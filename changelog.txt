@@ -1,0 +1,9 @@
+Change Log for Star Wars Unlimited deck building site and AIP db project 
+
+
+
+///// 2025-02-05
+
+We have an initial version that is working, but 8 cards failed. Claude thinks it\'92s okay, and just has to do with how we were querying the db. We\'92ve started to adjust the script for this, but we had to switch conversations in the middle of it for rate limits. The previous functioning one is on GitHub, so we at least know that will always work.\
+
+Continue to try the new version with Claude, but don\'92t spend too much energy on it. If it becomes a rabbit hole, revert to the GitHub version and move to the next part of the project.}
