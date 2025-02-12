@@ -18,6 +18,9 @@ starwarsunlimited-db-api/
 └── dev.sh                 # Development startup script
 ```
 
+![image](https://github.com/user-attachments/assets/fd0b2e51-f01b-47ff-9d51-b09b171859cb)
+
+
 ## Known Issues
 
 1. **Homepage Navigation**: The main homepage (localhost:3000) is currently non-functional. Please navigate directly to:
