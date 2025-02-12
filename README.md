@@ -30,6 +30,41 @@ starwarsunlimited-db-api/
 
 4. **Performance**: Initial load of the card list may be slow due to fetching related data (aspects, keywords, etc.) for each card.
 
+5. **Deck Builder Dialog**: The card details dialog in the deck builder is currently not functioning properly:
+   - Dialog may not appear when clicking cards
+   - Scrolling within the dialog may be inconsistent
+   - Working on implementing a more reliable dialog solution
+
+## Recent Progress (2024-02-07)
+
+1. **Deck Builder Improvements**:
+   - Implemented grid layout for card display
+   - Added card filtering by type and aspect
+   - Implemented deck building functionality with card limits
+   - Added deck stats tracking
+   - Working on fixing card details dialog issues
+
+2. **Card Grid Layout**:
+   - Improved card grid layout with proper sizing
+   - Added support for both horizontal (bases/leaders) and vertical cards
+   - Implemented responsive grid columns
+   - Added card selection highlighting
+
+3. **UI Enhancements**:
+   - Added loading states for card fetching
+   - Implemented proper error handling
+   - Added responsive design improvements
+   - Enhanced filter sidebar functionality
+
+## Next Steps
+
+1. Fix card details dialog in deck builder
+2. Implement deck saving functionality
+3. Add deck export feature
+4. Enhance error messaging and user feedback
+5. Add card search functionality
+6. Implement deck sharing features
+
 ## Features
 
 ### Backend

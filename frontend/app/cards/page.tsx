@@ -3,124 +3,142 @@
 import * as React from "react"
 import { Search } from 'lucide-react'
 import { getCards, Card } from "@/lib/api"
-
 import { Input } from "@/components/ui/input"
 import { CardFilters } from "@/components/card-filters"
 import { CardPreview } from "@/components/card-preview"
 import { CardGrid } from "@/components/card-grid"
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@/components/ui/resizable"
-import { toast } from "sonner"
+import { Spinner } from "@/components/ui/spinner"
+import { CardDetails } from "@/components/card-details"
+import { Button } from "@/components/ui/button"
+import { ChevronLeft, ChevronRight } from "lucide-react"
 
 export default function CardsPage() {
-  const [searchQuery, setSearchQuery] = React.useState("")
   const [selectedType, setSelectedType] = React.useState<string | null>(null)
   const [selectedAspect, setSelectedAspect] = React.useState<string | null>(null)
+  const [selectedCost, setSelectedCost] = React.useState<string | null>(null)
+  const [selectedCard, setSelectedCard] = React.useState<Card | null>(null)
   const [cards, setCards] = React.useState<Card[]>([])
-  const [selectedCard, setSelectedCard] = React.useState<Card | undefined>()
   const [loading, setLoading] = React.useState(true)
-  const [error, setError] = React.useState<string | null>(null)
-  const [page, setPage] = React.useState(1)
-  const [total, setTotal] = React.useState(0)
+  const [currentPage, setCurrentPage] = React.useState(1)
+  const [totalPages, setTotalPages] = React.useState(1)
 
-  const loadCards = React.useCallback(async () => {
-    try {
+  React.useEffect(() => {
+    const loadCards = async () => {
       setLoading(true)
-      setError(null)
-      const response = await getCards({
-        search: searchQuery || undefined,
-        type: selectedType || undefined,
-        aspect: selectedAspect || undefined,
-        page,
-        limit: 20,
-      })
-      setCards(response.cards)
-      setTotal(response.total)
-    } catch (error) {
-      console.error("Failed to load cards:", error)
-      setError("Failed to load cards. Please try again later.")
-      toast.error("Failed to load cards")
-    } finally {
-      setLoading(false)
+      try {
+        const response = await getCards({
+          page: currentPage,
+          limit: 50
+        })
+        let filteredCards = response.cards
+
+        if (selectedType) {
+          filteredCards = filteredCards.filter(card => card.type === selectedType)
+        }
+
+        if (selectedAspect) {
+          filteredCards = filteredCards.filter(card => 
+            card.aspects.some(a => a.aspect_name === selectedAspect)
+          )
+        }
+
+        if (selectedCost) {
+          const [min, max] = selectedCost.split('-').map(Number)
+          filteredCards = filteredCards.filter(card => {
+            const cardCost = card.energy_cost || 0
+            if (selectedCost === '7+') {
+              return cardCost >= 7
+            }
+            return cardCost >= min && cardCost <= (max || min)
+          })
+        }
+
+        setCards(filteredCards)
+        setTotalPages(Math.ceil(response.total / 50))
+      } catch (error) {
+        console.error("Failed to load cards:", error)
+      } finally {
+        setLoading(false)
+      }
     }
-  }, [searchQuery, selectedType, selectedAspect, page])
-
-  React.useEffect(() => {
-    setPage(1)
     loadCards()
-  }, [searchQuery, selectedType, selectedAspect])
+  }, [selectedType, selectedAspect, selectedCost, currentPage])
 
-  React.useEffect(() => {
-    loadCards()
-  }, [page])
+  const handlePreviousPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(prev => prev - 1)
+    }
+  }
 
-  if (error) {
-    return (
-      <div className="flex h-[calc(100vh-3.5rem)] items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-destructive mb-2">Error</h2>
-          <p className="text-muted-foreground">{error}</p>
-        </div>
-      </div>
-    )
+  const handleNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(prev => prev + 1)
+    }
   }
 
   return (
-    <div className="h-[calc(100vh-3.5rem)] flex-1 overflow-hidden">
-      <ResizablePanelGroup
-        direction="horizontal"
-        className="h-full items-stretch"
-      >
-        {/* Left Panel - Search & Filters */}
-        <ResizablePanel defaultSize={25} minSize={20}>
-          <div className="flex h-full flex-col bg-muted/20">
-            <div className="p-4">
-              <div className="relative">
-                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search cards..."
-                  className="pl-8"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-              </div>
+    <div className="grid grid-cols-[250px_1fr_300px] h-[calc(100vh-3.5rem)]">
+      {/* Left sidebar */}
+      <aside className="border-r bg-muted/20 p-4 space-y-4">
+        <CardFilters
+          selectedType={selectedType}
+          selectedAspect={selectedAspect}
+          selectedCost={selectedCost}
+          onTypeChange={setSelectedType}
+          onAspectChange={setSelectedAspect}
+          onCostChange={setSelectedCost}
+        />
+      </aside>
+
+      {/* Main content */}
+      <main className="flex flex-col">
+        <div className="flex-1 overflow-auto p-6">
+          {loading ? (
+            <div className="flex items-center justify-center h-full">
+              <Spinner />
             </div>
-            <CardFilters
-              selectedType={selectedType}
-              selectedAspect={selectedAspect}
-              onTypeChange={setSelectedType}
-              onAspectChange={setSelectedAspect}
+          ) : (
+            <CardGrid
+              cards={cards}
+              onCardClick={setSelectedCard}
+              selectedCardId={selectedCard?.id}
             />
-            <div className="flex-1 overflow-auto">
-              {loading ? (
-                <div className="flex h-full items-center justify-center">
-                  <div className="animate-pulse text-muted-foreground">
-                    Loading cards...
-                  </div>
-                </div>
-              ) : (
-                <CardGrid
-                  cards={cards}
-                  selectedCardId={selectedCard?.id}
-                  onCardClick={setSelectedCard}
-                />
-              )}
-            </div>
+          )}
+        </div>
+        
+        <div className="border-t p-4 flex items-center justify-between">
+          <Button
+            variant="outline"
+            onClick={handlePreviousPage}
+            disabled={currentPage === 1}
+          >
+            <ChevronLeft className="h-4 w-4 mr-2" />
+            Previous
+          </Button>
+          <div className="text-sm text-muted-foreground">
+            Page {currentPage} of {totalPages}
           </div>
-        </ResizablePanel>
+          <Button
+            variant="outline"
+            onClick={handleNextPage}
+            disabled={currentPage === totalPages}
+          >
+            Next
+            <ChevronRight className="h-4 w-4 ml-2" />
+          </Button>
+        </div>
+      </main>
 
-        <ResizableHandle withHandle />
-
-        {/* Right Panel - Card Preview */}
-        <ResizablePanel defaultSize={75}>
-          <div className="flex h-full flex-col">
-            <CardPreview card={selectedCard} />
+      {/* Right sidebar */}
+      <aside className="border-l bg-muted/20 h-full overflow-hidden">
+        {selectedCard ? (
+          <CardDetails card={selectedCard} />
+        ) : (
+          <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+            Select a card to view details
           </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+        )}
+      </aside>
     </div>
   )
 } 

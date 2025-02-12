@@ -1,44 +1,80 @@
 "use client"
 
 import * as React from "react"
-import { getTypes } from "@/lib/api"
+import { getTypes, getAspects } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { cn } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
 
 interface CardFiltersProps {
   onTypeChange?: (type: string | null) => void
   onAspectChange?: (aspect: string | null) => void
+  onCostChange?: (cost: string | null) => void
   selectedType?: string | null
   selectedAspect?: string | null
+  selectedCost?: string | null
 }
 
 export function CardFilters({
   onTypeChange,
   onAspectChange,
+  onCostChange,
   selectedType,
   selectedAspect,
+  selectedCost,
 }: CardFiltersProps) {
   const [types, setTypes] = React.useState<string[]>([])
+  const [aspects, setAspects] = React.useState<Array<{aspect_name: string; aspect_color: string}>>([])
 
   React.useEffect(() => {
-    const loadTypes = async () => {
+    const loadData = async () => {
       try {
-        const typesData = await getTypes()
+        const [typesData, aspectsData] = await Promise.all([
+          getTypes(),
+          getAspects()
+        ])
         setTypes(typesData)
+        setAspects(aspectsData)
       } catch (error) {
-        console.error("Failed to load types:", error)
+        console.error("Failed to load filter data:", error)
       }
     }
-    loadTypes()
+    loadData()
   }, [])
 
   return (
     <div className="p-4">
-      <div className="space-y-4">
+      <div className="space-y-6">
         <div>
-          <h3 className="mb-2 text-sm font-medium">Card Type</h3>
+          <h3 className="mb-4 text-sm font-medium">Aspects</h3>
+          <div className="flex flex-wrap gap-2">
+            {aspects.map((aspect) => (
+              <Badge
+                key={aspect.aspect_name}
+                variant="outline"
+                className={cn(
+                  "cursor-pointer hover:opacity-80",
+                  selectedAspect === aspect.aspect_name && "ring-2 ring-primary"
+                )}
+                style={{ 
+                  backgroundColor: selectedAspect === aspect.aspect_name ? aspect.aspect_color : 'transparent',
+                  color: selectedAspect === aspect.aspect_name ? 'white' : aspect.aspect_color,
+                  borderColor: aspect.aspect_color
+                }}
+                onClick={() => onAspectChange?.(
+                  selectedAspect === aspect.aspect_name ? null : aspect.aspect_name
+                )}
+              >
+                {aspect.aspect_name}
+              </Badge>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <h3 className="mb-4 text-sm font-medium">Card Type</h3>
           <RadioGroup
             value={selectedType || ""}
             onValueChange={(value) => onTypeChange?.(value || null)}
@@ -59,7 +95,7 @@ export function CardFilters({
         </div>
 
         <div>
-          <h3 className="mb-2 text-sm font-medium">Cost</h3>
+          <h3 className="mb-4 text-sm font-medium">Cost</h3>
           <div className="flex flex-wrap gap-2">
             {["1-3", "4-6", "7+"].map((cost) => (
               <Button
@@ -68,18 +104,15 @@ export function CardFilters({
                 size="sm"
                 className={cn(
                   "flex-1",
-                  false && "bg-primary text-primary-foreground"
+                  selectedCost === cost && "bg-primary text-primary-foreground"
                 )}
+                onClick={() => onCostChange?.(selectedCost === cost ? null : cost)}
               >
                 {cost}
               </Button>
             ))}
           </div>
         </div>
-
-        <Button className="w-full" variant="secondary">
-          Apply Filters
-        </Button>
       </div>
     </div>
   )
