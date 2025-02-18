@@ -65,6 +65,32 @@ starwarsunlimited-db-api/
 5. Add card search functionality
 6. Implement deck sharing features
 
+## Planned Vector Search Integration
+
+A vector search integration using Qdrant is planned for future development. This feature will enable:
+
+1. **AI-Powered Deck Suggestions**
+   - Card similarity matching based on text and mechanics
+   - Intelligent deck completion recommendations
+   - Strategy and synergy analysis
+
+2. **Semantic Card Search**
+   - Natural language card search
+   - Find cards by describing effects or strategies
+   - Group cards by similar mechanics or themes
+   - I've added the rulebook to the vector database, so it will be able to search the rulebook for you
+   and have better context for card interactions.
+   - I have started the process of adding the card text to the vector database, but it is a work in progress.
+
+3. **Implementation Plan**
+   - Complete core functionality first
+   - Generate card embeddings using OpenAI's text-embedding-3-small model
+   - Store vectors in Qdrant for fast similarity search
+   - Implement new API endpoints for AI features
+   - Maintain separate vector and relational databases
+
+This feature will be implemented after stabilizing the current core functionality.
+
 ## Features
 
 ### Backend

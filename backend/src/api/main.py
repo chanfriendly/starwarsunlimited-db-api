@@ -5,6 +5,7 @@ from typing import List, Optional
 import json
 import os
 import logging
+from .vector_db import VectorDB
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -20,6 +21,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Initialize vector database
+vector_db = VectorDB()
 
 def get_db():
     # Use the database in the user's home directory

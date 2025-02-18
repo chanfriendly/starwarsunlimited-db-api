@@ -5,4 +5,7 @@ pydantic==2.5.3
 requests==2.31.0
 SQLAlchemy==2.0.25
 python-dotenv==1.0.0
-aiosqlite==0.19.0 
+aiosqlite==0.19.0
+qdrant-client==1.7.0
+openai==1.9.0
+numpy>=1.26.0 
