@@ -18,6 +18,9 @@ starwarsunlimited-db-api/
 └── dev.sh                 # Development startup script
 ```
 
+![image](https://github.com/user-attachments/assets/c53ce794-f20e-41b5-8e98-444eb34203b9)
+
+
 ## Known Issues
 
 1. **Homepage Navigation**: The main homepage (localhost:3000) is currently non-functional. Please navigate directly to:
@@ -65,31 +68,219 @@ starwarsunlimited-db-api/
 5. Add card search functionality
 6. Implement deck sharing features
 
-## Planned Vector Search Integration
+## AI Development Roadmap
 
-A vector search integration using Qdrant is planned for future development. This feature will enable:
+### Overview
 
-1. **AI-Powered Deck Suggestions**
-   - Card similarity matching based on text and mechanics
-   - Intelligent deck completion recommendations
-   - Strategy and synergy analysis
+This roadmap outlines the development phases for integrating advanced AI capabilities into the Star Wars Unlimited Card Database project. The project will expand beyond its current card database and planned vector search functionality to include sophisticated deck building assistance and game simulation features.
 
-2. **Semantic Card Search**
-   - Natural language card search
-   - Find cards by describing effects or strategies
-   - Group cards by similar mechanics or themes
-   - I've added the rulebook to the vector database, so it will be able to search the rulebook for you
-   and have better context for card interactions.
-   - I have started the process of adding the card text to the vector database, but it is a work in progress.
+### Phase 1: Enhanced Vector Search & Deck Recommendations
 
-3. **Implementation Plan**
-   - Complete core functionality first
-   - Generate card embeddings using OpenAI's text-embedding-3-small model
-   - Store vectors in Qdrant for fast similarity search
-   - Implement new API endpoints for AI features
-   - Maintain separate vector and relational databases
+#### Card Embedding System
+The embedding system captures not just card text, but the deep strategic elements of Star Wars Unlimited. The system uses OpenAI's text-embedding-3-small model to create rich vector representations of cards that understand their roles in the game.
 
-This feature will be implemented after stabilizing the current core functionality.
+The embedding system encodes:
+```python
+class CardEmbedding:
+    def __init__(self):
+        self.strategic_features = {
+            'tempo_impact': 'How the card affects game pace',
+            'resource_efficiency': 'Value relative to cost',
+            'synergy_potential': 'Interaction with other cards',
+            'game_phase_value': 'Utility in early/mid/late game'
+        }
+        self.mechanical_features = {
+            'combat_impact': 'Effect on board state',
+            'resource_generation': 'Contribution to economy',
+            'control_elements': 'Ability to direct game flow'
+        }
+```
+
+#### Deck Analysis Engine
+The deck analysis system examines both individual cards and their interactions:
+
+```python
+class DeckAnalyzer:
+    def analyze_deck(self, deck: List[Card]) -> DeckProfile:
+        """
+        Creates a comprehensive deck profile including:
+        - Resource curve analysis
+        - Power spike timing
+        - Synergy patterns
+        - Consistency metrics
+        """
+        # Implementation details for deck analysis
+        pass
+```
+
+### Phase 2: Game State Representation
+
+#### Core Game Logic
+The foundation of the AI system is a precise representation of the game state:
+
+```python
+@dataclass
+class GameState:
+    # Board state
+    player_hand: List[Card]
+    player_resources: int
+    player_bases: List[Base]
+    player_units: List[Unit]
+    
+    # Game flow tracking
+    current_phase: GamePhase
+    initiative_player: PlayerID
+    action_history: List[Action]
+    
+    def apply_action(self, action: Action) -> 'GameState':
+        """
+        Applies an action and returns the new game state.
+        Enforces all game rules and timing restrictions.
+        """
+        pass
+```
+
+#### State Management
+The system implements efficient state handling for AI training:
+
+```python
+class StateManager:
+    def encode_state(self, state: GameState) -> np.ndarray:
+        """
+        Converts game state into a format suitable for
+        neural network processing.
+        """
+        pass
+    
+    def decode_state(self, encoded: np.ndarray) -> GameState:
+        """
+        Reconstructs game state from encoded format.
+        Critical for debugging and visualization.
+        """
+        pass
+```
+
+### Phase 3: Monte Carlo Tree Search Implementation
+
+MCTS provides the initial AI opponent, balancing exploration and exploitation of game strategies:
+
+```python
+class MCTSNode:
+    def __init__(self, state: GameState):
+        self.state = state
+        self.visits = 0
+        self.value = 0
+        self.children = {}
+        
+    def select_action(self) -> Action:
+        """
+        Chooses the most promising action using UCB1 formula.
+        Balances exploitation of known good moves with
+        exploration of new possibilities.
+        """
+        pass
+```
+
+### Phase 4: Deep Learning Integration
+
+The neural network architecture comprises several specialized components:
+
+```python
+class SWUModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        # State evaluation
+        self.state_encoder = nn.Sequential(
+            nn.Linear(STATE_SIZE, 512),
+            nn.ReLU(),
+            nn.Linear(512, 256)
+        )
+        
+        # Action prediction
+        self.policy_head = nn.Linear(256, ACTION_SPACE)
+        
+        # Position evaluation
+        self.value_head = nn.Linear(256, 1)
+```
+
+### Phase 5: MLOps & Production
+
+#### Model Serving
+The existing FastAPI backend will be extended to serve AI features:
+
+```python
+@router.post("/api/v1/analyze-deck")
+async def analyze_deck(deck: List[Card]):
+    """
+    Provides comprehensive deck analysis including:
+    - Strategic assessment
+    - Suggested improvements
+    - Matchup predictions
+    """
+    pass
+
+@router.post("/api/v1/suggest-play")
+async def suggest_play(game_state: GameState):
+    """
+    Analyzes current game state and suggests optimal plays.
+    Includes confidence levels and alternative options.
+    """
+    pass
+```
+
+#### Integration with Existing UI
+The current components will be enhanced with AI features:
+
+```typescript
+interface DeckBuilderProps {
+  cards: Card[]
+  aiSuggestions?: boolean
+}
+
+const DeckBuilder: React.FC<DeckBuilderProps> = ({ cards, aiSuggestions }) => {
+  // Enhanced deck builder with AI assistance
+  return (
+    <div className="grid grid-cols-12 gap-4">
+      <DeckList />
+      {aiSuggestions && <AISuggestionsPanel />}
+    </div>
+  )
+}
+```
+
+### Implementation Strategy
+
+Each phase builds upon the existing infrastructure:
+
+1. Implementation begins with vector search integration
+2. Game state tracking is added alongside the current deck builder
+3. MCTS implementation provides initial AI testing capabilities
+4. Deep learning components are gradually integrated
+5. Production deployment includes comprehensive monitoring
+
+The modular design ensures new AI features enhance rather than disrupt current functionality. Each component can be developed and tested independently while maintaining the overall system's stability.
+
+### Performance Considerations
+
+The system includes several optimizations:
+
+1. State encoding compression for efficient training
+2. Batched inference for deck analysis
+3. Caching frequently requested suggestions
+4. Edge-optimized model variants for local deployment
+
+### Development Priorities
+
+Current implementation priorities:
+
+1. Complete vector search integration
+2. Implement game state representation
+3. Create initial test suite for game rules
+4. Design and test baseline deck analysis features
+
+### Contributing
+
+Contributions to any phase of this AI development roadmap are welcome. Please refer to the Contributing section in the main README for guidelines on submitting changes.
 
 ## Features
 
