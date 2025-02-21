@@ -1,0 +1,25 @@
+Change Log for Star Wars Unlimited deck building site and AIP db project 
+
+///// 2024-02-05
+
+We have an initial version that is working, but 8 cards failed. Claude thinks it's okay, and just has to do with how we were querying the db. We've started to adjust the script for this, but we had to switch conversations in the middle of it for rate limits. The previous functioning one is on GitHub, so we at least know that will always work.
+
+Continue to try the new version with Claude, but don't spend too much energy on it. If it becomes a rabbit hole, revert to the GitHub version and move to the next part of the project.
+
+///// 2024-02-06
+
+Major updates and fixes:
+1. Fixed database connection issues by moving the database to user's home directory (~/.swu/swu_cards.db)
+2. Successfully connected frontend to backend, with working card display and filtering
+3. Updated database schema and API endpoints to handle all card types and related data
+4. Added proper error handling and logging throughout the application
+5. Fixed CORS issues to allow frontend-backend communication
+6. Successfully imported all 891 cards from the Star Wars Unlimited API
+7. Added Known Issues section to README for better user guidance
+8. Updated .gitignore to handle new log files and database location
+
+Current Status:
+- Backend API fully functional with complete card database
+- Frontend successfully displaying cards at /cards and /deck-builder routes
+- Main homepage needs work but core functionality is working
+- All card types (Leaders, Units, Events, etc.) properly stored and retrievable
