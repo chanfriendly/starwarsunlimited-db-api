@@ -2,27 +2,26 @@
 
 ## Overview
 
-This project provides a complete solution for building, maintaining, and browsing a local database of Star Wars Unlimited cards. Star Wars Unlimited is a new trading card game that combines strategic deck building with the rich Star Wars universe. This tool helps players manage their collections, build decks, and analyze game strategies.
+SWU Deck Builder is a comprehensive tool for Star Wars Unlimited players, designed specifically to support the Twin Suns format. 
 
-The application consists of a FastAPI backend API for data management and a Next.js frontend interface for card browsing and deck building. It includes tools to fetch and update card data from the official Star Wars Unlimited API, ensuring your local database stays current with the latest card releases.
+In the Twin Suns format, players build decks with distinctive rules:
 
-## Project Structure
+- Each deck is built around a central Leader card (similar to a Commander in MTG)
+- Only one copy of each card is allowed in a deck (unlike standard Star Wars Unlimited rules of 3-4 copies)
+- The Leader defines the deck's core strategy and sets the deck's aspectual identity
 
-```
-starwarsunlimited-db-api/
-├── backend/                 # Python FastAPI backend
-│   ├── src/
-│   │   ├── api/            # API endpoints and database client
-│   │   └── database/       # Database setup and models
-│   └── requirements.txt    # Python dependencies
-├── frontend/               # Next.js frontend
-│   ├── app/               # Next.js app directory
-│   ├── components/        # React components
-│   └── lib/              # Utility functions and API client
-└── dev.sh                 # Development startup script
-```
+## Project Goals
+My mission is to support growth for the Star Wars Unlimited community, offering:
+
+- Comprehensive card database
+- Intuitive deck-building interface
+- Advanced card search and filtering
+- Future AI-powered deck analysis and playtesting
 
 ![image](https://github.com/user-attachments/assets/c53ce794-f20e-41b5-8e98-444eb34203b9)
+
+
+
 
 ## Features
 
@@ -41,7 +40,27 @@ starwarsunlimited-db-api/
 - Search cards by name
 - Detailed card view with full card information
 - Dark mode support
-- Built with Next.js 13 and shadcn/ui components
+
+### Technical Architecture
+
+#### Database
+
+- SQLite for structured card data storage
+- Qdrant Vector Database for advanced semantic search (future AI features)
+
+#### Technologies
+
+- Frontend: Next.js, React
+- Backend: FastAPI
+- Database: SQLite, Qdrant
+
+### Upcoming Features
+
+- Deck saving and sharing
+- User profiles
+- AI-powered deck suggestions
+- Deck strategy analysis
+- Playtesting against AI opponents
 
 ## Getting Started
 
@@ -94,51 +113,35 @@ This will start:
 
 ## Current Status and Known Issues
 
-### Recent Progress (2024-02-07)
+The project is actively under development. Please see the change log for more detailed progress notes. Current limitations include:
 
-The project has made significant strides in several areas:
 
-1. **Deck Builder Improvements**:
-   - Implemented grid layout for card display
-   - Added card filtering by type and aspect
-   - Implemented deck building functionality with card limits
-   - Added deck stats tracking
-   - Working on fixing card details dialog issues
+### Incomplete Functionality
 
-2. **Card Grid Layout**:
-   - Improved card grid layout with proper sizing
-   - Added support for both horizontal (bases/leaders) and vertical cards
-   - Implemented responsive grid columns
-   - Added card selection highlighting
+- Deck building is not fully implemented
+- Cannot save or share decks
+- No user authentication
 
-3. **UI Enhancements**:
-   - Added loading states for card fetching
-   - Implemented proper error handling
-   - Added responsive design improvements
-   - Enhanced filter sidebar functionality
 
-### Known Issues
+### User Interface
 
-1. **Homepage Navigation**: The main homepage (localhost:3000) is currently non-functional. Please navigate directly to:
-   - Card Browser: http://localhost:3000/cards
-   - Deck Builder: http://localhost:3000/deck-builder
+- Homepage is not yet user-friendly
+- Limited navigation options, mainly /cards and /deck-builder
 
-2. **Database Location**: The database is now stored in the user's home directory at `~/.swu/swu_cards.db` for better permissions handling.
 
-3. **Image Loading**: Some card images may fail to load if they're not available from the API. Default placeholders will be shown instead.
+Features in Development
 
-4. **Performance**: Initial load of the card list may be slow due to fetching related data (aspects, keywords, etc.) for each card.
+- AI deck suggestion system
+- Comprehensive deck analysis
+- Full vector database integration
+- Playtesting decks
 
-5. **Deck Builder Dialog**: The card details dialog in the deck builder is currently not functioning properly:
-   - Dialog may not appear when clicking cards
-   - Scrolling within the dialog may be inconsistent
-   - Working on implementing a more reliable dialog solution
 
 ## Future Development
 
 ### Immediate Next Steps
 
-1. Fix card details dialog in deck builder
+1. Improve homepage
 2. Implement deck saving functionality
 3. Add deck export feature
 4. Enhance error messaging and user feedback
@@ -150,7 +153,7 @@ The project has made significant strides in several areas:
 The project plans to integrate advanced AI capabilities to enhance deck building and game analysis. This development will proceed in several phases:
 
 #### Phase 1: Intelligent Card Analysis
-- Implementation of vector search for semantic card relationships
+- Implementation of vector search for semantic card relationships ✅
 - AI-powered deck recommendations based on play patterns and card synergies
 - Advanced filtering based on card mechanics and strategic roles
 
@@ -219,4 +222,4 @@ Please be respectful when using the API:
 - Cache data when possible
 - Don't hammer the API with unnecessary requests
 
-_Please understand, this is a project for me to learn; I am, in most ways, a novice, and it may take me time to respond, understand, or correct issues. Please be patient, or if you're more advanced and have the passion, take this and run with it farther and faster than I can. I want to see the community, and resources for it, grow._
+_Disclaimer: This project is a community effort and is not officially affiliated with Star Wars Unlimited or Lucasfilm. It is created by a Star Wars Unlimited player, for players. This is also an educational project for me, so please understand my limitations._

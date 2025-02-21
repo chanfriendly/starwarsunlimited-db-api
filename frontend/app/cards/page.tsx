@@ -1,16 +1,16 @@
-"use client"
+// app/cards/page.tsx
+'use client';
 
 import * as React from "react"
 import { Search } from 'lucide-react'
 import { getCards, Card } from "@/lib/api"
 import { Input } from "@/components/ui/input"
 import { CardFilters } from "@/components/card-filters"
-import { CardPreview } from "@/components/card-preview"
 import { CardGrid } from "@/components/card-grid"
-import { Spinner } from "@/components/ui/spinner"
 import { CardDetails } from "@/components/card-details"
 import { Button } from "@/components/ui/button"
 import { ChevronLeft, ChevronRight } from "lucide-react"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 
 export default function CardsPage() {
   const [selectedType, setSelectedType] = React.useState<string | null>(null)
@@ -30,6 +30,7 @@ export default function CardsPage() {
           page: currentPage,
           limit: 50
         })
+        
         let filteredCards = response.cards
 
         if (selectedType) {
@@ -77,68 +78,78 @@ export default function CardsPage() {
   }
 
   return (
-    <div className="grid grid-cols-[250px_1fr_300px] h-[calc(100vh-3.5rem)]">
+    <ResizablePanelGroup direction="horizontal" className="min-h-screen">
       {/* Left sidebar */}
-      <aside className="border-r bg-muted/20 p-4 space-y-4">
-        <CardFilters
-          selectedType={selectedType}
-          selectedAspect={selectedAspect}
-          selectedCost={selectedCost}
-          onTypeChange={setSelectedType}
-          onAspectChange={setSelectedAspect}
-          onCostChange={setSelectedCost}
-        />
-      </aside>
+      <ResizablePanel defaultSize={20} minSize={15} maxSize={30}>
+        <div className="h-full border-r bg-muted/20 p-4 space-y-4">
+          <CardFilters
+            selectedType={selectedType}
+            selectedAspect={selectedAspect}
+            selectedCost={selectedCost}
+            onTypeChange={setSelectedType}
+            onAspectChange={setSelectedAspect}
+            onCostChange={setSelectedCost}
+          />
+        </div>
+      </ResizablePanel>
+
+      <ResizableHandle withHandle />
 
       {/* Main content */}
-      <main className="flex flex-col">
-        <div className="flex-1 overflow-auto p-6">
-          {loading ? (
-            <div className="flex items-center justify-center h-full">
-              <Spinner />
-            </div>
-          ) : (
-            <CardGrid
-              cards={cards}
-              onCardClick={setSelectedCard}
-              selectedCardId={selectedCard?.id}
-            />
-          )}
-        </div>
-        
-        <div className="border-t p-4 flex items-center justify-between">
-          <Button
-            variant="outline"
-            onClick={handlePreviousPage}
-            disabled={currentPage === 1}
-          >
-            <ChevronLeft className="h-4 w-4 mr-2" />
-            Previous
-          </Button>
-          <div className="text-sm text-muted-foreground">
-            Page {currentPage} of {totalPages}
+      <ResizablePanel defaultSize={55}>
+        <div className="h-full flex flex-col">
+          <div className="flex-1 overflow-auto p-6">
+            {loading ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+              </div>
+            ) : (
+              <CardGrid
+                cards={cards}
+                onCardClick={setSelectedCard}
+                selectedCardId={selectedCard?.id}
+              />
+            )}
           </div>
-          <Button
-            variant="outline"
-            onClick={handleNextPage}
-            disabled={currentPage === totalPages}
-          >
-            Next
-            <ChevronRight className="h-4 w-4 ml-2" />
-          </Button>
+          
+          <div className="border-t p-4 flex items-center justify-between">
+            <Button
+              variant="outline"
+              onClick={handlePreviousPage}
+              disabled={currentPage === 1}
+            >
+              <ChevronLeft className="h-4 w-4 mr-2" />
+              Previous
+            </Button>
+            <div className="text-sm text-muted-foreground">
+              Page {currentPage} of {totalPages}
+            </div>
+            <Button
+              variant="outline"
+              onClick={handleNextPage}
+              disabled={currentPage === totalPages}
+            >
+              Next
+              <ChevronRight className="h-4 w-4 ml-2" />
+            </Button>
+          </div>
         </div>
-      </main>
+      </ResizablePanel>
+
+      <ResizableHandle withHandle />
 
       {/* Right sidebar */}
-      <aside className="border-l bg-muted/20 h-full overflow-hidden">
-        {selectedCard ? (
-          <CardDetails card={selectedCard} />
-        ) : (
-          <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-            Select a card to view details
-          </div>
-        )}
-      </aside>
-    </div>
+      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+        <div className="h-full border-l bg-muted/20">
+          {selectedCard ? (
+            <CardDetails card={selectedCard} />
+          ) : (
+            <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+              Select a card to view details
+            </div>
+          )}
+        </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   )
-} 
+}

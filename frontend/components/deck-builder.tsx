@@ -1,402 +1,153 @@
-"use client"
+'use client';
 
 import * as React from "react"
-import { Search, Save, Download } from 'lucide-react'
-import { getCards, Card } from "@/lib/api"
-import { cn } from "@/lib/utils"
-
-import { Input } from "@/components/ui/input"
-import { CardFilters } from "@/components/card-filters"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
+import { CardDetails } from "@/components/card-details"
 import { CardGrid } from "@/components/card-grid"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogPortal,
-  DialogOverlay,
-} from "@/components/ui/dialog"
+import { CardFilters } from "@/components/card-filters"
+import { Card, getCards } from "@/lib/api"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Checkbox } from "@/components/ui/checkbox"
 
-interface DeckCard extends Card {
-  quantity: number;
-}
+export default function DeckBuilder() {
+  const [selectedCard, setSelectedCard] = React.useState<Card | null>(null)
+  const [cards, setCards] = React.useState<Card[]>([])
+  const [loading, setLoading] = React.useState(true)
+  const [showOutOfAspect, setShowOutOfAspect] = React.useState(false)
+  const [leaders, setLeaders] = React.useState<Card[]>([])
+  const [base, setBase] = React.useState<Card | null>(null)
+  const [currentView, setCurrentView] = React.useState<'leaders' | 'base' | 'cards'>('leaders')
 
-interface DeckStats {
-  total: number;
-  characters: number;
-  vehicles: number;
-  events: number;
-  bases: number;
-  leaders: number;
-}
+  React.useEffect(() => {
+    const loadCards = async () => {
+      setLoading(true)
+      try {
+        const response = await getCards({ 
+          page: 1, 
+          limit: 100,
+          type: 'Leader' 
+        })
+        setCards(response.cards)
+      } catch (error) {
+        console.error("Failed to load cards:", error)
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadCards()
+  }, [])
 
-interface CardDetailsDialogProps {
-  card: Card | undefined;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onAddCard: (card: Card) => void;
-}
+  const handleCardSelect = (card: Card) => {
+    setSelectedCard(card)
+    if (currentView === 'leaders' && leaders.length < 2) {
+      setLeaders([...leaders, card])
+      if (leaders.length === 1) setCurrentView('base')
+    } else if (currentView === 'base' && !base) {
+      setBase(card)
+      setCurrentView('cards')
+    }
+  }
 
-function CardDetailsDialog({ card, open, onOpenChange, onAddCard }: CardDetailsDialogProps) {
-  if (!card) return null;
+  const isCardInAspect = (card: Card): boolean => {
+    if (!base || leaders.length < 2) return false
+    
+    // Get all aspects from leaders and base
+    const deckAspects = [
+      ...leaders.flatMap(leader => leader.aspects?.map(a => a.aspect_name) || []),
+      ...(base.aspects?.map(a => a.aspect_name) || [])
+    ]
+
+    // Count aspects in deck
+    const deckAspectCounts = deckAspects.reduce((acc, aspect) => {
+      acc[aspect] = (acc[aspect] || 0) + 1
+      return acc
+    }, {} as Record<string, number>)
+
+    // Check if card's aspects are present in sufficient quantity
+    const cardAspects = card.aspects?.map(a => a.aspect_name) || []
+    const cardAspectCounts = cardAspects.reduce((acc, aspect) => {
+      acc[aspect] = (acc[aspect] || 0) + 1
+      return acc
+    }, {} as Record<string, number>)
+
+    return Object.entries(cardAspectCounts).every(([aspect, count]) => 
+      (deckAspectCounts[aspect] || 0) >= count
+    )
+  }
+
+  const displayCards = React.useMemo(() => {
+    if (currentView === 'leaders') {
+      return cards.filter(card => card.type === 'Leader')
+    } else if (currentView === 'base') {
+      return cards.filter(card => card.type === 'Base')
+    } else {
+      const filteredCards = cards.filter(card => 
+        card.type !== 'Leader' && card.type !== 'Base'
+      )
+      return showOutOfAspect ? filteredCards : filteredCards.filter(isCardInAspect)
+    }
+  }, [cards, currentView, showOutOfAspect, base, leaders])
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{card.name}</DialogTitle>
-          {card.subtitle && (
-            <DialogDescription>{card.subtitle}</DialogDescription>
-          )}
-        </DialogHeader>
-        <div className="grid grid-cols-[300px_1fr] gap-6">
-          <div className="aspect-[5/7] relative rounded-lg overflow-hidden">
-            {card.image_uri && (
-              <img
-                src={card.image_uri}
-                alt={card.name}
-                className="object-contain w-full h-full"
-              />
-            )}
-          </div>
+    <ResizablePanelGroup direction="horizontal" className="min-h-screen">
+      <ResizablePanel defaultSize={20} minSize={15} maxSize={30}>
+        <div className="h-full border-r bg-muted/20 p-4 space-y-4">
           <div className="space-y-4">
-            <div className="flex flex-wrap gap-2">
-              {card.aspects.map((aspect) => (
-                <Badge
-                  key={aspect.aspect_name}
-                  style={{ backgroundColor: aspect.aspect_color }}
-                  className="text-white"
-                >
-                  {aspect.aspect_name}
-                </Badge>
+            <div>
+              <h3 className="font-medium mb-2">Selected Leaders ({leaders.length}/2)</h3>
+              {leaders.map(leader => (
+                <div key={leader.id} className="text-sm">{leader.name}</div>
               ))}
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            {base && (
               <div>
-                <p className="text-sm font-medium">Type</p>
-                <p className="text-sm text-muted-foreground">{card.type}</p>
+                <h3 className="font-medium mb-2">Selected Base</h3>
+                <div className="text-sm">{base.name}</div>
               </div>
-              {card.energy_cost !== undefined && (
-                <div>
-                  <p className="text-sm font-medium">Energy Cost</p>
-                  <p className="text-sm text-muted-foreground">{card.energy_cost}</p>
-                </div>
-              )}
-              {card.attack !== undefined && (
-                <div>
-                  <p className="text-sm font-medium">Attack</p>
-                  <p className="text-sm text-muted-foreground">{card.attack}</p>
-                </div>
-              )}
-              {card.health !== undefined && (
-                <div>
-                  <p className="text-sm font-medium">Health</p>
-                  <p className="text-sm text-muted-foreground">{card.health}</p>
-                </div>
-              )}
-            </div>
-            {card.text && (
-              <div>
-                <p className="text-sm font-medium">Card Text</p>
-                <p className="text-sm text-muted-foreground whitespace-pre-wrap">{card.text}</p>
+            )}
+            {currentView === 'cards' && (
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                    id="showAll"
+                    checked={showOutOfAspect}
+                    onCheckedChange={(checked: boolean | "indeterminate") => setShowOutOfAspect(checked as boolean)}
+                  />
+                <label htmlFor="showAll" className="text-sm font-medium">
+                  Show out of aspect cards
+                </label>
               </div>
             )}
           </div>
         </div>
-        <DialogFooter>
-          <Button onClick={() => {
-            onAddCard(card);
-            onOpenChange(false);
-          }}>
-            Add to Deck
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
+      </ResizablePanel>
 
-export function DeckBuilder() {
-  const [searchQuery, setSearchQuery] = React.useState("")
-  const [selectedType, setSelectedType] = React.useState<string | null>(null)
-  const [selectedAspect, setSelectedAspect] = React.useState<string | null>(null)
-  const [cards, setCards] = React.useState<Card[]>([])
-  const [selectedCard, setSelectedCard] = React.useState<Card | undefined>()
-  const [loading, setLoading] = React.useState(false)
-  const [page, setPage] = React.useState(1)
-  const [total, setTotal] = React.useState(0)
-  const [deck, setDeck] = React.useState<DeckCard[]>([])
-  const [deckName, setDeckName] = React.useState("")
-  const [showCardDetails, setShowCardDetails] = React.useState(false)
+      <ResizableHandle withHandle />
 
-  const deckStats = React.useMemo(() => {
-    return deck.reduce<DeckStats>(
-      (stats, card) => {
-        stats.total += card.quantity
-        if (card.type === "Character") stats.characters += card.quantity
-        if (card.type === "Vehicle") stats.vehicles += card.quantity
-        if (card.type === "Event") stats.events += card.quantity
-        if (card.type === "Base") stats.bases += card.quantity
-        if (card.type === "Leader") stats.leaders += card.quantity
-        return stats
-      },
-      { total: 0, characters: 0, vehicles: 0, events: 0, bases: 0, leaders: 0 }
-    )
-  }, [deck])
-
-  const loadCards = React.useCallback(async () => {
-    try {
-      setLoading(true)
-      // First, get all bases and leaders without pagination
-      const basesResponse = await getCards({
-        type: "Base",
-        search: searchQuery || undefined,
-        aspect: selectedAspect || undefined,
-        limit: 100 // High limit to get all bases
-      })
-      
-      const leadersResponse = await getCards({
-        type: "Leader",
-        search: searchQuery || undefined,
-        aspect: selectedAspect || undefined,
-        limit: 100 // High limit to get all leaders
-      })
-
-      // Then get other cards with pagination
-      const otherResponse = await getCards({
-        search: searchQuery || undefined,
-        aspect: selectedAspect || undefined,
-        page,
-        limit: 50,
-        type: selectedType || undefined,
-      })
-
-      // Combine and sort the results
-      const allCards = [
-        ...basesResponse.cards.sort((a, b) => a.name.localeCompare(b.name)),
-        ...leadersResponse.cards.sort((a, b) => a.name.localeCompare(b.name)),
-        ...otherResponse.cards.filter(card => 
-          card.type !== "Base" && card.type !== "Leader"
-        ).sort((a, b) => a.name.localeCompare(b.name))
-      ]
-
-      setCards(allCards)
-      // Update total count excluding bases and leaders for pagination
-      setTotal(otherResponse.total)
-    } catch (error) {
-      console.error("Failed to load cards:", error)
-    } finally {
-      setLoading(false)
-    }
-  }, [searchQuery, selectedType, selectedAspect, page])
-
-  const sortedCards = React.useMemo(() => {
-    if (!cards.length) return { bases: [], leaders: [], other: [] }
-
-    return {
-      bases: cards.filter(card => card.type === "Base"),
-      leaders: cards.filter(card => card.type === "Leader"),
-      other: cards.filter(card => card.type !== "Base" && card.type !== "Leader")
-    }
-  }, [cards])
-
-  React.useEffect(() => {
-    setPage(1)
-    loadCards()
-  }, [searchQuery, selectedType, selectedAspect])
-
-  React.useEffect(() => {
-    loadCards()
-  }, [page])
-
-  const canAddCard = (card: Card): boolean => {
-    const existingCard = deck.find(c => c.id === card.id)
-    
-    // Check if card already exists
-    if (existingCard) {
-      // Don't allow duplicates of bases or leaders
-      if (card.type === "Base" || card.type === "Leader") {
-        return false
-      }
-      // For other cards, check the 3-card limit
-      return existingCard.quantity < 3
-    }
-
-    // Check base and leader limits
-    if (card.type === "Base" && deckStats.bases >= 1) {
-      return false
-    }
-    if (card.type === "Leader" && deckStats.leaders >= 2) {
-      return false
-    }
-
-    return true
-  }
-
-  const addCardToDeck = (card: Card) => {
-    if (!canAddCard(card)) {
-      // You might want to show a toast or message here
-      console.warn("Cannot add more copies of this card")
-      return
-    }
-
-    setDeck(prev => {
-      const existingCard = prev.find(c => c.id === card.id)
-      if (existingCard) {
-        return prev.map(c =>
-          c.id === card.id
-            ? { ...c, quantity: Math.min(c.quantity + 1, 3) }
-            : c
-        )
-      }
-      return [...prev, { ...card, quantity: 1 }]
-    })
-  }
-
-  const removeCardFromDeck = (cardId: string) => {
-    setDeck(prev => {
-      const existingCard = prev.find(c => c.id === cardId)
-      if (existingCard && existingCard.quantity > 1) {
-        return prev.map(c =>
-          c.id === cardId
-            ? { ...c, quantity: c.quantity - 1 }
-            : c
-        )
-      }
-      return prev.filter(c => c.id !== cardId)
-    })
-  }
-
-  const saveDeck = () => {
-    // Implement deck saving logic
-    console.log("Saving deck:", { name: deckName, cards: deck })
-  }
-
-  const exportDeck = () => {
-    // Implement deck export logic
-    console.log("Exporting deck:", { name: deckName, cards: deck })
-  }
-
-  return (
-    <div className="grid h-[calc(100vh-3.5rem)] grid-cols-[250px_1fr]">
-      {/* Left sidebar - Filters and Deck */}
-      <div className="border-r bg-muted/20 flex flex-col">
-        <div className="p-4">
-          <div className="relative">
-            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search cards..."
-              className="pl-8"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+      <ResizablePanel defaultSize={55}>
+        <ScrollArea className="h-full">
+          <div className="p-6">
+            <CardGrid
+              cards={displayCards}
+              onCardClick={handleCardSelect}
+              selectedCardId={selectedCard?.id}
             />
           </div>
-        </div>
-        <CardFilters
-          selectedType={selectedType}
-          selectedAspect={selectedAspect}
-          onTypeChange={setSelectedType}
-          onAspectChange={setSelectedAspect}
-        />
-        <div className="border-t p-4">
-          <Input
-            placeholder="Deck Name"
-            value={deckName}
-            onChange={(e) => setDeckName(e.target.value)}
-            className="mb-4"
-          />
-          <div className="flex gap-2">
-            <Button
-              className="flex-1"
-              onClick={saveDeck}
-              disabled={deckStats.bases !== 1 || deckStats.leaders !== 2}
-            >
-              <Save className="w-4 h-4 mr-2" />
-              Save
-            </Button>
-            <Button
-              variant="outline"
-              className="flex-1"
-              onClick={exportDeck}
-              disabled={deckStats.bases !== 1 || deckStats.leaders !== 2}
-            >
-              <Download className="w-4 h-4 mr-2" />
-              Export
-            </Button>
-          </div>
-          <div className="mt-4 space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span>Total Cards:</span>
-              <span>{deckStats.total}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className={cn(
-                deckStats.bases === 1 && "text-green-500",
-                deckStats.bases > 1 && "text-red-500"
-              )}>Base:</span>
-              <span>{deckStats.bases}/1</span>
-            </div>
-            <div className="flex justify-between">
-              <span className={cn(
-                deckStats.leaders === 2 && "text-green-500",
-                deckStats.leaders > 2 && "text-red-500"
-              )}>Leaders:</span>
-              <span>{deckStats.leaders}/2</span>
-            </div>
-          </div>
-        </div>
-        <div className="flex-1 overflow-auto p-4 border-t">
-          {deck.map((card) => (
-            <div
-              key={card.id}
-              className="flex items-center justify-between py-2"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium">{card.quantity}x</span>
-                <span className="text-sm">{card.name}</span>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => removeCardFromDeck(card.id)}
-              >
-                Remove
-              </Button>
-            </div>
-          ))}
-        </div>
-      </div>
+        </ScrollArea>
+      </ResizablePanel>
 
-      {/* Main content - Card Grid */}
-      <div className="overflow-auto p-6">
-        {loading ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="animate-spin rounded-full h-8 w-8 border-4 border-primary border-t-transparent" />
-          </div>
-        ) : (
-          <CardGrid
-            cards={cards}
-            onCardClick={(card) => {
-              console.log("Card clicked:", card.name);
-              setSelectedCard(card);
-              setShowCardDetails(true);
-              console.log("showCardDetails set to:", true);
-            }}
-            selectedCardId={selectedCard?.id}
-          />
-        )}
-      </div>
+      <ResizableHandle withHandle />
 
-      <CardDetailsDialog
-        card={selectedCard}
-        open={showCardDetails}
-        onOpenChange={setShowCardDetails}
-        onAddCard={addCardToDeck}
-      />
-    </div>
-  );
+      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+        <div className="h-full border-l bg-muted/20">
+          {selectedCard ? (
+            <CardDetails card={selectedCard} />
+          ) : (
+            <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+              Select a card to view details
+            </div>
+          )}
+        </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
+  )
 }

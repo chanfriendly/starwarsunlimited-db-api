@@ -1,10 +1,32 @@
 Change Log for Star Wars Unlimited deck building site and AIP db project 
 
-///// 2024-02-05
+///// 2024-02-21
 
-We have an initial version that is working, but 8 cards failed. Claude thinks it's okay, and just has to do with how we were querying the db. We've started to adjust the script for this, but we had to switch conversations in the middle of it for rate limits. The previous functioning one is on GitHub, so we at least know that will always work.
+Major Developments:
+1. Vector Database Integration
+   - Successfully configured Qdrant vector database connection
+   - Implemented robust indexing for card data and rulebook sections
+   - Resolved vector dimension and ID format challenges
+   - Created hybrid database approach using SQLite and Qdrant
 
-Continue to try the new version with Claude, but don't spend too much energy on it. If it becomes a rabbit hole, revert to the GitHub version and move to the next part of the project.
+2. Frontend Improvements
+   - Redesigned homepage with responsive layout
+   - Enhanced card browser with advanced filtering
+   - Developed multi-stage deck builder interface
+   - Implemented aspect compatibility checking
+   - Added toggle for showing/hiding out-of-aspect cards
+
+3. AI and Machine Learning Foundations
+   - Set up initial vector embedding infrastructure
+   - Created semantic analysis groundwork
+   - Prepared for AI deck recommendation system
+   - Implemented card relationship mapping
+
+4. Technical Enhancements
+   - Improved error handling across frontend and backend
+   - Refined Next.js and React component architecture
+   - Added type-safe state management
+   - Enhanced logging and debugging capabilities
 
 ///// 2024-02-06
 
@@ -23,3 +45,10 @@ Current Status:
 - Frontend successfully displaying cards at /cards and /deck-builder routes
 - Main homepage needs work but core functionality is working
 - All card types (Leaders, Units, Events, etc.) properly stored and retrievable
+
+///// 2024-02-05
+
+Initial version working with some challenges:
+- 8 cards failed during database querying
+- Preliminary script adjustments attempted
+- Functional version available on GitHub as backup
