@@ -6,6 +6,8 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { MainNav } from "@/components/main-nav"
 import type React from "react"
 import { Toaster } from "sonner"
+import { AuthProvider } from "@/lib/auth-context"
+import { DeckProvider } from "@/lib/deck-context"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -22,13 +24,17 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={cn(inter.className, "min-h-screen antialiased bg-background")}>
-        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
-          <div className="relative flex min-h-screen flex-col">
-            <MainNav />
-            <main className="flex-1">{children}</main>
-          </div>
-          <Toaster />
-        </ThemeProvider>
+        <AuthProvider>
+          <DeckProvider>
+            <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
+              <div className="relative flex min-h-screen flex-col">
+                <MainNav />
+                <main className="flex-1">{children}</main>
+              </div>
+              <Toaster />
+            </ThemeProvider>
+          </DeckProvider>
+        </AuthProvider>
       </body>
     </html>
   )

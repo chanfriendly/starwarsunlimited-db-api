@@ -6,6 +6,8 @@ import json
 import os
 import logging
 from .vector_db import VectorDB
+from .auth import router as auth_router
+from .decks import router as deck_router
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -24,6 +26,10 @@ app.add_middleware(
 
 # Initialize vector database
 vector_db = VectorDB()
+
+# Include routers
+app.include_router(auth_router)
+app.include_router(deck_router)
 
 def get_db():
     # Use the database in the user's home directory

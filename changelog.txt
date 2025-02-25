@@ -1,5 +1,36 @@
 Change Log for Star Wars Unlimited deck building site and AIP db project 
 
+
+///// 2024-02-26
+
+Major Improvements and Bug Fixes:
+1. Deck Builder Enhancements
+   - Implemented multi-stage deck building workflow
+   - Added proper aspect compatibility checking
+   - Created visual indicators for card selection
+   - Implemented flip view for leader cards
+   - Added deck validation with progress indicators
+
+2. UI Improvements
+   - Enhanced card detail display with aspect color coding
+   - Added selection overlays and type badges to card grid
+   - Implemented resizable panels for better workspace organization
+   - Added visual feedback for card compatibility
+
+3. Technical Fixes
+   - Resolved numerous TypeScript errors
+   - Fixed component import and usage issues
+   - Improved error handling throughout the application
+   - Enhanced state management for multi-stage processes
+   - Added proper typing for compatibility checking
+
+Current Status:
+- Deck builder functioning with staged workflow
+- Card details displaying correctly with leader card flipping
+- Card grid still has some layout issues to resolve
+- Menu and navigation need further refinement
+- Deck saving functionality needs implementation
+
 ///// 2024-02-21
 
 Major Developments:

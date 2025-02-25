@@ -2,7 +2,7 @@
 
 # Start the backend server
 cd backend
-source .venv/bin/activate
+source venv/bin/activate
 uvicorn src.api.main:app --reload --port 8000 &
 BACKEND_PID=$!
 
