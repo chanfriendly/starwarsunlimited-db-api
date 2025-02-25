@@ -21,7 +21,28 @@ My mission is to support growth for the Star Wars Unlimited community, offering:
 ![image](https://github.com/user-attachments/assets/c53ce794-f20e-41b5-8e98-444eb34203b9)
 
 
+### Recent Improvements (2024-02-26)
 
+The project has made significant progress with several key improvements:
+
+1. **Deck Builder Functionality**:
+   - Implemented multi-stage deck building workflow (Leaders → Base → Cards)
+   - Added aspect compatibility checking for proper deck building rules
+   - Created visual indicators for card selection and compatibility status
+   - Implemented flip view for double-sided leader cards
+   - Added deck statistics and validation
+
+2. **User Interface Enhancements**:
+   - Improved card detail display with aspect color coding
+   - Enhanced card grid with selection indicators and type badges
+   - Added responsive layout with resizable panels
+   - Implemented stage progress indicators in deck builder
+
+3. **Technical Improvements**:
+   - Fixed TypeScript errors and improved type safety
+   - Enhanced component organization and reusability
+   - Improved error handling and state management
+   - Added visual feedback for user actions
 
 ## Features
 
@@ -141,12 +162,32 @@ Features in Development
 
 ### Immediate Next Steps
 
-1. Improve homepage
-2. Implement deck saving functionality
-3. Add deck export feature
-4. Enhance error messaging and user feedback
-5. Add card search functionality
-6. Implement deck sharing features
+1. **Fix Card Grid Layout**
+   - Refactor the card grid component to ensure proper spacing and prevent overlap
+   - Optimize for different screen sizes and card densities
+   - Implement virtualization for better performance with large card collections
+
+2. **Create Decks Page**
+   - Develop a dedicated page for browsing and managing saved decks
+   - Implement deck list with filtering and sorting capabilities
+   - Add deck preview with statistics and aspect breakdown
+   - Create interface for loading decks into the deck builder
+
+3. **Improve Navigation**
+   - Enhance main navigation with better styling and mobile responsiveness
+   - Add breadcrumbs for improved context within the application
+   - Improve active state indicators for current section
+
+4. **Enhance Deck Builder**
+   - Ensure leader cards always show flip side in detail view
+   - Add deck saving and loading functionality
+   - Implement deck sharing via URL
+   - Add deck validation with clear feedback
+
+5. **User Authentication**
+   - Implement user registration and login
+   - Add profile pages for user information
+   - Create persistent deck storage for logged-in users
 
 ### AI Features Roadmap
 

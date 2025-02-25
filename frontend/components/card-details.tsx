@@ -253,6 +253,7 @@ export function CardDetails({ card }: CardDetailsProps) {
                 </Badge>
               </div>
             )}
+            
             {/* Using type assertion to avoid the artist property error */}
             {(card as any).artist && (
               <div className="flex justify-between">
