@@ -106,10 +106,20 @@ export default function DeckBuilder() {
     setAspectStats(aspects);
   }, [leaders, base]);
 
+  React.useEffect(() => {
+    if (activeTab === 'cards' && currentStage === 'cards' && allCards.length === 0) {
+      // If we just switched to the cards tab and no cards are loaded
+      // Trigger a fresh card load without any filters
+      setSelectedCardType(null);
+      setSearchTerm('');
+      setPage(1);
+    }
+  }, [activeTab, currentStage]);
+
   // Load cards based on current stage
   React.useEffect(() => {
     const loadCards = async () => {
-      setLoading(true)
+      setLoading(true);
       try {
         // Determine which cards to load based on current tab
         let cardType: string | undefined;
@@ -206,13 +216,27 @@ export default function DeckBuilder() {
   // Filter cards for display based on current stage and filters
   const displayCards = React.useMemo(() => {
     if (activeTab === 'cards') {
+      // If we're in the cards tab but no cards are loaded yet,
+      // force an initial load of all compatible cards
+      if (allCards.length === 0 && !loading) {
+        // Using a setTimeout to avoid triggering during render
+        setTimeout(() => {
+          // Reset any filters that might be preventing cards from loading
+          if (selectedCardType === null && searchTerm === '') {
+            // This will trigger the useEffect to load all cards
+            setPage(1);
+          }
+        }, 0);
+      }
+      
       const filteredCards = allCards.filter(card => 
         card.type !== 'Leader' && card.type !== 'Base'
       );
+      
       return showOutOfAspect ? filteredCards : filteredCards.filter(isCardInAspect);
     }
     return allCards;
-  }, [allCards, activeTab, showOutOfAspect, leaders, base]);
+  }, [allCards, activeTab, showOutOfAspect, isCardInAspect, loading, selectedCardType, searchTerm]);
 
   // Navigation handlers
   const goToNextPage = () => {

@@ -5,6 +5,7 @@
     "radix-ui": "^1.1.3"
   },
   "devDependencies": {
+    "@types/nodemailer": "^6.4.17",
     "shadcn-ui": "^0.9.4"
   }
 }
