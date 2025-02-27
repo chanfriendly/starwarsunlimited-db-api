@@ -35,6 +35,7 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { Separator } from "@/components/ui/separator"
 import { Card as CardUI, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { s } from "framer-motion/dist/types.d-6pKw1mTI";
 
 // Deck building stages
 type DeckBuildingStage = 'leaders' | 'base' | 'cards';
@@ -106,18 +107,33 @@ export default function DeckBuilder() {
     setAspectStats(aspects);
   }, [leaders, base]);
 
-  React.useEffect(() => {
-    if (activeTab === 'cards' && currentStage === 'cards' && allCards.length === 0) {
-      // If we just switched to the cards tab and no cards are loaded
-      // Trigger a fresh card load without any filters
-      setSelectedCardType(null);
-      setSearchTerm('');
-      setPage(1);
-    }
-  }, [activeTab, currentStage]);
 
-  // Load cards based on current stage
   React.useEffect(() => {
+    if (activeTab === 'cards' && (allCards.length === 0 || !allCards.some(c => 
+        c.type !== 'Leader' && c.type !== 'Base'))) {
+      console.log("Loading regular cards for Cards tab");
+      
+      // Force load regular cards
+      getCards({ 
+        page: 1, 
+        limit: 24,
+        // Explicitly request non-leader/base cards
+        type: "Unit" // Start with Units to ensure we get some cards
+      })
+      .then(response => {
+        console.log(`Loaded ${response.cards.length} unit cards`);
+        // Only update if component is still mounted
+        setAllCards(prev => [...prev, ...response.cards]);
+        setTotalPages(Math.ceil(response.total / 24));
+      })
+      .catch(error => {
+        console.error("Failed to load unit cards:", error);
+      });
+    }
+  }, [activeTab, allCards]);
+
+  React.useEffect(() => {
+    // We'll use a simpler approach to avoid race conditions
     const loadCards = async () => {
       setLoading(true);
       try {
@@ -128,10 +144,13 @@ export default function DeckBuilder() {
           cardType = 'Leader';
         } else if (activeTab === 'base') {
           cardType = 'Base';
-        } else if (selectedCardType) {
-          cardType = selectedCardType;
+        } else if (activeTab === 'cards') {
+          // For the cards tab, don't filter by type in the API call
+          // We'll do it client-side to ensure we get enough cards
+          cardType = undefined;
         }
         
+        // API call with appropriate parameters
         const response = await getCards({ 
           page,
           limit: 24,
@@ -153,7 +172,8 @@ export default function DeckBuilder() {
     };
     
     loadCards();
-  }, [activeTab, page, selectedCardType, searchTerm, toast]);
+  }, [activeTab, page, searchTerm]); // Removed selectedCardType, leaders.length, base
+
 
   // Handle card selection logic
   const handleCardSelect = (card: Card) => {
@@ -186,58 +206,127 @@ export default function DeckBuilder() {
   };
 
   // Check if a card is compatible with deck's aspects
-  const isCardInAspect = (card: Card): boolean => {
-    if (!base || leaders.length < 2) return false;
+  const isCardInAspect = React.useCallback((card: Card): boolean => {
+    // If card has no aspects, it should be compatible
+    if (!card.aspects || card.aspects.length === 0) return true;
+    
+    // If we don't have leaders+base yet, don't filter
+    if (!base || leaders.length < 2) return true;
     
     // Get all aspects from leaders and base
     const deckAspects = [
       ...leaders.flatMap(leader => leader.aspects?.map(a => a.aspect_name) || []),
       ...(base.aspects?.map(a => a.aspect_name) || [])
     ];
+  
+    // Simple check: if any of the card's aspects are in the deck, it's compatible
+    const cardAspects = card.aspects.map(a => a.aspect_name);
+    
+    // Card is compatible if ANY of its aspects match the deck (not ALL)
+    return cardAspects.some(aspect => deckAspects.includes(aspect));
+  }, [leaders, base]);
+  
+  React.useEffect(() => {
+    if (activeTab === 'cards' && leaders.length === 2 && base) {
+      // If in the cards tab with leaders and base, ensure we have cards
+      if (allCards.length === 0 || allCards.every(c => c.type === 'Leader' || c.type === 'Base')) {
+        console.log("Loading initial cards for Cards tab");
+        setLoading(true);
+        getCards({ page: 1, limit: 24 })
+          .then(response => {
+            console.log(`Loaded ${response.cards.length} initial cards`);
+            setAllCards(response.cards);
+            setTotalPages(Math.ceil(response.total / 24));
+          })
+          .catch(error => {
+            console.error("Failed to load initial cards:", error);
+          })
+          .finally(() => {
+            setLoading(false);
+          });
+      }
+    }
+  }, [activeTab, leaders.length, base]);
 
-    // Count aspects in deck
-    const deckAspectCounts = deckAspects.reduce((acc, aspect) => {
-      acc[aspect] = (acc[aspect] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    // Check if card's aspects are present in sufficient quantity
-    const cardAspects = card.aspects?.map(a => a.aspect_name) || [];
-    const cardAspectCounts = cardAspects.reduce((acc, aspect) => {
-      acc[aspect] = (acc[aspect] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    return Object.entries(cardAspectCounts).every(([aspect, count]) => 
-      (deckAspectCounts[aspect] || 0) >= count
-    );
-  };
+  // Then fix the loading effect to ensure it returns regular cards when in the cards tab
+  React.useEffect(() => {
+    const loadCards = async () => {
+      if (loading) return;
+      
+      setLoading(true);
+      try {
+        // Don't apply type filter for cards tab in API call - get all types
+        const cardType = activeTab === 'leaders' 
+          ? 'Leader' 
+          : activeTab === 'base' 
+            ? 'Base' 
+            : undefined; // Important: undefined means no type filter
+        
+        console.log(`Loading cards for tab ${activeTab}, type: ${cardType || 'all'}`);
+        
+        const response = await getCards({ 
+          page,
+          limit: 24,
+          type: cardType,
+          search: searchTerm || undefined
+        });
+        
+        console.log(`Got ${response.cards.length} cards from API`);
+        
+        // Store all cards without filtering here
+        setAllCards(response.cards);
+        setTotalPages(Math.ceil(response.total / 24));
+      } catch (error) {
+        console.error("Failed to load cards:", error);
+        toast({
+          title: "Error",
+          description: "Failed to load cards. Please try again."
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadCards();
+  }, [activeTab, page, searchTerm]);
 
   // Filter cards for display based on current stage and filters
+
   const displayCards = React.useMemo(() => {
-    if (activeTab === 'cards') {
-      // If we're in the cards tab but no cards are loaded yet,
-      // force an initial load of all compatible cards
-      if (allCards.length === 0 && !loading) {
-        // Using a setTimeout to avoid triggering during render
-        setTimeout(() => {
-          // Reset any filters that might be preventing cards from loading
-          if (selectedCardType === null && searchTerm === '') {
-            // This will trigger the useEffect to load all cards
-            setPage(1);
-          }
-        }, 0);
-      }
-      
-      const filteredCards = allCards.filter(card => 
+    console.log(`Filtering ${allCards.length} cards, showOutOfAspect: ${showOutOfAspect}`);
+    
+    // First, do basic type filtering based on tab
+    let filteredCards = allCards;
+    
+    if (activeTab === 'leaders') {
+      filteredCards = allCards.filter(card => card.type === 'Leader');
+    } else if (activeTab === 'base') {
+      filteredCards = allCards.filter(card => card.type === 'Base');
+    } else if (activeTab === 'cards') {
+      // For cards tab, filter out leaders and bases
+      filteredCards = allCards.filter(card => 
         card.type !== 'Leader' && card.type !== 'Base'
       );
       
-      return showOutOfAspect ? filteredCards : filteredCards.filter(isCardInAspect);
+      // Apply card type filter if selected
+      if (selectedCardType) {
+        filteredCards = filteredCards.filter(card => 
+          card.type === selectedCardType
+        );
+      }
+      
+      // Only apply aspect filtering if showOutOfAspect is false
+      if (!showOutOfAspect) {
+        const beforeCount = filteredCards.length;
+        filteredCards = filteredCards.filter(isCardInAspect);
+        console.log(`Aspect filtering: ${beforeCount} → ${filteredCards.length} cards`);
+      }
     }
-    return allCards;
-  }, [allCards, activeTab, showOutOfAspect, isCardInAspect, loading, selectedCardType, searchTerm]);
-
+    
+    console.log(`Returning ${filteredCards.length} cards for display`);
+    return filteredCards;
+  }, [allCards, activeTab, selectedCardType, showOutOfAspect, isCardInAspect]);
+  
   // Navigation handlers
   const goToNextPage = () => {
     if (page < totalPages) {
