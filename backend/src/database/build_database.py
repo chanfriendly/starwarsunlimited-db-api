@@ -67,10 +67,11 @@ def main():
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
     
-    # Get the absolute path to the database file
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    backend_dir = os.path.dirname(os.path.dirname(current_dir))
-    database_path = os.path.join(backend_dir, 'swu_cards.db')
+   # Get the path to the database file in user's home directory
+    home_dir = os.path.expanduser("~")
+    swu_dir = os.path.join(home_dir, ".swu")
+    os.makedirs(swu_dir, exist_ok=True)  # Create the .swu directory if it doesn't exist
+    database_path = os.path.join(swu_dir, "swu_cards.db")
     
     logging.info(f"Starting database build at {datetime.now()}")
     logging.info(f"Using database at: {database_path}")
