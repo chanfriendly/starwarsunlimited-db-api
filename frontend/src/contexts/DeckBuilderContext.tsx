@@ -43,9 +43,9 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
       setLeaders([...leaders, leader]);
       
       // Auto-progress if we've selected 2 leaders
-      if (leaders.length === 1) {
-        setCurrentStage('base');
-      }
+      // if (leaders.length === 1) {
+      //  setCurrentStage('base');
+      ///}
     }
   };
 

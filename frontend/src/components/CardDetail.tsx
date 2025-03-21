@@ -1,4 +1,3 @@
-// frontend/components/CardDetail.tsx
 'use client';
 
 import React from 'react';
@@ -11,6 +10,7 @@ interface CardDetailProps {
   onRemoveFromDeck?: (cardId: string) => void;
   isInDeck?: boolean;
   isCompatible?: boolean;
+  currentStage?: 'leaders' | 'base' | 'cards'; // Add this prop
 }
 
 export function CardDetail({ 
@@ -18,7 +18,8 @@ export function CardDetail({
   onAddToDeck, 
   onRemoveFromDeck, 
   isInDeck = false,
-  isCompatible = true
+  isCompatible = true,
+  currentStage = 'cards' // Default to 'cards'
 }: CardDetailProps) {
   if (!card) {
     return (
@@ -49,19 +50,22 @@ export function CardDetail({
 
   return (
     <div className="h-full overflow-auto p-4">
-      <div className="mb-6">
-        <div className="aspect-[7/10] relative rounded-lg overflow-hidden border border-gray-700 mb-4">
-          {card.image_uri ? (
-            <img
-              src={card.image_uri}
-              alt={card.name}
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center bg-gray-900">
-              No Image
-            </div>
-          )}
+      <div className="flex flex-col items-center mb-6">
+        {/* Card image with controlled size */}
+        <div className="max-w-xs w-full mx-auto mb-4">
+          <div className="aspect-[7/10] relative rounded-lg overflow-hidden border border-gray-700">
+            {card.image_uri ? (
+              <img
+                src={card.image_uri}
+                alt={card.name}
+                className="w-full h-full object-contain"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center bg-gray-900">
+                <span className="text-lg text-center p-4">{card.name}</span>
+              </div>
+            )}
+          </div>
         </div>
         
         <h2 className="text-xl font-bold mb-1">{card.name}</h2>
@@ -69,7 +73,7 @@ export function CardDetail({
           <p className="text-gray-400 mb-2">{card.subtitle}</p>
         )}
         
-        <div className="flex flex-wrap gap-2 mb-4">
+        <div className="flex flex-wrap gap-2 mb-4 justify-center">
           {card.aspects?.map((aspect) => (
             <div 
               key={aspect.aspect_name}
@@ -85,7 +89,7 @@ export function CardDetail({
           ))}
         </div>
         
-        <div className="grid grid-cols-3 gap-4 mb-4 bg-gray-800/50 p-3 rounded-lg">
+        <div className="grid grid-cols-3 gap-4 mb-4 bg-gray-800/50 p-3 rounded-lg w-full max-w-xs">
           {card.energy_cost !== undefined && (
             <div className="text-center">
               <p className="text-xs text-gray-400">Cost</p>
@@ -107,14 +111,14 @@ export function CardDetail({
         </div>
         
         {card.text && (
-          <div className="mb-4">
+          <div className="mb-4 w-full max-w-xs">
             <h3 className="text-sm font-medium mb-1">Card Text</h3>
             <p className="text-sm text-gray-300 whitespace-pre-line">{card.text}</p>
           </div>
         )}
         
-        {card.keywords?.length > 0 && (
-          <div className="mb-4">
+        {card.keywords && card.keywords.length > 0 && (
+          <div className="mb-4 w-full max-w-xs">
             <h3 className="text-sm font-medium mb-1">Keywords</h3>
             <div className="flex flex-wrap gap-2">
               {card.keywords.map((keyword) => (
@@ -130,22 +134,24 @@ export function CardDetail({
         )}
         
         {onAddToDeck && onRemoveFromDeck && (
-          <div className="mt-6">
+          <div className="mt-4 w-full max-w-xs">
             {isInDeck ? (
               <Button 
                 onClick={() => onRemoveFromDeck(card.id)}
                 variant="destructive"
                 className="w-full"
               >
-                Remove from Deck
+                Remove {currentStage === 'leaders' ? 'Leader' : currentStage === 'base' ? 'Base' : 'Card'}
               </Button>
             ) : (
               <Button 
                 onClick={() => onAddToDeck(card)}
-                className="w-full"
+                className="w-full bg-gradient-to-r from-purple-500 to-pink-500"
                 disabled={!isCompatible}
               >
-                {!isCompatible ? 'Incompatible with Deck' : 'Add to Deck'}
+                {!isCompatible ? 'Incompatible with Deck' : 
+                  currentStage === 'leaders' ? 'Add as Leader' : 
+                  currentStage === 'base' ? 'Add as Base' : 'Add to Deck'}
               </Button>
             )}
           </div>
