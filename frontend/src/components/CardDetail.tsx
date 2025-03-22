@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Card } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 
@@ -10,7 +10,7 @@ interface CardDetailProps {
   onRemoveFromDeck?: (cardId: string) => void;
   isInDeck?: boolean;
   isCompatible?: boolean;
-  currentStage?: 'leaders' | 'base' | 'cards'; // Add this prop
+  currentStage?: 'leaders' | 'base' | 'cards';
 }
 
 export function CardDetail({ 
@@ -19,8 +19,13 @@ export function CardDetail({
   onRemoveFromDeck, 
   isInDeck = false,
   isCompatible = true,
-  currentStage = 'cards' // Default to 'cards'
+  currentStage = 'cards'
 }: CardDetailProps) {
+  const [showBackSide, setShowBackSide] = useState(false);
+  
+  // Only allow flipping for cards with a back side (mainly Leaders)
+  const canFlip = card?.image_back_uri !== undefined && card?.image_back_uri !== null;
+  
   if (!card) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-6">
@@ -48,16 +53,18 @@ export function CardDetail({
     );
   }
 
+  const currentImage = showBackSide && card.image_back_uri ? card.image_back_uri : card.image_uri;
+
   return (
     <div className="h-full overflow-auto p-4">
       <div className="flex flex-col items-center mb-6">
         {/* Card image with controlled size */}
-        <div className="max-w-xs w-full mx-auto mb-4">
+        <div className="max-w-xs w-full mx-auto mb-4 relative">
           <div className="aspect-[7/10] relative rounded-lg overflow-hidden border border-gray-700">
-            {card.image_uri ? (
+            {currentImage ? (
               <img
-                src={card.image_uri}
-                alt={card.name}
+                src={currentImage}
+                alt={`${card.name} ${showBackSide ? '(back)' : '(front)'}`}
                 className="w-full h-full object-contain"
               />
             ) : (
@@ -66,6 +73,18 @@ export function CardDetail({
               </div>
             )}
           </div>
+          
+          {/* Flip button for cards with back side */}
+          {canFlip && (
+            <button 
+              className="absolute top-2 right-2 p-2 bg-purple-500 rounded-full text-white"
+              onClick={() => setShowBackSide(!showBackSide)}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+          )}
         </div>
         
         <h2 className="text-xl font-bold mb-1">{card.name}</h2>

@@ -1,4 +1,3 @@
-// frontend/contexts/DeckBuilderContext.tsx
 'use client';
 
 import React, { createContext, useContext, useState, ReactNode } from 'react';
@@ -27,25 +26,32 @@ interface DeckBuilderContextType {
   progressStage: () => void;
   resetDeck: () => void;
   isCardInAspect: (card: Card) => boolean;
+  setCurrentStage: (stage: DeckBuildingStage) => void; // Add this line
 }
 
 const DeckBuilderContext = createContext<DeckBuilderContextType | undefined>(undefined);
 
 export function DeckBuilderProvider({ children }: { children: ReactNode }) {
-  const [currentStage, setCurrentStage] = useState<DeckBuildingStage>('leaders');
+  const [currentStage, setCurrentStageState] = useState<DeckBuildingStage>('leaders');
   const [leaders, setLeaders] = useState<Card[]>([]);
   const [base, setBaseState] = useState<Card | null>(null);
   const [deckCards, setDeckCards] = useState<DeckItem[]>([]);
   const [deckName, setDeckName] = useState('New Deck');
+
+  // Add a function to explicitly set the current stage
+  const setCurrentStage = (stage: DeckBuildingStage) => {
+    console.log(`Setting stage from ${currentStage} to ${stage}`);
+    setCurrentStageState(stage);
+  };
 
   const addLeader = (leader: Card) => {
     if (leaders.length < 2 && !leaders.some(l => l.id === leader.id)) {
       setLeaders([...leaders, leader]);
       
       // Auto-progress if we've selected 2 leaders
-      // if (leaders.length === 1) {
-      //  setCurrentStage('base');
-      ///}
+      if (leaders.length === 1) {
+        setCurrentStageState('base');
+      }
     }
   };
 
@@ -53,17 +59,18 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
     setLeaders(leaders.filter(leader => leader.id !== leaderId));
     // If we remove a leader, go back to the leaders stage
     if (currentStage !== 'leaders') {
-      setCurrentStage('leaders');
+      setCurrentStageState('leaders');
       // Also reset base if we're going back to selecting leaders
       setBaseState(null);
     }
   };
 
   const setBase = (newBase: Card | null) => {
+    console.log("Setting base:", newBase?.name);
     setBaseState(newBase);
     // Auto-progress if we've selected a base
     if (newBase && currentStage === 'base') {
-      setCurrentStage('cards');
+      setCurrentStageState('cards');
     }
   };
 
@@ -90,10 +97,18 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
   };
 
   const progressStage = () => {
+    console.log("Current stage:", currentStage);
+    console.log("Leaders:", leaders.length);
+    console.log("Base:", base?.name);
+    
     if (currentStage === 'leaders' && leaders.length === 2) {
-      setCurrentStage('base');
+      console.log("Progressing from leaders to base");
+      setCurrentStageState('base');
     } else if (currentStage === 'base' && base) {
-      setCurrentStage('cards');
+      console.log("Progressing from base to cards");
+      setCurrentStageState('cards');
+    } else {
+      console.log("Cannot progress: conditions not met");
     }
   };
 
@@ -102,7 +117,7 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
     setBaseState(null);
     setDeckCards([]);
     setDeckName('New Deck');
-    setCurrentStage('leaders');
+    setCurrentStageState('leaders');
   };
 
   // Check if a card is compatible with the current deck aspects
@@ -139,6 +154,7 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
         progressStage,
         resetDeck,
         isCardInAspect,
+        setCurrentStage, // Add this line to include the function in the context
       }}
     >
       {children}
