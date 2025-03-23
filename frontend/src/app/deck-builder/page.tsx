@@ -23,7 +23,7 @@ export default function DeckBuilder() {
     const [loadingBaseCards, setLoadingBaseCards] = useState(false);
     const [showAllCards, setShowAllCards] = useState<boolean>(false);
 
-    // Use the DeckBuilder context
+    // Use the DeckBuilder context with the direct setCurrentStage function
     const {
         currentStage,
         leaders,
@@ -35,26 +35,10 @@ export default function DeckBuilder() {
         addCard,
         removeCard,
         isCardInAspect,
-        progressStage,
         resetDeck,
         setDeckName,
+        setCurrentStage: contextSetCurrentStage // Use the context's function directly
     } = useDeckBuilder();
-
-    // For typescript safety, define a setCurrentStage function that interfaces with the context
-    const setCurrentStage = useCallback((stage: 'leaders' | 'base' | 'cards') => {
-        if (stage === 'leaders') {
-            // Reset state when going back to leaders
-            setBaseContext(null);
-        }
-        // Use context methods to update stage in a controlled way.  Use progressStage only when the stage is actually changing
-        if (stage === 'base' && leaders.length === 2 && currentStage !== 'base') {
-            progressStage();
-        } else if (stage === 'cards' && base && currentStage !== 'cards') {
-            progressStage();
-        } else if (stage !== currentStage) { // Only progress if stage is different
-            progressStage();
-        }
-    }, [currentStage, leaders.length, base, progressStage, setBaseContext]);
 
     // Fetch cards from API
     useEffect(() => {
@@ -107,7 +91,6 @@ export default function DeckBuilder() {
         loadCards();
     }, [currentStage]);
 
-
     // Filter cards based on stage and search/type filters
     useEffect(() => {
         let result: CardType[] = [];
@@ -155,31 +138,95 @@ export default function DeckBuilder() {
             console.log('Card types distribution:', typeCounts);
             
             // If we have chosen leaders and a base, filter by aspect compatibility
-            if (leaders.length === 2 && base) {
+            if (leaders.length === 2 && base && !showAllCards) {
                 // Get all aspects from leaders and base
-                const deckAspects = [
-                    ...leaders.flatMap(leader => leader.aspects?.map(a => a.aspect_name) || []),
-                    ...(base.aspects?.map(a => a.aspect_name) || [])
-                ];
+                const deckAspects: Record<string, number> = {};
                 
-                console.log('Deck aspects:', deckAspects);
-                
-                // If showing all cards is turned off, filter by aspect compatibility
-                if (deckAspects.length > 0 && !showAllCards) {
-                    result = result.filter(card => {
-                        const cardAspects = card.aspects?.map(a => a.aspect_name) || [];
-                        return cardAspects.some(aspect => deckAspects.includes(aspect));
+                // Count occurrences of each aspect in the deck
+                // First process all leaders
+                leaders.forEach(leader => {
+                    leader.aspects?.forEach(aspect => {
+                        const name = aspect.aspect_name;
+                        deckAspects[name] = (deckAspects[name] || 0) + 1;
                     });
-                    console.log('Compatible cards after aspect filtering:', result.length);
-                }
+                });
+                
+                // Then add base aspects
+                base.aspects?.forEach(aspect => {
+                    const name = aspect.aspect_name;
+                    deckAspects[name] = (deckAspects[name] || 0) + 1;
+                });
+                
+                console.log('Deck aspect counts:', deckAspects);
+                
+                // Check if the deck has Heroism or Villainy
+                const hasHeroism = deckAspects['Heroism'] > 0;
+                const hasVillainy = deckAspects['Villainy'] > 0;
+                
+                console.log('Deck has Heroism:', hasHeroism);
+                console.log('Deck has Villainy:', hasVillainy);
+                
+                // Filter cards based on the complex aspect compatibility rules
+                result = result.filter(card => {
+                    // Get card aspects
+                    const cardAspects: Record<string, number> = {};
+                    card.aspects?.forEach(aspect => {
+                      const name = aspect.aspect_name;
+                      cardAspects[name] = (cardAspects[name] || 0) + 1;
+                    });
+                    
+                    // First check Heroism/Villainy compatibility
+                    // If deck is Heroism, cards with Villainy are invalid
+                    if (hasHeroism && cardAspects['Villainy'] > 0) {
+                      return false;
+                    }
+                    
+                    // If deck is Villainy, cards with Heroism are invalid
+                    if (hasVillainy && cardAspects['Heroism'] > 0) {
+                      return false;
+                    }
+                    
+                    // For other aspects, a card is compatible if it has AT LEAST ONE 
+                    // of the secondary aspects in the deck, OR has no secondary aspects at all
+                    
+                    // Get the secondary aspects from the deck
+                    const secondaryAspects = ['Command', 'Vigilance', 'Cunning', 'Aggression'];
+                    const deckSecondaryAspects = secondaryAspects.filter(aspect => deckAspects[aspect] > 0);
+                    
+                    // If deck has no secondary aspects, all cards pass this check
+                    if (deckSecondaryAspects.length === 0) {
+                      return true;
+                    }
+                    
+                    // Get secondary aspects from the card
+                    const cardSecondaryAspects = secondaryAspects.filter(aspect => cardAspects[aspect] > 0);
+                    
+                    // If card has no secondary aspects, it's compatible
+                    if (cardSecondaryAspects.length === 0) {
+                      return true;
+                    }
+                    
+                    // Check if any of the card's secondary aspects are in the deck
+                    for (const aspect of cardSecondaryAspects) {
+                      if (deckAspects[aspect] > 0) {
+                        return true;
+                      }
+                    }
+                    
+                    // If we get here, the card has secondary aspects but none match the deck
+                    return false;
+                  });
+                
+                console.log('Compatible cards after aspect filtering:', result.length);
+            } else {
+                console.log('Showing all cards, bypassing aspect filter');
             }
-        } else {
-            result = cards;
         }
     
         // Additional filters
         if (cardTypeFilter && cardTypeFilter !== 'All') {
             result = result.filter(card => card.type === cardTypeFilter);
+            console.log(`After type filter (${cardTypeFilter}):`, result.length);
         }
     
         // Search query filtering
@@ -189,6 +236,7 @@ export default function DeckBuilder() {
                 card.name?.toLowerCase().includes(query) ||
                 (card.text && card.text.toLowerCase().includes(query))
             );
+            console.log(`After search filter (${searchQuery}):`, result.length);
         }
     
         console.log('Final filtered cards:', result.length);
@@ -323,7 +371,7 @@ export default function DeckBuilder() {
                         </Button>
 
                         <Button
-                            onClick={() => setCurrentStage('base')}
+                            onClick={() => contextSetCurrentStage('base')}
                             disabled={leaders.length < 2}
                             className="bg-gradient-to-r from-orange-600 to-orange-400 text-white hover:opacity-90"
                         >
@@ -382,7 +430,7 @@ export default function DeckBuilder() {
                     {/* Navigation Buttons */}
                     <div className="mt-6 flex justify-between">
                         <Button
-                            onClick={() => setCurrentStage('leaders')}
+                            onClick={() => contextSetCurrentStage('leaders')}
                             variant="outline"
                         >
                             Back
@@ -396,7 +444,7 @@ export default function DeckBuilder() {
                         </Button>
 
                         <Button
-                            onClick={() => setCurrentStage('cards')}
+                            onClick={() => contextSetCurrentStage('cards')}
                             disabled={!base}
                             className="bg-gradient-to-r from-orange-600 to-orange-400 text-white hover:opacity-90"
                         >
@@ -462,7 +510,7 @@ export default function DeckBuilder() {
                     {/* Navigation Buttons */}
                     <div className="mt-6 flex justify-between">
                         <Button
-                            onClick={() => setCurrentStage('base')}
+                            onClick={() => contextSetCurrentStage('base')}
                             variant="outline"
                         >
                             Back
@@ -615,7 +663,6 @@ export default function DeckBuilder() {
                                                         <option value="Unit">Units</option>
                                                         <option value="Event">Events</option>
                                                         <option value="Upgrade">Upgrades</option>
-                                                        <option value="Plot">Plots</option>
                                                     </>
                                                 )}
                                                 {currentStage === 'base' && <option value="Base">Bases</option>}
@@ -628,7 +675,10 @@ export default function DeckBuilder() {
                                                     <input
                                                         type="checkbox"
                                                         checked={showAllCards}
-                                                        onChange={() => setShowAllCards(!showAllCards)}
+                                                        onChange={() => {
+                                                            console.log("Toggling showAllCards from", showAllCards, "to", !showAllCards);
+                                                            setShowAllCards(!showAllCards);
+                                                        }}
                                                         className="mr-2 h-4 w-4 rounded border-gray-700 bg-gray-700 text-purple-600 focus:ring-purple-500"
                                                     />
                                                     <span className="text-sm text-gray-300">Show all cards</span>

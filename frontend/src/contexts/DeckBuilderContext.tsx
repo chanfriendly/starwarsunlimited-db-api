@@ -26,7 +26,7 @@ interface DeckBuilderContextType {
   progressStage: () => void;
   resetDeck: () => void;
   isCardInAspect: (card: Card) => boolean;
-  setCurrentStage: (stage: DeckBuildingStage) => void; // Add this line
+  setCurrentStage: (stage: DeckBuildingStage) => void;
 }
 
 const DeckBuilderContext = createContext<DeckBuilderContextType | undefined>(undefined);
@@ -38,9 +38,13 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
   const [deckCards, setDeckCards] = useState<DeckItem[]>([]);
   const [deckName, setDeckName] = useState('New Deck');
 
-  // Add a function to explicitly set the current stage
+  // Function to directly set the current stage
   const setCurrentStage = (stage: DeckBuildingStage) => {
     console.log(`Setting stage from ${currentStage} to ${stage}`);
+    // If going back to leaders stage, reset base
+    if (stage === 'leaders' && currentStage !== 'leaders') {
+      setBaseState(null);
+    }
     setCurrentStageState(stage);
   };
 
@@ -120,20 +124,76 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
     setCurrentStageState('leaders');
   };
 
-  // Check if a card is compatible with the current deck aspects
+  // Function to check if a card is compatible with the current deck aspects
   const isCardInAspect = (card: Card): boolean => {
-    if (leaders.length < 2 || !base) return false;
+    if (leaders.length < 2 || !base) return true; // If deck isn't complete, all cards are "in aspect"
     
-    // Get all aspects from the leaders and base
-    const deckAspects = [
-      ...leaders.flatMap(leader => leader.aspects?.map(a => a.aspect_name) || []),
-      ...(base.aspects?.map(a => a.aspect_name) || [])
-    ];
+    // Get all aspects from leaders and base
+    const deckAspects: Record<string, number> = {};
     
-    // Check if any of the card's aspects are in the deck
-    const cardAspects = card.aspects?.map(a => a.aspect_name) || [];
+    // Count occurrences of each aspect in the deck
+    leaders.forEach(leader => {
+      leader.aspects?.forEach(aspect => {
+        const name = aspect.aspect_name;
+        deckAspects[name] = (deckAspects[name] || 0) + 1;
+      });
+    });
     
-    return cardAspects.some(aspect => deckAspects.includes(aspect));
+    // Add base aspects
+    base.aspects?.forEach(aspect => {
+      const name = aspect.aspect_name;
+      deckAspects[name] = (deckAspects[name] || 0) + 1;
+    });
+    
+    // Check if the deck has Heroism or Villainy
+    const hasHeroism = deckAspects['Heroism'] > 0;
+    const hasVillainy = deckAspects['Villainy'] > 0;
+    
+    // Get card aspects
+    const cardAspects: Record<string, number> = {};
+    card.aspects?.forEach(aspect => {
+      const name = aspect.aspect_name;
+      cardAspects[name] = (cardAspects[name] || 0) + 1;
+    });
+    
+    // First check Heroism/Villainy compatibility
+    if (hasHeroism && cardAspects['Villainy'] > 0) {
+      return false;
+    }
+    
+    if (hasVillainy && cardAspects['Heroism'] > 0) {
+      return false;
+    }
+    
+    // For other aspects, a card is compatible if it has AT LEAST ONE 
+    // of the secondary aspects in the deck, OR has no secondary aspects at all
+    
+    // Get the secondary aspects from the deck
+    const secondaryAspects = ['Command', 'Vigilance', 'Cunning', 'Aggression'];
+    const deckSecondaryAspects = secondaryAspects.filter(aspect => deckAspects[aspect] > 0);
+    
+    // If deck has no secondary aspects, all cards pass this check
+    if (deckSecondaryAspects.length === 0) {
+      return true;
+    }
+    
+    // Get secondary aspects from the card
+    const cardSecondaryAspects = secondaryAspects.filter(aspect => cardAspects[aspect] > 0);
+    
+    // If card has no secondary aspects, it's compatible
+    if (cardSecondaryAspects.length === 0) {
+      return true;
+    }
+    
+    // Check if any of the card's secondary aspects are in the deck
+    for (const aspect of cardSecondaryAspects) {
+      if (deckAspects[aspect] > 0) {
+        return true;
+      }
+    }
+    
+    // If we get here, the card has secondary aspects but none match the deck
+    return false;
   };
 
   return (
@@ -154,7 +214,7 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
         progressStage,
         resetDeck,
         isCardInAspect,
-        setCurrentStage, // Add this line to include the function in the context
+        setCurrentStage,
       }}
     >
       {children}
