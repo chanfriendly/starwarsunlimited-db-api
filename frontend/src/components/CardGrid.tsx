@@ -82,8 +82,8 @@ export function CardGrid({
                 </div>
               )}
               
-              {/* Action hint overlay for leaders */}
-              {currentStage === 'leaders' && (
+              {/* Action hint overlay for leaders and bases */}
+              {(currentStage === 'leaders' || currentStage === 'base') && (
                 <div className="absolute top-1 left-1 bg-purple-500/90 text-white text-xs py-0.5 px-1 rounded-full">
                   Click to Select
                 </div>

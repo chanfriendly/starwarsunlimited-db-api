@@ -263,4 +263,38 @@ async def get_types():
         return types
     except sqlite3.Error as e:
         logger.error(f"Database error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    
+@app.get("/api/stats")
+async def get_stats():
+    try:
+        # Connect to database
+        db = get_db()
+        
+        # Get total cards count
+        cursor = db.execute("SELECT COUNT(*) FROM cards")
+        total_cards = cursor.fetchone()[0]
+        
+        # Get unique aspects count
+        cursor = db.execute("SELECT COUNT(DISTINCT aspect_name) FROM card_aspects")
+        aspects_count = cursor.fetchone()[0]
+        
+        # Get unique card types count
+        cursor = db.execute("SELECT COUNT(DISTINCT type) FROM cards")
+        types_count = cursor.fetchone()[0]
+        
+        # Get unique sets count
+        cursor = db.execute("SELECT COUNT(DISTINCT set_name) FROM cards WHERE set_name IS NOT NULL")
+        sets_count = cursor.fetchone()[0]
+        
+        db.close()
+        
+        return {
+            "total_cards": total_cards,
+            "aspects_count": aspects_count,
+            "types_count": types_count,
+            "sets_count": sets_count
+        }
+    except Exception as e:
+        logger.error(f"Error getting stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")

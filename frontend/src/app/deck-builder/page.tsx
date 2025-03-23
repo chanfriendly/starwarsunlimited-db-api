@@ -8,9 +8,9 @@ import { CardDetail } from '@/components/CardDetail';
 import { LeaderSelection } from '@/components/LeaderSelection';
 import { DeckStats } from '@/components/DeckStats';
 import { useDeckBuilder } from '@/contexts/DeckBuilderContext';
-import { Card as CardType, fetchCards, fetchBaseCards } from '@/lib/api'; // Import fetchBaseCards
+import { Card as CardType, fetchCards, fetchBaseCards, fetchRegularCards } from '@/lib/api';
 
-export default function DeckBuilder() { // Changed to default export
+export default function DeckBuilder() {
     // State
     const [cards, setCards] = useState<CardType[]>([]);
     const [filteredCards, setFilteredCards] = useState<CardType[]>([]);
@@ -19,9 +19,9 @@ export default function DeckBuilder() { // Changed to default export
     const [error, setError] = useState<string | null>(null);
     const [cardTypeFilter, setCardTypeFilter] = useState<string>('');
     const [searchQuery, setSearchQuery] = useState<string>('');
-    const [baseCards, setBaseCards] = useState<CardType[]>([]); // State for base cards
+    const [baseCards, setBaseCards] = useState<CardType[]>([]);
     const [loadingBaseCards, setLoadingBaseCards] = useState(false);
-
+    const [showAllCards, setShowAllCards] = useState<boolean>(false);
 
     // Use the DeckBuilder context
     const {
@@ -31,7 +31,7 @@ export default function DeckBuilder() { // Changed to default export
         deckCards,
         addLeader,
         removeLeader,
-        setBase: setBaseContext, // Renamed to avoid shadowing
+        setBase: setBaseContext,
         addCard,
         removeCard,
         isCardInAspect,
@@ -61,26 +61,41 @@ export default function DeckBuilder() { // Changed to default export
         const loadCards = async () => {
             try {
                 setLoading(true);
-                console.log('Fetching cards...');
-
+                console.log(`Fetching cards for stage: ${currentStage}`);
+    
                 let fetchedCards: CardType[] = [];
-
-                if (currentStage === 'base') {
-                    fetchedCards = await fetchBaseCards(); // Fetch base cards
-                    setBaseCards(fetchedCards); // Also store in baseCards state
-                } else {
+    
+                if (currentStage === 'leaders') {
+                    // For leaders, fetch all cards and then filter for leaders only
                     fetchedCards = await fetchCards();
+                    console.log(`Loaded ${fetchedCards.length} cards, filtering for leaders...`);
+                    setCards(fetchedCards);
+                } else if (currentStage === 'base') {
+                    // For base selection, specifically fetch base cards
+                    fetchedCards = await fetchBaseCards();
+                    console.log(`Loaded ${fetchedCards.length} base cards`);
+                    setBaseCards(fetchedCards);
+                    setFilteredCards(fetchedCards); // Directly set filtered cards
+                } else if (currentStage === 'cards') {
+                    // For regular cards, use the new function that excludes leaders and bases
+                    fetchedCards = await fetchRegularCards();
+                    console.log(`Loaded ${fetchedCards.length} regular cards (non-Leader, non-Base)`);
                     setCards(fetchedCards);
                 }
-
+    
                 if (fetchedCards.length === 0) {
-                    console.warn('No cards returned from API');
-                } else {
-                    console.log(`Loaded ${fetchedCards.length} cards`);
-                    console.log('Sample card:', fetchedCards[0]);
+                    console.warn('No cards returned from API for stage:', currentStage);
+                    if (currentStage === 'cards') {
+                        // As a fallback for cards stage, try loading all cards
+                        console.log('Trying fallback method for cards stage...');
+                        const allCards = await fetchCards({ limit: '200' });
+                        const regularCards = allCards.filter(card => 
+                            card.type !== 'Leader' && card.type !== 'Base'
+                        );
+                        console.log(`Fallback found ${regularCards.length} regular cards`);
+                        setCards(regularCards);
+                    }
                 }
-
-
             } catch (err) {
                 console.error('Error loading cards:', err);
                 setError('Failed to load cards. Please try again later.');
@@ -88,28 +103,30 @@ export default function DeckBuilder() { // Changed to default export
                 setLoading(false);
             }
         };
-
+    
         loadCards();
     }, [currentStage]);
+
 
     // Filter cards based on stage and search/type filters
     useEffect(() => {
         let result: CardType[] = [];
-
+    
         // Stage-based filtering
         if (currentStage === 'leaders') {
+            // Filter for leaders only
             result = cards.filter(card => card.type === 'Leader');
             console.log('Leaders found:', result.length);
-
+    
             // If we already have one leader selected, filter for compatible leaders only
             if (leaders.length === 1) {
                 const firstLeader = leaders[0];
                 const firstLeaderAspects = firstLeader.aspects?.map(a => a.aspect_name) || [];
-
+    
                 // Filter for leaders that share either Heroism or Villainy aspect
                 result = result.filter(card => {
                     const cardAspects = card.aspects?.map(a => a.aspect_name) || [];
-
+    
                     // Check if card has Heroism and first leader has Heroism OR
                     // card has Villainy and first leader has Villainy
                     return (
@@ -117,30 +134,54 @@ export default function DeckBuilder() { // Changed to default export
                         (cardAspects.includes('Villainy') && firstLeaderAspects.includes('Villainy'))
                     );
                 });
-
+    
                 // Also exclude the already selected leader
                 result = result.filter(card => card.id !== firstLeader.id);
             }
         } else if (currentStage === 'base') {
-            // Use baseCards state here
+            // For base stage, directly use the baseCards state
             result = baseCards;
-            console.log('Base cards found using specific filtering:', result.length);
-
-            if (result.length === 0) {
-                // If still no base cards, do a comprehensive debug
-                console.log('Sample of card types in the database:');
-                console.log(cards.slice(0, 20).map(card => ({ id: card.id, name: card.name, type: card.type })));
+            console.log('Base cards found:', result.length);
+        } else if (currentStage === 'cards') {
+            // For cards stage, use the cards that have already been filtered by fetchRegularCards
+            result = cards;
+            console.log('Regular cards found:', result.length);
+            
+            // Log the types of cards we have for debugging
+            const typeCounts: Record<string, number> = {};
+            result.forEach(card => {
+                typeCounts[card.type] = (typeCounts[card.type] || 0) + 1;
+            });
+            console.log('Card types distribution:', typeCounts);
+            
+            // If we have chosen leaders and a base, filter by aspect compatibility
+            if (leaders.length === 2 && base) {
+                // Get all aspects from leaders and base
+                const deckAspects = [
+                    ...leaders.flatMap(leader => leader.aspects?.map(a => a.aspect_name) || []),
+                    ...(base.aspects?.map(a => a.aspect_name) || [])
+                ];
+                
+                console.log('Deck aspects:', deckAspects);
+                
+                // If showing all cards is turned off, filter by aspect compatibility
+                if (deckAspects.length > 0 && !showAllCards) {
+                    result = result.filter(card => {
+                        const cardAspects = card.aspects?.map(a => a.aspect_name) || [];
+                        return cardAspects.some(aspect => deckAspects.includes(aspect));
+                    });
+                    console.log('Compatible cards after aspect filtering:', result.length);
+                }
             }
         } else {
             result = cards;
         }
-
-
+    
         // Additional filters
         if (cardTypeFilter && cardTypeFilter !== 'All') {
             result = result.filter(card => card.type === cardTypeFilter);
         }
-
+    
         // Search query filtering
         if (searchQuery) {
             const query = searchQuery.toLowerCase();
@@ -149,20 +190,26 @@ export default function DeckBuilder() { // Changed to default export
                 (card.text && card.text.toLowerCase().includes(query))
             );
         }
-
-        console.log('Filtered cards:', result.length);
+    
+        console.log('Final filtered cards:', result.length);
         setFilteredCards(result);
-    }, [cards, currentStage, cardTypeFilter, searchQuery, leaders, baseCards]);
+    }, [cards, currentStage, cardTypeFilter, searchQuery, leaders, baseCards, base, showAllCards]);
 
     // Handle card selection
     const handleCardClick = (card: CardType) => {
-        console.log('Card clicked:', card.name);
+        console.log('Card clicked:', card.name, 'Type:', card.type, 'Current stage:', currentStage);
         setSelectedCard(card);
 
         // Auto-add leaders when clicked (if in leaders stage and we have room)
         if (currentStage === 'leaders' && leaders.length < 2 && !leaders.some(l => l.id === card.id)) {
             console.log('Auto-adding leader on click');
             addLeader(card);
+        }
+        
+        // Auto-add base when clicked (if in base stage and no base is selected)
+        if (currentStage === 'base' && !base && card.type === 'Base') {
+            console.log('Auto-adding base on click');
+            setBaseContext(card);
         }
     };
 
@@ -174,7 +221,7 @@ export default function DeckBuilder() { // Changed to default export
 
     // Handle adding card to deck
     const handleAddToDeck = (card: CardType) => {
-        console.log(`Adding ${card.type} to deck:`, card.name);
+        console.log(`Adding ${card.type} to deck:`, card.name, 'Current stage:', currentStage);
 
         if (currentStage === 'leaders') {
             if (leaders.length < 2 && !leaders.some(l => l.id === card.id)) {
@@ -184,8 +231,12 @@ export default function DeckBuilder() { // Changed to default export
                 console.log('Not adding leader - already have 2 or leader already selected');
             }
         } else if (currentStage === 'base') {
-            console.log('Setting base');
-            setBaseContext(card);
+            if (card.type === 'Base') {
+                console.log('Setting base');
+                setBaseContext(card);
+            } else {
+                console.log('Not setting base - wrong card type:', card.type);
+            }
         } else {
             console.log('Adding card to deck');
             addCard(card);
@@ -272,7 +323,7 @@ export default function DeckBuilder() { // Changed to default export
                         </Button>
 
                         <Button
-                            onClick={() => setCurrentStage('base')} // Changed to use setCurrentStage
+                            onClick={() => setCurrentStage('base')}
                             disabled={leaders.length < 2}
                             className="bg-gradient-to-r from-orange-600 to-orange-400 text-white hover:opacity-90"
                         >
@@ -331,7 +382,7 @@ export default function DeckBuilder() { // Changed to default export
                     {/* Navigation Buttons */}
                     <div className="mt-6 flex justify-between">
                         <Button
-                            onClick={() => setCurrentStage('leaders')}  // Changed to use setCurrentStage
+                            onClick={() => setCurrentStage('leaders')}
                             variant="outline"
                         >
                             Back
@@ -345,7 +396,7 @@ export default function DeckBuilder() { // Changed to default export
                         </Button>
 
                         <Button
-                            onClick={() => setCurrentStage('cards')} // Changed to use setCurrentStage
+                            onClick={() => setCurrentStage('cards')}
                             disabled={!base}
                             className="bg-gradient-to-r from-orange-600 to-orange-400 text-white hover:opacity-90"
                         >
@@ -411,7 +462,7 @@ export default function DeckBuilder() { // Changed to default export
                     {/* Navigation Buttons */}
                     <div className="mt-6 flex justify-between">
                         <Button
-                            onClick={() => setCurrentStage('base')}  // Changed to use setCurrentStage
+                            onClick={() => setCurrentStage('base')}
                             variant="outline"
                         >
                             Back
@@ -536,10 +587,14 @@ export default function DeckBuilder() { // Changed to default export
                         <Card className="bg-gray-900 border-gray-800 mb-6 overflow-hidden">
                             <CardHeader className="border-b border-gray-800">
                                 <div className="flex items-center justify-between">
-                                    <CardTitle className="text-xl">Card Browser</CardTitle>
+                                    <CardTitle className="text-xl">
+                                        {currentStage === 'leaders' ? 'Select Leaders' : 
+                                        currentStage === 'base' ? 'Select Base' : 
+                                        'Add Cards to Deck'}
+                                    </CardTitle>
 
                                     {/* Search and Filter Controls */}
-                                    <div className="flex space-x-2">
+                                    <div className="flex space-x-2 items-center">
                                         <input
                                             type="text"
                                             placeholder="Search cards..."
@@ -555,12 +610,30 @@ export default function DeckBuilder() { // Changed to default export
                                                 onChange={(e) => setCardTypeFilter(e.target.value)}
                                             >
                                                 <option value="">All Types</option>
-                                                <option value="Unit">Units</option>
-                                                <option value="Event">Events</option>
-                                                <option value="Upgrade">Upgrades</option>
-                                                <option value="Plot">Plots</option>
+                                                {currentStage === 'cards' && (
+                                                    <>
+                                                        <option value="Unit">Units</option>
+                                                        <option value="Event">Events</option>
+                                                        <option value="Upgrade">Upgrades</option>
+                                                        <option value="Plot">Plots</option>
+                                                    </>
+                                                )}
                                                 {currentStage === 'base' && <option value="Base">Bases</option>}
                                             </select>
+                                        )}
+                                        
+                                        {currentStage === 'cards' && (
+                                            <div className="flex items-center ml-2">
+                                                <label className="flex items-center cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={showAllCards}
+                                                        onChange={() => setShowAllCards(!showAllCards)}
+                                                        className="mr-2 h-4 w-4 rounded border-gray-700 bg-gray-700 text-purple-600 focus:ring-purple-500"
+                                                    />
+                                                    <span className="text-sm text-gray-300">Show all cards</span>
+                                                </label>
+                                            </div>
                                         )}
                                     </div>
                                 </div>
@@ -585,7 +658,21 @@ export default function DeckBuilder() { // Changed to default export
                                             onCardClick={handleCardClick}
                                             onDoubleClick={handleCardDoubleClick}
                                             selectedCardId={selectedCard?.id}
-                                            isCompatible={currentStage === 'cards' ? isCardInAspect : undefined}
+                                            isCompatible={(card) => {
+                                                // Always compatible in leader and base stages
+                                                if (currentStage === 'leaders' || currentStage === 'base') {
+                                                    return true;
+                                                }
+                                                
+                                                // For cards stage, check aspect compatibility
+                                                if (currentStage === 'cards' && leaders.length === 2 && base) {
+                                                    // If showing all cards, still identify which are in/out of aspect
+                                                    return isCardInAspect(card);
+                                                }
+                                                
+                                                // Default to compatible
+                                                return true;
+                                            }}
                                             currentStage={currentStage}
                                         />
                                     </div>

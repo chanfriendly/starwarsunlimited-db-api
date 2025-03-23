@@ -166,11 +166,12 @@ export function CardDetail({
               <Button 
                 onClick={() => onAddToDeck(card)}
                 className="w-full bg-gradient-to-r from-purple-500 to-pink-500"
-                disabled={!isCompatible}
+                disabled={!isCompatible || (currentStage === 'base' && card.type !== 'Base')}
               >
                 {!isCompatible ? 'Incompatible with Deck' : 
                   currentStage === 'leaders' ? 'Add as Leader' : 
-                  currentStage === 'base' ? 'Add as Base' : 'Add to Deck'}
+                  currentStage === 'base' ? (card.type === 'Base' ? 'Add as Base' : 'Not a Base Card') : 
+                  'Add to Deck'}
               </Button>
             )}
           </div>
