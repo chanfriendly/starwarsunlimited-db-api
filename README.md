@@ -18,7 +18,8 @@ Our mission is to support growth for the Star Wars Unlimited community, offering
 - Advanced card search and filtering
 - AI-powered deck analysis and playtesting (in development)
 
-![Star Wars Unlimited Interface](https://github.com/user-attachments/assets/c53ce794-f20e-41b5-8e98-444eb34203b9)
+<img width="1293" alt="Screenshot 2025-03-23 at 1 05 35 PM" src="https://github.com/user-attachments/assets/b35a8216-c01c-4b5e-a5b7-350850decfef" />
+<img width="1333" alt="Screenshot 2025-03-23 at 1 06 07 PM" src="https://github.com/user-attachments/assets/0f8ecea8-f18d-4d8a-b54c-3df901fe2f37" />
 
 ### Current Status (2025-03-23)
 
