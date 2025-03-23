@@ -6,43 +6,48 @@ SWU Deck Builder is a comprehensive tool for Star Wars Unlimited players, design
 
 In the Twin Suns format, players build decks with distinctive rules:
 
-- Each deck is built around a central Leader card (similar to a Commander in MTG)
+- Each deck is built around two central Leader cards (similar to Commander in MTG)
 - Only one copy of each card is allowed in a deck (unlike standard Star Wars Unlimited rules of 3-4 copies)
-- The Leader defines the deck's core strategy and sets the deck's aspectual identity
+- The Leaders define the deck's core strategy and set the deck's aspectual identity
 
 ## Project Goals
-My mission is to support growth for the Star Wars Unlimited community, offering:
+Our mission is to support growth for the Star Wars Unlimited community, offering:
 
-- Comprehensive card database
-- Intuitive deck-building interface
+- Comprehensive card database with full card details and images
+- Intuitive deck-building interface with aspect compatibility checking
 - Advanced card search and filtering
-- Future AI-powered deck analysis and playtesting
+- AI-powered deck analysis and playtesting (in development)
 
-![image](https://github.com/user-attachments/assets/c53ce794-f20e-41b5-8e98-444eb34203b9)
+![Star Wars Unlimited Interface](https://github.com/user-attachments/assets/c53ce794-f20e-41b5-8e98-444eb34203b9)
 
-
-### Recent Improvements (2024-02-26)
+### Current Status (2025-03-23)
 
 The project has made significant progress with several key improvements:
 
-1. **Deck Builder Functionality**:
-   - Implemented multi-stage deck building workflow (Leaders → Base → Cards)
-   - Added aspect compatibility checking for proper deck building rules
-   - Created visual indicators for card selection and compatibility status
-   - Implemented flip view for double-sided leader cards
-   - Added deck statistics and validation
+1. **Complete Backend Development**:
+   - Robust SQLite database with detailed card schema
+   - Full card data import from official Star Wars Unlimited API
+   - RESTful API endpoints for cards, decks, and aspects
+   - Authentication system with JWT implementation
+   - Vector database integration for semantic search capabilities
 
-2. **User Interface Enhancements**:
-   - Improved card detail display with aspect color coding
-   - Enhanced card grid with selection indicators and type badges
-   - Added responsive layout with resizable panels
-   - Implemented stage progress indicators in deck builder
+2. **Advanced Deck Builder Functionality**:
+   - Multi-stage deck building workflow (Leaders → Base → Cards)
+   - Intelligent aspect compatibility checking based on Twin Suns format rules
+   - Visual indicators for card selection and compatibility status
+   - Interactive card detail view with flip functionality for double-sided leader cards
+   - Real-time deck statistics and validation
 
-3. **Technical Improvements**:
-   - Fixed TypeScript errors and improved type safety
-   - Enhanced component organization and reusability
-   - Improved error handling and state management
-   - Added visual feedback for user actions
+3. **User Interface Enhancements**:
+   - Responsive grid layout with card filtering and search
+   - Detailed card view with aspect color coding
+   - Card grid with selection indicators and type badges
+   - Stage progress indicators in deck builder
+   - Dark mode optimized interface
+
+4. **AI Integration (In Progress)**:
+   - Vector database setup for semantic card relationship analysis
+   - Foundation for AI deck suggestions and playtesting
 
 ## Features
 
@@ -54,34 +59,34 @@ The project has made significant progress with several key improvements:
 - Includes price history tracking capability
 - Provides detailed logging of the database building process
 - Rate-limited API access to be respectful of the server
+- User authentication and authorization
 
 ### Frontend
 - Modern, responsive card browser interface
 - Filter cards by type, aspect, and other attributes
-- Search cards by name
+- Search cards by name and text
 - Detailed card view with full card information
-- Dark mode support
+- Multi-stage deck building process
+- Compatibility checking for proper deck construction
+- Dark mode interface
+
+### AI Features (In Development)
+- Semantic card analysis using vector database
+- Deck suggestion engine based on card synergies
+- AI opponent for deck playtesting
 
 ### Technical Architecture
 
 #### Database
 
 - SQLite for structured card data storage
-- Qdrant Vector Database for advanced semantic search (future AI features)
+- Qdrant Vector Database for advanced semantic search capabilities
 
 #### Technologies
 
-- Frontend: Next.js, React
-- Backend: FastAPI
-- Database: SQLite, Qdrant
-
-### Upcoming Features
-
-- Deck saving and sharing
-- User profiles
-- AI-powered deck suggestions
-- Deck strategy analysis
-- Playtesting against AI opponents
+- Frontend: Next.js 15, React 18, Tailwind CSS 4
+- Backend: FastAPI, SQLite, Qdrant
+- Authentication: JWT with bcrypt password hashing
 
 ## Getting Started
 
@@ -116,7 +121,7 @@ npm install
 ```bash
 cd backend
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-python -m src.database.build_database
+python -m src.api.import_swu_data
 ```
 
 Note: The database will be created in your home directory at `~/.swu/swu_cards.db`
@@ -134,86 +139,76 @@ This will start:
 
 ## Current Status and Known Issues
 
-The project is actively under development. Please see the change log for more detailed progress notes. Current limitations include:
-
+The project is actively under development. Current limitations include:
 
 ### Incomplete Functionality
 
-- Deck building is not fully implemented
-- Cannot save or share decks
-- No user authentication
-
+- Deck saving and sharing functionality needs to be completed
+- User profile management is partially implemented
+- AI features are still in early development
 
 ### User Interface
 
-- Homepage is not yet user-friendly
-- Limited navigation options, mainly /cards and /deck-builder
+- Card grid layout needs optimization for variable card sizes
+- Mobile responsiveness improvements needed for deck builder
 
-
-Features in Development
+### Features in Active Development
 
 - AI deck suggestion system
 - Comprehensive deck analysis
-- Full vector database integration
-- Playtesting decks
+- Full vector database integration for semantic card relationships
+- Playtesting against AI opponents
 
+## Development Roadmap
 
-## Future Development
+### Phase 1: Core Functionality (Completed)
+- ✅ Card database with comprehensive data model
+- ✅ Card browser with filtering and search
+- ✅ Multi-stage deck builder
+- ✅ Aspect compatibility checking
+- ✅ Leader card flip view
 
-### Immediate Next Steps
+### Phase 2: User Management (In Progress)
+- ✅ Authentication backend
+- ⏳ User profile frontend
+- ⏳ Deck saving and sharing
+- ⏳ Deck versioning and history
 
-1. **Fix Card Grid Layout**
-   - Refactor the card grid component to ensure proper spacing and prevent overlap
-   - Optimize for different screen sizes and card densities
-   - Implement virtualization for better performance with large card collections
+### Phase 3: AI Integration (Starting)
+- ✅ Vector database setup
+- ⏳ Semantic card relationship analysis
+- ⏳ AI deck suggestions
+- ⏳ Deck performance predictions
 
-2. **Create Decks Page**
-   - Develop a dedicated page for browsing and managing saved decks
-   - Implement deck list with filtering and sorting capabilities
-   - Add deck preview with statistics and aspect breakdown
-   - Create interface for loading decks into the deck builder
+### Phase 4: Advanced AI Features (Planned)
+- ⏳ AI opponent implementation
+- ⏳ Game state tracking
+- ⏳ Strategy analysis
+- ⏳ Machine learning integration
 
-3. **Improve Navigation**
-   - Enhance main navigation with better styling and mobile responsiveness
-   - Add breadcrumbs for improved context within the application
-   - Improve active state indicators for current section
+## AI Feature Details
 
-4. **Enhance Deck Builder**
-   - Ensure leader cards always show flip side in detail view
-   - Add deck saving and loading functionality
-   - Implement deck sharing via URL
-   - Add deck validation with clear feedback
+The project incorporates advanced AI capabilities to enhance deck building and gameplay:
 
-5. **User Authentication**
-   - Implement user registration and login
-   - Add profile pages for user information
-   - Create persistent deck storage for logged-in users
+1. **Vector Database Integration**
+   - Cards are converted to vector embeddings capturing their semantic meaning
+   - Rulebook sections are indexed for contextual understanding
+   - Enables semantic search and relationship discovery
 
-### AI Features Roadmap
+2. **Deck Building Assistant**
+   - AI suggests cards based on synergies with selected leaders
+   - Identifies optimal aspect combinations
+   - Recommends cards based on play style preferences
 
-The project plans to integrate advanced AI capabilities to enhance deck building and game analysis. This development will proceed in several phases:
+3. **Game State Analysis**
+   - Tracks and evaluates board states
+   - Analyzes card interactions and synergies
+   - Provides strategic recommendations
 
-#### Phase 1: Intelligent Card Analysis
-- Implementation of vector search for semantic card relationships ✅
-- AI-powered deck recommendations based on play patterns and card synergies
-- Advanced filtering based on card mechanics and strategic roles
-
-#### Phase 2: Deck Building Assistant
-- Automated deck analysis for resource curve and strategy identification
-- Synergy suggestions for deck improvement
-- Performance predictions based on card combinations
-
-#### Phase 3: Game State Analysis
-- Implementation of game state tracking and analysis
-- Basic AI opponent for deck testing
-- Play pattern recognition and strategic suggestions
-
-#### Phase 4: Advanced AI Features
-- Deep learning integration for sophisticated strategy analysis
-- Real-time play suggestions
-- Deck performance optimization
-
-Each phase will build upon the existing functionality while maintaining stability and usability. Detailed technical specifications for each phase will be published as implementation begins.
+4. **AI Opponent**
+   - Simulates gameplay for deck testing
+   - Uses reinforcement learning to improve play patterns
+   - Adapts to different deck archetypes and strategies
 
 ## Technical Details
 
@@ -238,23 +233,20 @@ Each card entry includes:
   - Release data
   - Current price data
 
-### Technologies
+### Vector Database
 
-- Backend:
-  - FastAPI
-  - SQLite
-  - Python 3.8+
-  - SQLAlchemy
-
-- Frontend:
-  - Next.js 13
-  - React
-  - Tailwind CSS
-  - shadcn/ui components
+The Qdrant vector database stores:
+- Card embeddings generated from card text and attributes
+- Rulebook section embeddings for context
+- Relationships between cards based on semantic similarity
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Notes
 
@@ -263,4 +255,4 @@ Please be respectful when using the API:
 - Cache data when possible
 - Don't hammer the API with unnecessary requests
 
-_Disclaimer: This project is a community effort and is not officially affiliated with Star Wars Unlimited or Lucasfilm. It is created by a Star Wars Unlimited player, for players. This is also an educational project for me, so please understand my limitations._
+_Disclaimer: This project is a community effort and is not officially affiliated with Star Wars Unlimited or Lucasfilm. It is created by a Star Wars Unlimited player, for players._
