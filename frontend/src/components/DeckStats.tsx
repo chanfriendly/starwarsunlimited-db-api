@@ -97,11 +97,11 @@ export function DeckStats() {
   return (
     <Card className="bg-gray-900 border-gray-800">
       <CardHeader className="border-b border-gray-800">
-        <CardTitle className="text-xl">Deck Statistics</CardTitle>
+        <CardTitle className="text-xl text-white">Deck Statistics</CardTitle>
       </CardHeader>
       <CardContent className="p-4">
         <div className="mb-4">
-          <h3 className="text-lg font-medium mb-2">Card Count</h3>
+        <h3 className="text-lg text-white font-medium mb-2">Card Count</h3>
           <div className="flex items-center">
             <div className="w-full bg-gray-800 rounded-full h-4">
               <div 
@@ -116,7 +116,7 @@ export function DeckStats() {
         <div className="grid grid-cols-2 gap-4">
           {/* Card types distribution */}
           <div>
-            <h3 className="text-lg font-medium mb-2">Card Types</h3>
+          <h3 className="text-lg text-white font-medium mb-2">Card Types</h3>
             <div className="space-y-2">
               {Object.entries(typeStats).map(([type, count]) => (
                 <div key={type} className="flex items-center justify-between">
@@ -131,7 +131,7 @@ export function DeckStats() {
 
           {/* Energy cost distribution */}
           <div>
-            <h3 className="text-lg font-medium mb-2">Energy Cost</h3>
+          <h3 className="text-lg text-white font-medium mb-2">Energy Cost</h3>
             <div className="space-y-2">
               {Object.entries(costStats)
                 .sort((a, b) => {

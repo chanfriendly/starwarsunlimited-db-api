@@ -1,3 +1,4 @@
+/* src/app/globals.css */
 @import "tailwindcss";
 
 :root {
@@ -23,4 +24,105 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Twin Suns Gradient Definition */
+.twin-suns-gradient {
+  background-image: linear-gradient(to right, #a855f7, #ec4899, #f97316);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  color: transparent;
+  display: inline;
+  background-color: transparent !important;
+}
+
+/* Ensure the gradient is always applied with high specificity */
+h1 .twin-suns-gradient,
+h2 .twin-suns-gradient,
+.navbar .twin-suns-gradient,
+span.twin-suns-gradient {
+  background-image: linear-gradient(to right, #a855f7, #ec4899, #f97316) !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  background-clip: text !important;
+  color: transparent !important;
+}
+
+/* Custom utility classes for text contrast - Tailwind-friendly */
+.section-heading {
+  @apply text-white font-medium;
+}
+
+.filter-label {
+  @apply text-gray-300 font-medium;
+}
+
+.stats-label {
+  @apply text-gray-300 font-medium;
+}
+
+/* Ensure specific headings have proper contrast */
+.card-browser-heading {
+  @apply text-white;
+}
+
+.deck-builder-heading {
+  @apply text-white;
+}
+
+.card-type-heading {
+  @apply text-white;
+}
+
+.aspects-heading {
+  @apply text-white;
+}
+
+.resource-cost-heading {
+  @apply text-white;
+}
+
+.energy-cost-heading {
+  @apply text-white;
+}
+
+.your-deck-heading {
+  @apply text-white;
+}
+
+.deck-stats-heading {
+  @apply text-white;
+}
+
+.card-count-heading {
+  @apply text-white;
+}
+
+/* Additional CSS for better contrast across the site */
+h1, h2, h3, h4, h5, h6 {
+  @apply text-white;
+}
+
+span, p, div {
+  @apply text-gray-300;
+}
+
+button, a {
+  @apply text-white;
+}
+
+/* Override for any text that still has contrast issues */
+.text-fix {
+  @apply text-white;
+}
+
+/* Force visible text on dark backgrounds */
+.dark-bg-text {
+  color: white !important; 
+}
+
+/* For any sections that were previously problematic */
+.force-visible {
+  color: white !important;
 }
