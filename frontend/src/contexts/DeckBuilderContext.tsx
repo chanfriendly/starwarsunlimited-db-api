@@ -21,6 +21,7 @@ interface DeckBuilderContextType {
   setBase: (base: Card | null) => void;
   addCard: (card: Card) => void;
   removeCard: (cardId: string) => void;
+  isCardInDeck: (cardId: string) => boolean;
   updateCardQuantity: (cardId: string, quantity: number) => void;
   setDeckName: (name: string) => void;
   progressStage: () => void;
@@ -36,7 +37,7 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
   const [leaders, setLeaders] = useState<Card[]>([]);
   const [base, setBaseState] = useState<Card | null>(null);
   const [deckCards, setDeckCards] = useState<DeckItem[]>([]);
-  const [deckName, setDeckName] = useState('New Deck');
+  const [deckName, setDeckNameState] = useState('New Deck');
 
   // Function to directly set the current stage
   const setCurrentStage = (stage: DeckBuildingStage) => {
@@ -49,7 +50,13 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
   };
 
   const addLeader = (leader: Card) => {
-    if (leaders.length < 2 && !leaders.some(l => l.id === leader.id)) {
+    // Check if this leader is already in the deck
+    if (leaders.some(l => l.id === leader.id)) {
+      console.log(`Leader ${leader.name} is already in the deck`);
+      return;
+    }
+    
+    if (leaders.length < 2) {
       setLeaders([...leaders, leader]);
       
       // Auto-progress if we've selected 2 leaders
@@ -78,26 +85,61 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const addCard = (card: Card) => {
-    const existingCard = deckCards.find(item => item.card.id === card.id);
-    
-    if (existingCard) {
-      updateCardQuantity(card.id, existingCard.quantity + 1);
-    } else {
-      setDeckCards([...deckCards, { card, quantity: 1 }]);
+  // Check if a card is already in the deck (leaders, base, or regular cards)
+  const isCardInDeck = (cardId: string): boolean => {
+    // Check if it's a leader
+    if (leaders.some(leader => leader.id === cardId)) {
+      return true;
     }
+    
+    // Check if it's the base
+    if (base && base.id === cardId) {
+      return true;
+    }
+    
+    // Check if it's a regular card
+    return deckCards.some(item => item.card.id === cardId);
+  };
+
+  // Modified to enforce Twin Suns format rule (no duplicates)
+  const addCard = (card: Card) => {
+    // First check if the card is already in the deck (leaders, base, or regular cards)
+    if (isCardInDeck(card.id)) {
+      console.log(`Card ${card.name} is already in the deck and cannot be added again in Twin Suns format`);
+      return;
+    }
+    
+    // In Twin Suns format, we always add with quantity 1
+    setDeckCards([...deckCards, { card, quantity: 1 }]);
   };
 
   const removeCard = (cardId: string) => {
     setDeckCards(deckCards.filter(item => item.card.id !== cardId));
   };
 
+  // This function is mostly for compatibility with non-Twin Suns formats
+  // In Twin Suns, we generally won't use this as quantities should always be 1
   const updateCardQuantity = (cardId: string, quantity: number) => {
+    // In Twin Suns format, quantity should always be 1 for regular cards
+    const maxQuantity = 1;
+    const actualQuantity = Math.min(quantity, maxQuantity);
+    
+    if (actualQuantity === 0) {
+      // If quantity is set to 0, remove the card
+      removeCard(cardId);
+      return;
+    }
+    
     setDeckCards(
       deckCards.map(item => 
-        item.card.id === cardId ? { ...item, quantity } : item
+        item.card.id === cardId ? { ...item, quantity: actualQuantity } : item
       )
     );
+  };
+
+  // Update the setDeckName function to properly update state
+  const setDeckName = (name: string) => {
+    setDeckNameState(name);
   };
 
   const progressStage = () => {
@@ -120,7 +162,7 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
     setLeaders([]);
     setBaseState(null);
     setDeckCards([]);
-    setDeckName('New Deck');
+    setDeckNameState('New Deck');
     setCurrentStageState('leaders');
   };
 
@@ -169,7 +211,7 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
     // of the secondary aspects in the deck, OR has no secondary aspects at all
     
     // Get the secondary aspects from the deck
-    const secondaryAspects = ['Command', 'Vigilance', 'Cunning', 'Aggression'];
+    const secondaryAspects = ['Command', 'Vigilance', 'Cunning', 'Aggression', 'Force'];
     const deckSecondaryAspects = secondaryAspects.filter(aspect => deckAspects[aspect] > 0);
     
     // If deck has no secondary aspects, all cards pass this check
@@ -209,6 +251,7 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
         setBase,
         addCard,
         removeCard,
+        isCardInDeck,
         updateCardQuantity,
         setDeckName,
         progressStage,

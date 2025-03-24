@@ -3,6 +3,18 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import path from 'path';
 import os from 'os';
+import { 
+  Database, 
+  Card, 
+  DeckRow, 
+  DeckLeaderRow, 
+  DeckBaseRow, 
+  DeckCardRow,
+  AspectResults,
+  KeywordResults,
+  DeckLeaderResults,
+  DeckCardResults
+} from '@/lib/database';
 
 // Type for the deck update payload
 interface DeckUpdateRequest {
@@ -16,7 +28,7 @@ interface DeckUpdateRequest {
 }
 
 // Helper function to get the database connection
-async function getDatabase() {
+async function getDatabase(): Promise<Database> {
   // Use the database in the user's home directory
   const homeDir = os.homedir();
   const dbPath = path.join(homeDir, '.swu', 'swu_cards.db');
@@ -31,21 +43,21 @@ async function getDatabase() {
 }
 
 // Helper function to get card details from the database
-async function getCardById(db, cardId) {
-  const card = await db.get('SELECT * FROM cards WHERE id = ?', cardId);
+async function getCardById(db: Database, cardId: string): Promise<Card | null> {
+  const card = await db.get<Card>('SELECT * FROM cards WHERE id = ?', cardId);
   
   if (!card) {
     return null;
   }
   
   // Get card aspects
-  const aspects = await db.all(
+  const aspects = await db.all<AspectResults>(
     'SELECT aspect_name, aspect_color FROM card_aspects WHERE card_id = ?', 
     cardId
   );
   
   // Get card keywords
-  const keywords = await db.all(
+  const keywords = await db.all<KeywordResults>(
     'SELECT keyword FROM card_keywords WHERE card_id = ?', 
     cardId
   );
@@ -53,47 +65,47 @@ async function getCardById(db, cardId) {
   // Return complete card with relationships
   return {
     ...card,
-    aspects,
-    keywords: keywords.map(row => row.keyword)
+    aspects: aspects,
+    keywords: keywords.map(item => item.keyword)
   };
 }
 
 // Helper function to get a complete deck with card details
-async function getCompleteDeck(db, deckId) {
+async function getCompleteDeck(db: Database, deckId: string): Promise<any> {
   // Get the deck
-  const deck = await db.get('SELECT * FROM decks WHERE id = ?', deckId);
+  const deck = await db.get<DeckRow>('SELECT * FROM decks WHERE id = ?', deckId);
   
   if (!deck) {
     return null;
   }
   
   // Get leaders
-  const leaderRows = await db.all(
+  const leaderRows = await db.all<DeckLeaderResults>(
     'SELECT * FROM deck_leaders WHERE deck_id = ? ORDER BY position', 
     deckId
   );
   
   // Get base
-  const baseRow = await db.get(
+  const baseRow = await db.get<DeckBaseRow>(
     'SELECT * FROM deck_bases WHERE deck_id = ?', 
     deckId
   );
   
   // Get cards
-  const cardRows = await db.all(
+  const cardRows = await db.all<DeckCardResults>(
     'SELECT * FROM deck_cards WHERE deck_id = ?', 
     deckId
   );
   
   // Get full details for each card
   const leaders = await Promise.all(
-    leaderRows.map(async row => await getCardById(db, row.card_id))
+    leaderRows.map(async (row) => await getCardById(db, row.card_id))
   );
   
   const base = baseRow ? await getCardById(db, baseRow.card_id) : null;
   
   const cards = await Promise.all(
-    cardRows.map(async row => ({
+    cardRows.map(async (row) => ({
       card: await getCardById(db, row.card_id),
       quantity: row.quantity
     }))
@@ -146,7 +158,7 @@ export async function PUT(
     const body: DeckUpdateRequest = await request.json();
     
     // Check if the deck exists
-    const existingDeck = await db.get('SELECT * FROM decks WHERE id = ?', id);
+    const existingDeck = await db.get<DeckRow>('SELECT * FROM decks WHERE id = ?', id);
     
     if (!existingDeck) {
       return NextResponse.json({ error: 'Deck not found' }, { status: 404 });
@@ -239,7 +251,7 @@ export async function DELETE(
     const id = params.id;
     
     // Check if the deck exists
-    const existingDeck = await db.get('SELECT * FROM decks WHERE id = ?', id);
+    const existingDeck = await db.get<DeckRow>('SELECT * FROM decks WHERE id = ?', id);
     
     if (!existingDeck) {
       return NextResponse.json({ error: 'Deck not found' }, { status: 404 });

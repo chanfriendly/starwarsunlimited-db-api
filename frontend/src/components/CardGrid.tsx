@@ -9,8 +9,10 @@ interface CardGridProps {
   onCardClick: (card: Card) => void;
   selectedCardId?: string;
   isCompatible?: (card: Card) => boolean;
-  onDoubleClick?: (card: Card) => void; // Add double-click handler
-  currentStage?: 'leaders' | 'base' | 'cards'; // Add current stage
+  isInDeck?: (cardId: string) => boolean;
+  onDoubleClick?: (card: Card) => void;
+  currentStage?: 'leaders' | 'base' | 'cards';
+  hideCardsInDeck?: boolean;
 }
 
 export function CardGrid({ 
@@ -18,8 +20,10 @@ export function CardGrid({
   onCardClick, 
   selectedCardId, 
   isCompatible,
+  isInDeck,
   onDoubleClick,
-  currentStage = 'cards'
+  currentStage = 'cards',
+  hideCardsInDeck = false
 }: CardGridProps) {
   
   // Handle double click to directly add card to deck
@@ -28,12 +32,18 @@ export function CardGrid({
       onDoubleClick(card);
     }
   };
+
+  // Filter out cards that should be hidden
+  const visibleCards = hideCardsInDeck && isInDeck 
+    ? cards.filter(card => !isInDeck(card.id)) 
+    : cards;
   
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-2">
-      {cards.map((card) => {
+      {visibleCards.map((card) => {
         const isSelected = card.id === selectedCardId;
         const compatible = isCompatible ? isCompatible(card) : true;
+        const inDeck = isInDeck ? isInDeck(card.id) : false;
         
         return (
           <div
@@ -43,6 +53,7 @@ export function CardGrid({
               "border-2 flex-shrink-0", 
               isSelected ? "border-purple-500" : "border-gray-800",
               !compatible && "opacity-60",
+              inDeck && "opacity-50",
               "hover:scale-105"
             )}
             onClick={() => onCardClick(card)}
@@ -53,7 +64,10 @@ export function CardGrid({
                 <img
                   src={card.image_uri}
                   alt={card.name}
-                  className="w-full h-full object-contain"
+                  className={cn(
+                    "w-full h-full object-contain",
+                    inDeck && "grayscale"
+                  )}
                   loading="lazy"
                 />
               ) : (
@@ -95,6 +109,15 @@ export function CardGrid({
                   Out of Aspect
                 </div>
               )}
+
+              {/* Already in Deck indicator */}
+              {inDeck && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+                  <div className="bg-red-600 text-white text-xs font-bold py-1 px-3 rounded-full transform -rotate-12">
+                    Already in Deck
+                  </div>
+                </div>
+              )}
               
               {/* Card type badge */}
               <div className="absolute bottom-1 left-1 bg-black/70 text-white text-xs py-0.5 px-1 rounded-full">
@@ -108,6 +131,14 @@ export function CardGrid({
           </div>
         );
       })}
+
+      {visibleCards.length === 0 && (
+        <div className="col-span-full py-16 text-center text-gray-500">
+          {hideCardsInDeck && isInDeck ? 
+            "All available cards have been added to your deck." : 
+            "No cards found matching your criteria."}
+        </div>
+      )}
     </div>
   );
 }

@@ -3,9 +3,19 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import path from 'path';
 import os from 'os';
+import { 
+  Database, 
+  Card, 
+  CollectionItemRow, 
+  CountResponse, 
+  AspectResults,
+  KeywordResults,
+  CardResults,
+  CollectionItemResults
+} from '@/lib/database';
 
 // Helper function to get the database connection
-async function getDatabase() {
+async function getDatabase(): Promise<Database> {
   // Use the database in the user's home directory
   const homeDir = os.homedir();
   const dbPath = path.join(homeDir, '.swu', 'swu_cards.db');
@@ -30,21 +40,21 @@ async function getDatabase() {
 }
 
 // Helper function to get card details from the database
-async function getCardById(db, cardId) {
-  const card = await db.get('SELECT * FROM cards WHERE id = ?', cardId);
+async function getCardById(db: Database, cardId: string): Promise<Card | null> {
+  const card = await db.get<Card>('SELECT * FROM cards WHERE id = ?', cardId);
   
   if (!card) {
     return null;
   }
   
   // Get card aspects
-  const aspects = await db.all(
+  const aspects = await db.all<AspectResults>(
     'SELECT aspect_name, aspect_color FROM card_aspects WHERE card_id = ?', 
     cardId
   );
   
   // Get card keywords
-  const keywords = await db.all(
+  const keywords = await db.all<KeywordResults>(
     'SELECT keyword FROM card_keywords WHERE card_id = ?', 
     cardId
   );
@@ -52,22 +62,24 @@ async function getCardById(db, cardId) {
   // Return complete card with relationships
   return {
     ...card,
-    aspects,
-    keywords: keywords.map(row => row.keyword)
+    aspects: aspects,
+    keywords: keywords.map(item => item.keyword)
   };
 }
 
 // For simplicity, we'll seed some collection data if none exists
-async function seedCollectionIfEmpty(db, userId) {
+async function seedCollectionIfEmpty(db: Database, userId: string): Promise<void> {
   // Check if the user has any cards in their collection
-  const count = await db.get(
+  const count = await db.get<CountResponse>(
     'SELECT COUNT(*) as count FROM user_collection WHERE user_id = ?',
     userId
   );
   
-  if (count.count === 0) {
+  if (count?.count === 0) {
     // Get some card IDs to add to the collection
-    const cards = await db.all('SELECT id FROM cards LIMIT 10');
+    const cards = await db.all<CardResults>(
+      'SELECT id FROM cards LIMIT 10'
+    );
     
     // Add each card to the collection with a random quantity
     for (const card of cards) {
@@ -91,14 +103,14 @@ export async function GET() {
     await seedCollectionIfEmpty(db, userId);
     
     // Get the user's collection
-    const collectionRows = await db.all(
+    const collectionRows = await db.all<CollectionItemResults>(
       'SELECT card_id, count FROM user_collection WHERE user_id = ?',
       userId
     );
     
     // Get full details for each card
     const collection = await Promise.all(
-      collectionRows.map(async row => ({
+      collectionRows.map(async (row) => ({
         card: await getCardById(db, row.card_id),
         count: row.count
       }))
@@ -130,7 +142,7 @@ export async function POST(request: Request) {
     }
     
     // Check if the card exists in the collection
-    const existingItem = await db.get(
+    const existingItem = await db.get<CollectionItemRow>(
       'SELECT * FROM user_collection WHERE user_id = ? AND card_id = ?',
       [userId, card_id]
     );

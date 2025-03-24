@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { CardGrid } from '@/components/CardGrid';
@@ -10,16 +10,21 @@ import { LeaderSelection } from '@/components/LeaderSelection';
 import { DeckStats } from '@/components/DeckStats';
 import SaveDeckDialog from '@/components/SaveDeckDialog';
 import { useDeckBuilder } from '@/contexts/DeckBuilderContext';
-import { Card as CardType, fetchCards, fetchBaseCards, fetchRegularCards } from '@/lib/api';
+import { Card as CardType, fetchCards, fetchBaseCards, fetchRegularCards, fetchDeckById } from '@/lib/api';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 
 export default function DeckBuilder() {
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const deckIdParam = searchParams.get('deckId');
     
     // State
     const [cards, setCards] = useState<CardType[]>([]);
     const [filteredCards, setFilteredCards] = useState<CardType[]>([]);
     const [selectedCard, setSelectedCard] = useState<CardType | null>(null);
     const [loading, setLoading] = useState(true);
+    const [loadingDeck, setLoadingDeck] = useState(!!deckIdParam);
     const [error, setError] = useState<string | null>(null);
     const [cardTypeFilter, setCardTypeFilter] = useState<string>('');
     const [searchQuery, setSearchQuery] = useState<string>('');
@@ -27,6 +32,7 @@ export default function DeckBuilder() {
     const [loadingBaseCards, setLoadingBaseCards] = useState(false);
     const [showAllCards, setShowAllCards] = useState<boolean>(false);
     const [showSaveDialog, setShowSaveDialog] = useState(false);
+    const [hideCardsInDeck, setHideCardsInDeck] = useState(true);
 
     // Use the DeckBuilder context with the direct setCurrentStage function
     const {
@@ -39,11 +45,61 @@ export default function DeckBuilder() {
         setBase: setBaseContext,
         addCard,
         removeCard,
+        isCardInDeck,
         isCardInAspect,
         resetDeck,
         setDeckName,
         setCurrentStage: contextSetCurrentStage
     } = useDeckBuilder();
+
+    // Load existing deck if deckId is provided
+    useEffect(() => {
+        if (deckIdParam) {
+            const loadExistingDeck = async () => {
+                try {
+                    setLoadingDeck(true);
+                    const deck = await fetchDeckById(deckIdParam);
+                    
+                    if (!deck) {
+                        setError('Deck not found');
+                        return;
+                    }
+                    
+                    // Reset current deck
+                    resetDeck();
+                    
+                    // Set deck name
+                    setDeckName(deck.name);
+                    
+                    // Add leaders
+                    deck.leaders.forEach(leader => {
+                        addLeader(leader);
+                    });
+                    
+                    // Set base if it exists
+                    if (deck.base) {
+                        setBaseContext(deck.base);
+                    }
+                    
+                    // Add cards
+                    deck.cards.forEach(item => {
+                        addCard(item.card);
+                    });
+                    
+                    // Navigate to the cards stage
+                    contextSetCurrentStage('cards');
+                    
+                } catch (err) {
+                    console.error('Error loading deck:', err);
+                    setError('Failed to load deck. Please try again later.');
+                } finally {
+                    setLoadingDeck(false);
+                }
+            };
+            
+            loadExistingDeck();
+        }
+    }, [deckIdParam, addLeader, addCard, resetDeck, setDeckName, contextSetCurrentStage, setBaseContext]);
 
     // Fetch cards from API
     useEffect(() => {
@@ -144,83 +200,8 @@ export default function DeckBuilder() {
             
             // If we have chosen leaders and a base, filter by aspect compatibility
             if (leaders.length === 2 && base && !showAllCards) {
-                // Get all aspects from leaders and base
-                const deckAspects: Record<string, number> = {};
-                
-                // Count occurrences of each aspect in the deck
-                // First process all leaders
-                leaders.forEach(leader => {
-                    leader.aspects?.forEach(aspect => {
-                        const name = aspect.aspect_name;
-                        deckAspects[name] = (deckAspects[name] || 0) + 1;
-                    });
-                });
-                
-                // Then add base aspects
-                base.aspects?.forEach(aspect => {
-                    const name = aspect.aspect_name;
-                    deckAspects[name] = (deckAspects[name] || 0) + 1;
-                });
-                
-                console.log('Deck aspect counts:', deckAspects);
-                
-                // Check if the deck has Heroism or Villainy
-                const hasHeroism = deckAspects['Heroism'] > 0;
-                const hasVillainy = deckAspects['Villainy'] > 0;
-                
-                console.log('Deck has Heroism:', hasHeroism);
-                console.log('Deck has Villainy:', hasVillainy);
-                
-                // Filter cards based on the complex aspect compatibility rules
-                result = result.filter(card => {
-                    // Get card aspects
-                    const cardAspects: Record<string, number> = {};
-                    card.aspects?.forEach(aspect => {
-                      const name = aspect.aspect_name;
-                      cardAspects[name] = (cardAspects[name] || 0) + 1;
-                    });
-                    
-                    // First check Heroism/Villainy compatibility
-                    // If deck is Heroism, cards with Villainy are invalid
-                    if (hasHeroism && cardAspects['Villainy'] > 0) {
-                      return false;
-                    }
-                    
-                    // If deck is Villainy, cards with Heroism are invalid
-                    if (hasVillainy && cardAspects['Heroism'] > 0) {
-                      return false;
-                    }
-                    
-                    // For other aspects, a card is compatible if it has AT LEAST ONE 
-                    // of the secondary aspects in the deck, OR has no secondary aspects at all
-                    
-                    // Get the secondary aspects from the deck
-                    const secondaryAspects = ['Command', 'Vigilance', 'Cunning', 'Aggression'];
-                    const deckSecondaryAspects = secondaryAspects.filter(aspect => deckAspects[aspect] > 0);
-                    
-                    // If deck has no secondary aspects, all cards pass this check
-                    if (deckSecondaryAspects.length === 0) {
-                      return true;
-                    }
-                    
-                    // Get secondary aspects from the card
-                    const cardSecondaryAspects = secondaryAspects.filter(aspect => cardAspects[aspect] > 0);
-                    
-                    // If card has no secondary aspects, it's compatible
-                    if (cardSecondaryAspects.length === 0) {
-                      return true;
-                    }
-                    
-                    // Check if any of the card's secondary aspects are in the deck
-                    for (const aspect of cardSecondaryAspects) {
-                      if (deckAspects[aspect] > 0) {
-                        return true;
-                      }
-                    }
-                    
-                    // If we get here, the card has secondary aspects but none match the deck
-                    return false;
-                  });
+                // Filter for compatible aspects
+                result = result.filter(card => isCardInAspect(card));
                 
                 console.log('Compatible cards after aspect filtering:', result.length);
             } else {
@@ -246,11 +227,20 @@ export default function DeckBuilder() {
     
         console.log('Final filtered cards:', result.length);
         setFilteredCards(result);
-    }, [cards, currentStage, cardTypeFilter, searchQuery, leaders, baseCards, base, showAllCards]);
+    }, [cards, currentStage, cardTypeFilter, searchQuery, leaders, baseCards, base, showAllCards, isCardInAspect]);
 
     // Handle card selection
     const handleCardClick = (card: CardType) => {
         console.log('Card clicked:', card.name, 'Type:', card.type, 'Current stage:', currentStage);
+        
+        // If the card is already in the deck, we don't want to add it again
+        if (currentStage === 'cards' && isCardInDeck(card.id)) {
+            console.log('Card already in deck, not adding again');
+            // Still set it as selected to show details
+            setSelectedCard(card);
+            return;
+        }
+        
         setSelectedCard(card);
 
         // Auto-add leaders when clicked (if in leaders stage and we have room)
@@ -269,6 +259,13 @@ export default function DeckBuilder() {
     // Handle double-clicking to add card to deck
     const handleCardDoubleClick = (card: CardType) => {
         console.log('Card double-clicked:', card.name);
+        
+        // Don't add if already in deck
+        if (isCardInDeck(card.id)) {
+            console.log('Card already in deck, not adding again');
+            return;
+        }
+        
         handleAddToDeck(card);
     };
 
@@ -291,8 +288,12 @@ export default function DeckBuilder() {
                 console.log('Not setting base - wrong card type:', card.type);
             }
         } else {
-            console.log('Adding card to deck');
-            addCard(card);
+            if (!isCardInDeck(card.id)) {
+                console.log('Adding card to deck');
+                addCard(card);
+            } else {
+                console.log('Card already in deck, not adding again');
+            }
         }
     };
 
@@ -306,17 +307,6 @@ export default function DeckBuilder() {
             setBaseContext(null);
         } else {
             removeCard(cardId);
-        }
-    };
-
-    // Helper to check if card is in deck
-    const isCardInDeck = (cardId: string): boolean => {
-        if (currentStage === 'leaders') {
-            return leaders.some(leader => leader.id === cardId);
-        } else if (currentStage === 'base') {
-            return base?.id === cardId;
-        } else {
-            return deckCards.some(item => item.card.id === cardId);
         }
     };
 
@@ -338,7 +328,7 @@ export default function DeckBuilder() {
             case 'cards':
                 return {
                     title: 'Add Cards',
-                    description: 'Add cards to complete your deck.',
+                    description: 'Add cards to complete your deck. In Twin Suns format, you can only add each card once.',
                     progress: Math.min(deckCards.length / 40, 1) // Assuming 40 cards is a full deck
                 };
             default:
@@ -412,6 +402,8 @@ export default function DeckBuilder() {
                                             <span className="text-sm text-center p-2">{base.name}</span>
                                         </div>
                                     )}
+
+                                    {/* Remove button */}
                                     <button
                                         className="absolute top-2 right-2 p-1 bg-red-500 rounded-full"
                                         onClick={() => setBaseContext(null)}
@@ -497,11 +489,6 @@ export default function DeckBuilder() {
                                         <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-xs p-1 truncate">
                                             {deckCard.card.name}
                                         </div>
-                                        {deckCard.quantity > 1 && (
-                                            <div className="absolute top-0 left-0 bg-purple-500 text-white rounded-br text-xs font-bold px-1">
-                                                x{deckCard.quantity}
-                                            </div>
-                                        )}
                                     </div>
                                 </div>
                             ))}
@@ -589,6 +576,17 @@ export default function DeckBuilder() {
         console.log('Current leaders:', leaders.map(l => l?.name));
     }, [leaders]);
 
+    if (loadingDeck) {
+        return (
+            <div className="min-h-screen bg-black text-white flex items-center justify-center">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-purple-500 mx-auto"></div>
+                    <p className="mt-4 text-2xl text-gray-300">Loading deck...</p>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="min-h-screen bg-black text-white">
             {/* Header Section */}
@@ -604,15 +602,15 @@ export default function DeckBuilder() {
                     </p>
                 </div>
             </section>
-                    {/* Progress Indicator */}
-                    <section className="py-4 px-4 bg-gray-950">
-                                    <div className="max-w-7xl mx-auto">
-                                        <div className="flex items-center justify-between mb-4">
-                                            <h2 className="text-2xl font-bold">{stageInfo.title}</h2>
-                                            <div className="flex items-center space-x-2">
-                                                <div className="text-sm text-gray-400">{stageInfo.description}</div>
-                                            </div>
-                                        </div>
+            {/* Progress Indicator */}
+            <section className="py-4 px-4 bg-gray-950">
+                <div className="max-w-7xl mx-auto">
+                    <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-2xl font-bold">{stageInfo.title}</h2>
+                        <div className="flex items-center space-x-2">
+                            <div className="text-sm text-gray-400">{stageInfo.description}</div>
+                        </div>
+                    </div>
 
                     {/* Progress Steps */}
                     <div className="flex items-center mb-6">
@@ -686,20 +684,28 @@ export default function DeckBuilder() {
                                         )}
                                         
                                         {currentStage === 'cards' && (
-                                            <div className="flex items-center ml-2">
-                                                <label className="flex items-center cursor-pointer">
-                                                    <input
-                                                        type="checkbox"
+                                            <>
+                                                <div className="flex items-center ml-2">
+                                                    <Label htmlFor="show-all-cards" className="mr-2 text-sm text-gray-300">
+                                                        Show all cards
+                                                    </Label>
+                                                    <Switch
+                                                        id="show-all-cards"
                                                         checked={showAllCards}
-                                                        onChange={() => {
-                                                            console.log("Toggling showAllCards from", showAllCards, "to", !showAllCards);
-                                                            setShowAllCards(!showAllCards);
-                                                        }}
-                                                        className="mr-2 h-4 w-4 rounded border-gray-700 bg-gray-700 text-purple-600 focus:ring-purple-500"
+                                                        onCheckedChange={setShowAllCards}
                                                     />
-                                                    <span className="text-sm text-gray-300">Show all cards</span>
-                                                </label>
-                                            </div>
+                                                </div>
+                                                <div className="flex items-center ml-2">
+                                                    <Label htmlFor="hide-cards-in-deck" className="mr-2 text-sm text-gray-300">
+                                                        Hide cards in deck
+                                                    </Label>
+                                                    <Switch
+                                                        id="hide-cards-in-deck"
+                                                        checked={hideCardsInDeck}
+                                                        onCheckedChange={setHideCardsInDeck}
+                                                    />
+                                                </div>
+                                            </>
                                         )}
                                     </div>
                                 </div>
@@ -724,21 +730,9 @@ export default function DeckBuilder() {
                                             onCardClick={handleCardClick}
                                             onDoubleClick={handleCardDoubleClick}
                                             selectedCardId={selectedCard?.id}
-                                            isCompatible={(card) => {
-                                                // Always compatible in leader and base stages
-                                                if (currentStage === 'leaders' || currentStage === 'base') {
-                                                    return true;
-                                                }
-                                                
-                                                // For cards stage, check aspect compatibility
-                                                if (currentStage === 'cards' && leaders.length === 2 && base) {
-                                                    // If showing all cards, still identify which are in/out of aspect
-                                                    return isCardInAspect(card);
-                                                }
-                                                
-                                                // Default to compatible
-                                                return true;
-                                            }}
+                                            isCompatible={isCardInAspect}
+                                            isInDeck={isCardInDeck}
+                                            hideCardsInDeck={currentStage === 'cards' && hideCardsInDeck}
                                             currentStage={currentStage}
                                         />
                                     </div>

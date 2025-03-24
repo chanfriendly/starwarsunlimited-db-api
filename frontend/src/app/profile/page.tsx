@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -11,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import {
     BookOpen,
-    Library, // Changed from Cards to Library
+    Library,
     LayoutDashboard,
     Users,
     UserCircle,
@@ -20,225 +21,59 @@ import {
     Trash2,
     Search,
     ChevronRight,
+    AlertTriangle
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { ApiCard as CardType } from '@/lib/api';
+import { 
+    SavedDeck,
+    CollectionItem,
+    fetchUserDecks,
+    fetchUserCollection,
+    deleteUserDeck
+} from '@/lib/api';
 
-// Types for our user profile data
-interface Deck {
-    id: string;
-    name: string;
-    leaders: Leader[];
-    base?: CardType;
-    aspects: string[];
-    cardCount: number;
-    lastUpdated: string;
-}
-
-interface Leader {
-    id: string;
-    name: string;
-    imageUrl: string;
-}
-
-interface CollectionCard {
-    id: string;
-    card: CardType;
-    count: number;
-}
-
-interface UserProfile {
-    id: string;
-    username: string;
-    avatarUrl: string;
-    createdAt: string;
-    decks: Deck[];
-    collection: CollectionCard[];
-}
-
-// Mock data (replace with actual API call)
-const mockUserProfile: UserProfile = {
+// Default user profile data
+const defaultUserProfile = {
     id: '1',
     username: 'GalacticGamer77',
     avatarUrl: 'https://placehold.co/100x100/EEE/31343C?text=GG&font=Montserrat',
-    createdAt: '2023-01-15',
-    decks: [
-        {
-            id: '1',
-            name: 'Vader Command',
-            leaders: [
-                {
-                    id: '1',
-                    name: 'Darth Vader',
-                    imageUrl: 'https://cdn.jsdelivr.net/gh/JimJafar/SWU-images@main/cards/D20-001.webp'
-                },
-                {
-                    id: '2', 
-                    name: 'Grand Moff Tarkin',
-                    imageUrl: 'https://placehold.co/200x300/EEE/31343C?text=Tarkin&font=Montserrat'
-                }
-            ],
-            aspects: ['Command', 'Villainy'],
-            cardCount: 40,
-            lastUpdated: '2025-03-21',
-        },
-        {
-            id: '2',
-            name: 'Luke Force',
-            leaders: [
-                {
-                    id: '3',
-                    name: 'Luke Skywalker',
-                    imageUrl: 'https://cdn.jsdelivr.net/gh/JimJafar/SWU-images@main/cards/D20-012.webp'
-                },
-                {
-                    id: '4', 
-                    name: 'Obi-Wan Kenobi',
-                    imageUrl: 'https://placehold.co/200x300/EEE/31343C?text=Obi-Wan&font=Montserrat'
-                }
-            ],
-            aspects: ['Heroism', 'Force'],
-            cardCount: 40,
-            lastUpdated: '2025-03-20',
-        },
-        {
-            id: '3',
-            name: 'Leia Command',
-            leaders: [
-                {
-                    id: '5',
-                    name: 'Leia Organa',
-                    imageUrl: 'https://placehold.co/200x300/EEE/31343C?text=Leia&font=Montserrat'
-                },
-                {
-                    id: '6', 
-                    name: 'Han Solo',
-                    imageUrl: 'https://placehold.co/200x300/EEE/31343C?text=Han&font=Montserrat'
-                }
-            ],
-            aspects: ['Command', 'Heroism'],
-            cardCount: 40,
-            lastUpdated: '2025-03-18',
-        },
-    ],
-    collection: [
-        {
-            id: '1',
-            card: {
-                id: '1',
-                name: 'Darth Vader',
-                type: 'Leader',
-                aspects: [{ aspect_name: 'Command', aspect_color: '#ff0000' }, { aspect_name: 'Villainy', aspect_color: '#000000' }],
-                image_uri: 'https://cdn.jsdelivr.net/gh/JimJafar/SWU-images@main/cards/D20-001.webp',
-                image_url: 'https://cdn.jsdelivr.net/gh/JimJafar/SWU-images@main/cards/D20-001.webp', // Support both property names
-                text: 'Villainous. After you play a card, deal 1 damage to target undefeated unit.',
-                energy_cost: 5,
-                cost: 5, // Support both property names
-                attack: 5,
-                power: 5, // Support both property names
-                health: 5,
-                set_name: 'Core Set',
-                set_code: 'SWU01',
-                card_number: '001',
-                // Removed rarity as it's not in our Card type
-            },
-            count: 1
-        },
-        {
-            id: '2',
-            card: {
-                id: '2',
-                name: 'Luke Skywalker',
-                type: 'Leader',
-                aspects: [{ aspect_name: 'Heroism', aspect_color: '#3366ff' }, { aspect_name: 'Force', aspect_color: '#9933ff' }],
-                image_uri: 'https://cdn.jsdelivr.net/gh/JimJafar/SWU-images@main/cards/D20-012.webp',
-                image_url: 'https://cdn.jsdelivr.net/gh/JimJafar/SWU-images@main/cards/D20-012.webp', // Support both property names
-                text: 'Valiant. After an opponent plays a card, heal 1 damage from target undefeated unit.',
-                energy_cost: 5,
-                cost: 5, // Support both property names
-                attack: 3,
-                power: 3, // Support both property names
-                health: 5,
-                set_name: 'Core Set',
-                set_code: 'SWU01',
-                card_number: '012',
-                // Removed rarity as it's not in our Card type
-            },
-            count: 1
-        },
-        {
-            id: '3',
-            card: {
-                id: '3',
-                name: 'Rebel Trooper',
-                type: 'Unit',
-                aspects: [{ aspect_name: 'Command', aspect_color: '#ff0000' }],
-                image_uri: 'https://placehold.co/200x300/EEE/31343C?text=Trooper&font=Montserrat',
-                text: 'Deploy: Draw a card if you control a Leader.',
-                energy_cost: 2,
-                attack: 1,
-                health: 3,
-                set_name: 'Core Set',
-                card_number: '048',
-                // Removed rarity as it's not in our Card type
-            },
-            count: 3
-        },
-        {
-            id: '4',
-            card: {
-                id: '4',
-                name: 'Stormtrooper',
-                type: 'Unit',
-                aspects: [{ aspect_name: 'Command', aspect_color: '#ff0000' }],
-                image_uri: 'https://placehold.co/200x300/EEE/31343C?text=Storm&font=Montserrat',
-                text: 'Deploy: Deal 1 damage to target unit.',
-                energy_cost: 3,
-                attack: 2,
-                health: 2,
-                set_name: 'Core Set',
-                card_number: '050',
-                // Removed rarity as it's not in our Card type
-            },
-            count: 4
-        },
-        {
-            id: '5',
-            card: {
-                id: '5',
-                name: 'Force Lightning',
-                type: 'Event',
-                aspects: [{ aspect_name: 'Villainy', aspect_color: '#000000' }, { aspect_name: 'Force', aspect_color: '#9933ff' }],
-                image_uri: 'https://placehold.co/200x300/EEE/31343C?text=Lightning&font=Montserrat',
-                text: 'Deal 3 damage to target character.',
-                energy_cost: 2,
-                set_name: 'Core Set',
-                card_number: '075',
-                // Removed rarity as it's not in our Card type
-            },
-            count: 2
-        },
-        {
-            id: '6',
-            card: {
-                id: '6',
-                name: 'Lightsaber',
-                type: 'Upgrade',
-                aspects: [{ aspect_name: 'Force', aspect_color: '#9933ff' }],
-                image_uri: 'https://placehold.co/200x300/EEE/31343C?text=Saber&font=Montserrat',
-                text: 'Equipped unit gets +2/+0.',
-                energy_cost: 2,
-                set_name: 'Core Set',
-                card_number: '082',
-                // Removed rarity as it's not in our Card type
-            },
-            count: 2
-        },
-    ]
+    createdAt: '2023-01-15'
 };
 
 // Component to display a single deck
-const DeckCard = ({ deck }: { deck: Deck }) => {
+const DeckCard = ({ deck, onDelete }: { deck: SavedDeck, onDelete: (deckId: string) => void }) => {
+    const aspectColors: Record<string, string> = {
+        'Command': 'border-red-600 bg-red-900/20 text-red-400',
+        'Heroism': 'border-blue-600 bg-blue-900/20 text-blue-400',
+        'Villainy': 'border-gray-600 bg-gray-900/40 text-gray-300',
+        'Force': 'border-purple-600 bg-purple-900/20 text-purple-400',
+        'Cunning': 'border-amber-600 bg-amber-900/20 text-amber-400',
+        'Aggression': 'border-orange-600 bg-orange-900/20 text-orange-400',
+    };
+    
+    // Extract unique aspects from the leaders and base
+    const deckAspects = new Set<string>();
+    
+    // Add aspects from leaders
+    deck.leaders.forEach(leader => {
+        leader.aspects?.forEach(aspect => {
+            deckAspects.add(aspect.aspect_name);
+        });
+    });
+    
+    // Add aspects from base if it exists
+    if (deck.base) {
+        deck.base.aspects?.forEach(aspect => {
+            deckAspects.add(aspect.aspect_name);
+        });
+    }
+    
+    // Calculate total cards
+    const totalCards = deck.cards.reduce((sum, item) => sum + item.quantity, 0);
+    
+    // Format date
+    const formattedDate = new Date(deck.updated_at).toLocaleDateString();
+    
     return (
         <motion.div
             whileHover={{ scale: 1.03, boxShadow: "0px 4px 12px rgba(0, 0, 0, 0.2)" }}
@@ -254,46 +89,35 @@ const DeckCard = ({ deck }: { deck: Deck }) => {
                         className="bg-gray-700 text-gray-300 border-gray-600 group-hover:bg-purple-500 group-hover:text-white
                                 group-hover:border-purple-500 transition-colors duration-200"
                     >
-                        {deck.cardCount} Cards
+                        {totalCards} Cards
                     </Badge>
                 </CardHeader>
                 <CardContent>
-                    <div className="flex gap-2 mb-2">
-                        {deck.leaders.map((leader) => (
-                            <div key={leader.id} className="w-12 h-12 relative rounded-full overflow-hidden border border-gray-700">
-                                <img 
-                                    src={leader.imageUrl} 
-                                    alt={leader.name}
-                                    className="w-full h-full object-cover" 
-                                />
-                            </div>
-                        ))}
+                <div className="flex gap-2 mb-2">
+                    {deck.leaders.map((leader) => (
+                        <div key={leader.id} className="w-12 h-12 relative rounded-full overflow-hidden border border-gray-700">
+                        <img 
+                            src={leader.image_uri || leader.image_url || `https://placehold.co/100x100/EEE/31343C?text=${leader.name.charAt(0)}`} 
+                            alt={leader.name}
+                            className="w-full h-full object-cover object-center" 
+                            style={{ objectPosition: '50% 30%' }} // Focus on upper portion of the card
+                        />
+                        </div>
+                    ))}
                     </div>
                     <div className="flex flex-wrap gap-1 mt-1">
-                        {deck.aspects.map((aspect) => {
-                            // Define a color map for aspects
-                            const aspectColorMap: Record<string, string> = {
-                                'Command': 'border-red-600 bg-red-900/20 text-red-400',
-                                'Heroism': 'border-blue-600 bg-blue-900/20 text-blue-400',
-                                'Villainy': 'border-gray-600 bg-gray-900/40 text-gray-300',
-                                'Force': 'border-purple-600 bg-purple-900/20 text-purple-400',
-                                'Cunning': 'border-amber-600 bg-amber-900/20 text-amber-400',
-                                'Aggression': 'border-orange-600 bg-orange-900/20 text-orange-400',
-                            };
-                            
-                            return (
-                                <Badge
-                                    key={aspect}
-                                    variant="outline"
-                                    className={cn("text-xs border", aspectColorMap[aspect] || "border-gray-600 bg-gray-900/50 text-gray-300")}
-                                >
-                                    {aspect}
-                                </Badge>
-                            );
-                        })}
+                        {Array.from(deckAspects).map((aspect) => (
+                            <Badge
+                                key={aspect}
+                                variant="outline"
+                                className={cn("text-xs border", aspectColors[aspect] || "border-gray-600 bg-gray-900/50 text-gray-300")}
+                            >
+                                {aspect}
+                            </Badge>
+                        ))}
                     </div>
                     <div className="text-xs text-gray-500 mt-2">
-                        Last Updated: {deck.lastUpdated}
+                        Last Updated: {formattedDate}
                     </div>
                     <Button
                         variant="outline"
@@ -301,7 +125,7 @@ const DeckCard = ({ deck }: { deck: Deck }) => {
                                 hover:border-purple-500 transition-colors duration-200"
                         asChild
                     >
-                        <Link href={`/deck-builder/${deck.id}`}>
+                        <Link href={`/decks/${deck.id}`}>
                             View Deck <ChevronRight className="ml-2 w-4 h-4" />
                         </Link>
                     </Button>
@@ -312,8 +136,8 @@ const DeckCard = ({ deck }: { deck: Deck }) => {
 };
 
 // Component to display a single card in a collection
-const CollectionCard = ({ collectionCard }: { collectionCard: CollectionCard }) => {
-    const { card, count } = collectionCard;
+const CollectionCard = ({ collectionItem }: { collectionItem: CollectionItem }) => {
+    const { card, count } = collectionItem;
     
     return (
         <motion.div
@@ -326,7 +150,7 @@ const CollectionCard = ({ collectionCard }: { collectionCard: CollectionCard }) 
                 <CardHeader className="p-2">
                     <div className="aspect-[2/3] relative rounded-lg overflow-hidden border border-gray-700">
                         <img
-                            src={card.image_uri}
+                            src={card.image_uri || card.image_url || `https://placehold.co/200x300/EEE/31343C?text=${card.name}`}
                             alt={card.name}
                             className="w-full h-full object-cover"
                         />
@@ -373,22 +197,65 @@ const CollectionCard = ({ collectionCard }: { collectionCard: CollectionCard }) 
     );
 };
 
+const ErrorMessage = ({ message, retryFn }: { message: string, retryFn: () => void }) => (
+    <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 text-center">
+        <div className="flex justify-center mb-2">
+            <AlertTriangle className="text-red-500 h-8 w-8" />
+        </div>
+        <p className="text-red-400 mb-3">{message}</p>
+        <Button onClick={retryFn} variant="outline" className="border-red-700 hover:bg-red-800/30">
+            Try Again
+        </Button>
+    </div>
+);
+
 const UserProfilePage = () => {
-    const [userProfile, setUserProfile] = useState<UserProfile>(mockUserProfile);
+    const router = useRouter();
+    const [isLoading, setIsLoading] = useState(true);
+    const [decks, setDecks] = useState<SavedDeck[]>([]);
+    const [collection, setCollection] = useState<CollectionItem[]>([]);
+    const [userProfile, setUserProfile] = useState(defaultUserProfile);
     const [isEditing, setIsEditing] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedTab, setSelectedTab] = useState('decks'); // 'decks', 'collection', etc.
     const [formData, setFormData] = useState({
         username: userProfile.username,
     });
+    const [error, setError] = useState<string | null>(null);
 
-    // Simulate fetching user data
+    // Fetch data on component mount
     useEffect(() => {
-        // In a real implementation, fetch from the API
-        // Example: getUserProfile(userId).then(data => setUserProfile(data));
-        setUserProfile(mockUserProfile);
-        setFormData({ username: mockUserProfile.username });
+        loadData();
     }, []);
+
+    const loadData = async () => {
+        setIsLoading(true);
+        setError(null);
+        
+        try {
+            // Fetch decks and collection in parallel
+            const [decksData, collectionData] = await Promise.all([
+                fetchUserDecks(),
+                fetchUserCollection()
+            ]);
+            
+            console.log("Fetched decks:", decksData);
+            console.log("Fetched collection:", collectionData);
+            
+            setDecks(decksData);
+            setCollection(collectionData);
+            
+            // In a real app, would also fetch user profile data
+            // const profileData = await fetchUserProfile();
+            // setUserProfile(profileData);
+            
+        } catch (err) {
+            console.error('Error loading profile data:', err);
+            setError('Failed to load profile data. Please check your connection and try again.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     // Handlers for editing profile
     const handleEditProfile = () => {
@@ -411,14 +278,21 @@ const UserProfilePage = () => {
         setIsEditing(false);
     };
     
-    const handleDeleteDeck = (deckId: string) => {
-        // In a real implementation, send delete request to the API
-        // Example: deleteDeck(deckId).then(() => {
-        setUserProfile({
-            ...userProfile,
-            decks: userProfile.decks.filter((deck) => deck.id !== deckId),
-        });
-        // });
+    const handleDeleteDeck = async (deckId: string) => {
+        if (window.confirm('Are you sure you want to delete this deck?')) {
+            try {
+                const success = await deleteUserDeck(deckId);
+                if (success) {
+                    // Update the local state
+                    setDecks(decks.filter(deck => deck.id !== deckId));
+                } else {
+                    throw new Error('Failed to delete deck');
+                }
+            } catch (err) {
+                console.error('Error deleting deck:', err);
+                alert('Failed to delete deck. Please try again.');
+            }
+        }
     };
 
     // Handle form changes
@@ -431,7 +305,7 @@ const UserProfilePage = () => {
     };
 
     // Filtered collection based on search
-    const filteredCollection = userProfile.collection.filter((item) =>
+    const filteredCollection = collection.filter((item) =>
         item.card.name.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
@@ -532,11 +406,19 @@ const UserProfilePage = () => {
                                 </Link>
                             </Button>
                         </div>
-                        {userProfile.decks.length > 0 ? (
+                        
+                        {error && selectedTab === 'decks' ? (
+                            <ErrorMessage message={error} retryFn={loadData} />
+                        ) : isLoading ? (
+                            <div className="text-center py-16">
+                                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500 mx-auto"></div>
+                                <p className="mt-4 text-gray-400">Loading your decks...</p>
+                            </div>
+                        ) : decks.length > 0 ? (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                {userProfile.decks.map((deck) => (
-                                    <div key={deck.id} className="relative">
-                                        <DeckCard deck={deck} />
+                                {decks.map((deck) => (
+                                    <div key={deck.id} className="relative group">
+                                        <DeckCard deck={deck} onDelete={handleDeleteDeck} />
                                         <Button
                                             variant="destructive"
                                             size="icon"
@@ -550,8 +432,16 @@ const UserProfilePage = () => {
                                 ))}
                             </div>
                         ) : (
-                            <div className="text-gray-400 text-center py-8">
-                                You haven't created any decks yet. Click "Create Deck" to get started!
+                            <div className="text-gray-400 text-center py-16 bg-gray-900/50 rounded-lg border border-gray-800">
+                                <div className="mb-4">
+                                    <LayoutDashboard className="w-12 h-12 mx-auto text-gray-600" />
+                                </div>
+                                <p className="mb-6">You haven't created any decks yet.</p>
+                                <Button className="bg-purple-600 hover:bg-purple-700" asChild>
+                                    <Link href="/deck-builder">
+                                        Create Your First Deck
+                                    </Link>
+                                </Button>
                             </div>
                         )}
                     </TabsContent>
@@ -577,17 +467,40 @@ const UserProfilePage = () => {
                                 </Button>
                             </div>
                         </div>
-                        {filteredCollection.length > 0 ? (
+                        
+                        {error && selectedTab === 'collection' ? (
+                            <ErrorMessage message={error} retryFn={loadData} />
+                        ) : isLoading ? (
+                            <div className="text-center py-16">
+                                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500 mx-auto"></div>
+                                <p className="mt-4 text-gray-400">Loading your collection...</p>
+                            </div>
+                        ) : filteredCollection.length > 0 ? (
                             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                                {filteredCollection.map((collectionCard) => (
-                                    <CollectionCard key={collectionCard.id} collectionCard={collectionCard} />
+                                {filteredCollection.map((collectionItem) => (
+                                    <CollectionCard 
+                                        key={collectionItem.card.id} 
+                                        collectionItem={collectionItem} 
+                                    />
                                 ))}
                             </div>
                         ) : (
-                            <div className="text-gray-400 text-center py-8">
-                                {searchTerm
-                                    ? `No cards found matching "${searchTerm}".`
-                                    : "Your collection is empty. Add cards to your collection!"}
+                            <div className="text-gray-400 text-center py-16 bg-gray-900/50 rounded-lg border border-gray-800">
+                                <div className="mb-4">
+                                    <Library className="w-12 h-12 mx-auto text-gray-600" />
+                                </div>
+                                {searchTerm ? (
+                                    <p>No cards found matching "{searchTerm}".</p>
+                                ) : (
+                                    <>
+                                        <p className="mb-6">Your collection is empty.</p>
+                                        <Button className="bg-purple-600 hover:bg-purple-700" asChild>
+                                            <Link href="/cards">
+                                                Browse Cards
+                                            </Link>
+                                        </Button>
+                                    </>
+                                )}
                             </div>
                         )}
                     </TabsContent>

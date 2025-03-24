@@ -55,6 +55,42 @@ export function CardDetail({
 
   const currentImage = showBackSide && card.image_back_uri ? card.image_back_uri : card.image_uri;
 
+  // Function to get the appropriate button text based on the card's stage and status
+  const getButtonText = () => {
+    if (isInDeck) {
+      return `Remove ${currentStage === 'leaders' ? 'Leader' : currentStage === 'base' ? 'Base' : 'Card'}`;
+    }
+
+    if (!isCompatible) {
+      return 'Incompatible with Deck';
+    }
+
+    if (currentStage === 'base' && card.type !== 'Base') {
+      return 'Not a Base Card';
+    }
+
+    return `Add as ${currentStage === 'leaders' ? 'Leader' : currentStage === 'base' ? 'Base' : 'Card'}`;
+  };
+
+  // Get the button disabled state
+  const isButtonDisabled = () => {
+    if (isInDeck) {
+      return false; // Can always remove
+    }
+
+    // Can't add incompatible cards
+    if (!isCompatible) {
+      return true;
+    }
+
+    // Can't add non-base cards as base
+    if (currentStage === 'base' && card.type !== 'Base') {
+      return true;
+    }
+
+    return false;
+  };
+
   return (
     <div className="h-full overflow-auto p-4">
       <div className="flex flex-col items-center mb-6">
@@ -160,19 +196,23 @@ export function CardDetail({
                 variant="destructive"
                 className="w-full"
               >
-                Remove {currentStage === 'leaders' ? 'Leader' : currentStage === 'base' ? 'Base' : 'Card'}
+                {getButtonText()}
               </Button>
             ) : (
               <Button 
                 onClick={() => onAddToDeck(card)}
-                className="w-full bg-gradient-to-r from-purple-500 to-pink-500"
-                disabled={!isCompatible || (currentStage === 'base' && card.type !== 'Base')}
+                className={`w-full ${!isCompatible ? 'bg-gray-700' : 'bg-gradient-to-r from-purple-500 to-pink-500'}`}
+                disabled={isButtonDisabled()}
               >
-                {!isCompatible ? 'Incompatible with Deck' : 
-                  currentStage === 'leaders' ? 'Add as Leader' : 
-                  currentStage === 'base' ? (card.type === 'Base' ? 'Add as Base' : 'Not a Base Card') : 
-                  'Add to Deck'}
+                {getButtonText()}
               </Button>
+            )}
+            
+            {/* Special warning for already-in-deck in Twin Suns format */}
+            {currentStage === 'cards' && isInDeck && (
+              <p className="text-xs text-amber-400 mt-2 text-center">
+                In Twin Suns format, each card can only appear once in a deck.
+              </p>
             )}
           </div>
         )}

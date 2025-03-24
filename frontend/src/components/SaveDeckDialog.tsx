@@ -15,7 +15,7 @@ interface SaveDeckDialogProps {
 }
 
 const SaveDeckDialog = ({ isOpen, onClose, onSuccess }: SaveDeckDialogProps) => {
-  const { leaders, base, deckCards, deckName } = useDeckBuilder();
+  const { leaders, base, deckCards, deckName, setDeckName } = useDeckBuilder();
   const [name, setName] = useState(deckName || '');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,13 +58,15 @@ const SaveDeckDialog = ({ isOpen, onClose, onSuccess }: SaveDeckDialogProps) => 
     try {
       const savedDeck = await saveUserDeck(saveData);
       if (savedDeck) {
+        // Update the deck name in the context
+        setDeckName(name.trim());
         onSuccess(savedDeck.id);
       } else {
         setError('Failed to save deck. Please try again.');
       }
     } catch (err) {
-      setError('An error occurred while saving the deck');
       console.error('Save deck error:', err);
+      setError('An error occurred while saving the deck. Please check your connection and try again.');
     } finally {
       setIsSaving(false);
     }
