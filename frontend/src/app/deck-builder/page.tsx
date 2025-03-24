@@ -1,16 +1,20 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { CardGrid } from '@/components/CardGrid';
 import { CardDetail } from '@/components/CardDetail';
 import { LeaderSelection } from '@/components/LeaderSelection';
 import { DeckStats } from '@/components/DeckStats';
+import SaveDeckDialog from '@/components/SaveDeckDialog';
 import { useDeckBuilder } from '@/contexts/DeckBuilderContext';
 import { Card as CardType, fetchCards, fetchBaseCards, fetchRegularCards } from '@/lib/api';
 
 export default function DeckBuilder() {
+    const router = useRouter();
+    
     // State
     const [cards, setCards] = useState<CardType[]>([]);
     const [filteredCards, setFilteredCards] = useState<CardType[]>([]);
@@ -22,6 +26,7 @@ export default function DeckBuilder() {
     const [baseCards, setBaseCards] = useState<CardType[]>([]);
     const [loadingBaseCards, setLoadingBaseCards] = useState(false);
     const [showAllCards, setShowAllCards] = useState<boolean>(false);
+    const [showSaveDialog, setShowSaveDialog] = useState(false);
 
     // Use the DeckBuilder context with the direct setCurrentStage function
     const {
@@ -37,7 +42,7 @@ export default function DeckBuilder() {
         isCardInAspect,
         resetDeck,
         setDeckName,
-        setCurrentStage: contextSetCurrentStage // Use the context's function directly
+        setCurrentStage: contextSetCurrentStage
     } = useDeckBuilder();
 
     // Fetch cards from API
@@ -395,9 +400,9 @@ export default function DeckBuilder() {
                         {base ? (
                             <div className="relative max-w-xs">
                                 <div className="aspect-[7/10] relative rounded-lg overflow-hidden border-2 border-purple-500">
-                                    {base.image_uri ? (
+                                    {base.image_uri || base.image_url ? (
                                         <img
-                                            src={base.image_uri}
+                                            src={base.image_uri || base.image_url}
                                             alt={base.name}
                                             className="w-full h-full object-contain cursor-pointer"
                                             onClick={() => setSelectedCard(base)}
@@ -469,9 +474,9 @@ export default function DeckBuilder() {
                             {deckCards.map((deckCard) => (
                                 <div key={deckCard.card.id} className="relative">
                                     <div className="aspect-[7/10] relative rounded-lg overflow-hidden border border-gray-700 hover:border-purple-500 transition-colors cursor-pointer">
-                                        {deckCard.card.image_uri ? (
+                                        {deckCard.card.image_uri || deckCard.card.image_url ? (
                                             <img
-                                                src={deckCard.card.image_uri}
+                                                src={deckCard.card.image_uri || deckCard.card.image_url}
                                                 alt={deckCard.card.name}
                                                 className="w-full h-full object-contain"
                                                 onClick={() => setSelectedCard(deckCard.card)}
@@ -509,18 +514,29 @@ export default function DeckBuilder() {
 
                     {/* Navigation Buttons */}
                     <div className="mt-6 flex justify-between">
-                        <Button
-                            onClick={() => contextSetCurrentStage('base')}
-                            variant="outline"
-                        >
-                            Back
-                        </Button>
+                        <div>
+                            <Button
+                                onClick={() => contextSetCurrentStage('base')}
+                                variant="outline"
+                                className="mr-2"
+                            >
+                                Back
+                            </Button>
 
+                            <Button
+                                onClick={resetDeck}
+                                variant="destructive"
+                            >
+                                Reset Deck
+                            </Button>
+                        </div>
+                        
                         <Button
-                            onClick={resetDeck}
-                            variant="destructive"
+                            onClick={() => setShowSaveDialog(true)}
+                            className="bg-green-600 hover:bg-green-700 text-white"
+                            disabled={deckCards.length < 10}
                         >
-                            Reset Deck
+                            Save Deck
                         </Button>
                     </div>
 
@@ -538,33 +554,33 @@ export default function DeckBuilder() {
     // Dedicated hook for loading base cards when entering the base selection stage
     useEffect(() => {
         if (currentStage === 'base') {
-        console.log('Entered base selection stage, loading base cards...');
-        
-        const loadBaseCards = async () => {
-            setLoadingBaseCards(true);
-            try {
-            // Use the dedicated function to fetch base cards
-            const bases = await fetchBaseCards();
+            console.log('Entered base selection stage, loading base cards...');
             
-            if (bases.length > 0) {
-                console.log(`Successfully loaded ${bases.length} base cards`);
-                
-                // Update both the base cards state and filtered cards
-                setBaseCards(bases);
-                setFilteredCards(bases);
-            } else {
-                console.warn('No base cards returned from the API');
-                setError('No base cards found. They may not exist in the database or may have an incorrect type.');
-            }
-            } catch (err) {
-            console.error('Error loading base cards:', err);
-            setError('Failed to load base cards from the backend');
-            } finally {
-            setLoadingBaseCards(false);
-            }
-        };
-        
-        loadBaseCards();
+            const loadBaseCards = async () => {
+                setLoadingBaseCards(true);
+                try {
+                    // Use the dedicated function to fetch base cards
+                    const bases = await fetchBaseCards();
+                    
+                    if (bases.length > 0) {
+                        console.log(`Successfully loaded ${bases.length} base cards`);
+                        
+                        // Update both the base cards state and filtered cards
+                        setBaseCards(bases);
+                        setFilteredCards(bases);
+                    } else {
+                        console.warn('No base cards returned from the API');
+                        setError('No base cards found. They may not exist in the database or may have an incorrect type.');
+                    }
+                } catch (err) {
+                    console.error('Error loading base cards:', err);
+                    setError('Failed to load base cards from the backend');
+                } finally {
+                    setLoadingBaseCards(false);
+                }
+            };
+            
+            loadBaseCards();
         }
     }, [currentStage]);
 
@@ -762,6 +778,18 @@ export default function DeckBuilder() {
                     </div>
                 </div>
             </section>
+
+            {/* Save Deck Dialog */}
+            <SaveDeckDialog
+                isOpen={showSaveDialog}
+                onClose={() => setShowSaveDialog(false)}
+                onSuccess={(deckId) => {
+                    // Show success message or redirect to the deck page
+                    setShowSaveDialog(false);
+                    // Navigate to profile page
+                    router.push('/profile');
+                }}
+            />
         </div>
     );
 }

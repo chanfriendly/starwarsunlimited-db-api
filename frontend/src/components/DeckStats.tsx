@@ -6,7 +6,7 @@ import { useDeckBuilder } from '@/contexts/DeckBuilderContext';
 import { Card as CardType } from '@/lib/api';
 
 // Define types for our deck cards
-interface DeckCard {
+interface DeckItem {
   card: CardType;
   quantity: number;
 }
@@ -31,8 +31,12 @@ export function DeckStats() {
     const counts: Record<string, number> = {};
     
     deckCards.forEach((deckCard) => {
-      if (deckCard.card.energy_cost !== undefined) {
-        const cost = deckCard.card.energy_cost;
+      // Support both energy_cost and cost properties
+      const cost = deckCard.card.energy_cost !== undefined 
+        ? deckCard.card.energy_cost 
+        : deckCard.card.cost;
+        
+      if (cost !== undefined) {
         const costKey = cost >= 7 ? '7+' : cost.toString();
         counts[costKey] = (counts[costKey] || 0) + deckCard.quantity;
       }
@@ -49,7 +53,11 @@ export function DeckStats() {
     leaders.forEach((leader) => {
       leader.aspects?.forEach((aspect) => {
         if (!counts[aspect.aspect_name]) {
-          counts[aspect.aspect_name] = { count: 0, color: aspect.aspect_color };
+          // Always provide a default color if aspect_color is undefined
+          counts[aspect.aspect_name] = { 
+            count: 0, 
+            color: aspect.aspect_color || '#9966CC' // Default to a medium purple
+          };
         }
       });
     });
@@ -58,7 +66,11 @@ export function DeckStats() {
     if (base) {
       base.aspects?.forEach((aspect) => {
         if (!counts[aspect.aspect_name]) {
-          counts[aspect.aspect_name] = { count: 0, color: aspect.aspect_color };
+          // Always provide a default color if aspect_color is undefined
+          counts[aspect.aspect_name] = { 
+            count: 0, 
+            color: aspect.aspect_color || '#9966CC' // Default to a medium purple
+          };
         }
       });
     }
@@ -149,7 +161,7 @@ export function DeckStats() {
                 <div className="flex items-center">
                   <div 
                     className="w-3 h-3 rounded-full mr-2" 
-                    style={{ backgroundColor: color || 'purple' }}
+                    style={{ backgroundColor: color }}
                   ></div>
                   <span className="text-sm text-gray-300">{aspect}</span>
                 </div>
