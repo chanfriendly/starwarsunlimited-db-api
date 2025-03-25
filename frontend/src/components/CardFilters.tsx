@@ -76,7 +76,7 @@ export function CardFilters({
       <CardContent className="py-4 max-h-[80vh] overflow-y-auto">
         {/* Card Types */}
         <div className="mb-6">
-        <h3 className="text-white font-medium mb-2">Card Types</h3>
+          <h3 className="text-white font-medium mb-2">Card Types</h3>
           <div className="grid grid-cols-2 gap-2">
             {types.map((type) => (
               <div key={type} className="flex items-center space-x-2">
@@ -98,7 +98,7 @@ export function CardFilters({
 
         {/* Aspects */}
         <div className="mb-6">
-        <h3 className="text-white font-medium mb-2">Aspects</h3>
+          <h3 className="text-white font-medium mb-2">Aspects</h3>
           <div className="grid grid-cols-2 gap-2">
             {aspects.map((aspect) => (
               <div key={aspect} className="flex items-center space-x-2">
@@ -120,7 +120,7 @@ export function CardFilters({
 
         {/* Energy Cost */}
         <div className="mb-6">
-        <h3 className="text-white font-medium mb-2">Resource Cost</h3>
+          <h3 className="text-white font-medium mb-2">Resource Cost</h3>
           <div className="px-2">
             <Slider
               defaultValue={[filters.costMin, filters.costMax]}
@@ -139,7 +139,7 @@ export function CardFilters({
 
         {/* Keywords */}
         <div className="mb-6">
-        <h3 className="text-white font-medium mb-2">Keywords</h3>
+          <h3 className="text-white font-medium mb-2">Keywords</h3>
           <div className="grid grid-cols-2 gap-2">
             {keywords.map((keyword) => (
               <div key={keyword} className="flex items-center space-x-2">
@@ -149,10 +149,10 @@ export function CardFilters({
                   onCheckedChange={() => toggleArrayFilter('keywords', keyword)}
                 />
                 <Label 
-                    htmlFor={`type-${types}`}
-                    className="text-sm text-gray-300 cursor-pointer"
+                  htmlFor={`keyword-${keyword}`}
+                  className="text-sm text-gray-300 cursor-pointer"
                 >
-                    {types}
+                  {keyword}
                 </Label>
               </div>
             ))}
@@ -161,7 +161,7 @@ export function CardFilters({
 
         {/* Sets */}
         <div className="mb-6">
-        <h3 className="text-white font-medium mb-2">Sets</h3>
+          <h3 className="text-white font-medium mb-2">Sets</h3>
           <div className="grid grid-cols-2 gap-2">
             {sets.map((set) => (
               <div key={set} className="flex items-center space-x-2">

@@ -1,3 +1,4 @@
+// frontend/src/app/api/collection/route.ts
 import { NextResponse } from 'next/server';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
@@ -138,6 +139,15 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: 'Invalid collection item data' }, 
         { status: 400 }
+      );
+    }
+    
+    // Check if the card exists in the database
+    const existingCard = await getCardById(db, card_id);
+    if (!existingCard) {
+      return NextResponse.json(
+        { error: 'Card not found' }, 
+        { status: 404 }
       );
     }
     

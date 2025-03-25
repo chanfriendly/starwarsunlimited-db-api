@@ -2,11 +2,12 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ApiCard } from '@/lib/api';
+import { ApiCard, addCardToCollection } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { DialogTitle, DialogHeader, DialogFooter } from '@/components/ui/dialog';
 import { useRouter } from 'next/navigation';
+import { PlusCircle, Check } from 'lucide-react';
 
 export interface CardDetailDialogProps {
   card: ApiCard;
@@ -16,6 +17,8 @@ export interface CardDetailDialogProps {
 export function CardDetailDialog({ card, onClose }: CardDetailDialogProps) {
   const router = useRouter();
   const [showBackSide, setShowBackSide] = useState(false);
+  const [addingToCollection, setAddingToCollection] = useState(false);
+  const [addedToCollection, setAddedToCollection] = useState(false);
   
   // Only allow flipping for cards with a back side (mainly Leaders)
   const canFlip = card?.image_back_uri !== undefined && card?.image_back_uri !== null;
@@ -29,6 +32,21 @@ export function CardDetailDialog({ card, onClose }: CardDetailDialogProps) {
     } else {
       // For non-leaders, we'll need to select a leader first
       router.push('/deck-builder');
+    }
+  };
+
+  // Add card to collection
+  const handleAddToCollection = async () => {
+    try {
+      setAddingToCollection(true);
+      // Add the card to collection with count 1
+      await addCardToCollection(card.id, 1);
+      setAddedToCollection(true);
+    } catch (error) {
+      console.error('Error adding card to collection:', error);
+      // You could add error handling UI here
+    } finally {
+      setAddingToCollection(false);
     }
   };
 
@@ -149,13 +167,38 @@ export function CardDetailDialog({ card, onClose }: CardDetailDialogProps) {
         </div>
       </div>
 
-      <DialogFooter>
+      <DialogFooter className="flex-col sm:flex-row gap-2">
         <Button
           onClick={buildDeckWithCard}
-          className="bg-purple-600 hover:bg-purple-700 text-white mr-2"
+          className="bg-purple-600 hover:bg-purple-700 text-white"
         >
           Build Deck with this Card
         </Button>
+        
+        <Button
+          onClick={handleAddToCollection}
+          disabled={addingToCollection || addedToCollection}
+          className={`${
+            addedToCollection 
+              ? 'bg-green-600 hover:bg-green-700' 
+              : 'bg-blue-600 hover:bg-blue-700'
+          } text-white`}
+        >
+          {addingToCollection ? (
+            <>Loading...</>
+          ) : addedToCollection ? (
+            <>
+              <Check className="w-4 h-4 mr-2" />
+              Added to Collection
+            </>
+          ) : (
+            <>
+              <PlusCircle className="w-4 h-4 mr-2" />
+              Add to Collection
+            </>
+          )}
+        </Button>
+        
         <Button
           onClick={onClose}
           variant="outline"

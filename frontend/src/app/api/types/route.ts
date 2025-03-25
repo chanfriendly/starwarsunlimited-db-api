@@ -7,7 +7,6 @@ export async function GET() {
     "Base",
     "Unit",
     "Event",
-    "Plot",
     "Upgrade"
   ]);
 }

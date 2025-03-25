@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { fetchCards, fetchAspects, fetchTypes, fetchKeywords, ApiCard } from '@/lib/api';
+import { fetchCards, fetchAspects, fetchTypes, fetchKeywords, fetchSets, ApiCard } from '@/lib/api';
 import { CardGrid } from '@/components/CardGrid';
 import { CardFilters } from '@/components/CardFilters';
 import { CardDetailDialog } from '@/components/CardDetailDialog';
@@ -21,6 +21,7 @@ export default function CardBrowser() {
   const [aspects, setAspects] = useState<string[]>([]);
   const [types, setTypes] = useState<string[]>([]);
   const [keywords, setKeywords] = useState<string[]>([]);
+  const [sets, setSets] = useState<string[]>([]);
   
   // Filter state
   const [filters, setFilters] = useState({
@@ -44,15 +45,17 @@ export default function CardBrowser() {
         setFilteredCards(cardsData);
         
         // Fetch filter options
-        const [aspectsData, typesData, keywordsData] = await Promise.all([
+        const [aspectsData, typesData, keywordsData, setsData] = await Promise.all([
           fetchAspects(),
           fetchTypes(),
-          fetchKeywords()
+          fetchKeywords(),
+          fetchSets()
         ]);
         
         setAspects(aspectsData);
         setTypes(typesData);
         setKeywords(keywordsData);
+        setSets(setsData);
       } catch (err) {
         console.error('Error loading cards:', err);
         setError('Failed to load cards. Please try again later.');
@@ -100,17 +103,19 @@ export default function CardBrowser() {
       );
     }
     
-    // Apply cost filter
+    // Apply cost filter - using both energy_cost and cost fields for compatibility
     result = result.filter(card => {
-      const cost = card.cost || card.energy_cost || 0;
+      const cost = card.energy_cost !== undefined ? card.energy_cost : 
+                  (card.cost !== undefined ? card.cost : 0);
       return cost >= filters.costMin && cost <= filters.costMax;
     });
     
     // Apply set filter
     if (filters.sets.length > 0) {
-      result = result.filter(card => 
-        filters.sets.includes(card.set_code || card.set_name || '')
-      );
+      result = result.filter(card => {
+        const cardSet = card.set_code || card.set_name || '';
+        return filters.sets.includes(cardSet);
+      });
     }
     
     setFilteredCards(result);
@@ -126,10 +131,6 @@ export default function CardBrowser() {
   const handleFilterChange = (newFilters: any) => {
     setFilters({ ...filters, ...newFilters });
   };
-
-  // Get unique sets from cards
-  const sets = Array.from(new Set(cards.map(card => card.set_code || card.set_name)))
-    .filter(Boolean) as string[];
 
   return (
     <div className="min-h-screen bg-black text-white">

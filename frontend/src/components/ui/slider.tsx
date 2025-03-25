@@ -15,19 +15,22 @@ interface SliderProps {
 
 export const Slider = React.forwardRef<HTMLDivElement, SliderProps>(
   ({ className, min = 0, max = 100, step = 1, defaultValue = [0, 100], onValueChange, ...props }, ref) => {
+    // Initialize state with defaultValue
     const [values, setValues] = useState<number[]>(defaultValue);
 
+    // Update internal state when defaultValue prop changes
     useEffect(() => {
-      if (defaultValue !== values) {
-        setValues(defaultValue);
+      if (defaultValue[0] !== values[0] || defaultValue[1] !== values[1]) {
+        setValues([...defaultValue]);
       }
-    }, [defaultValue]);
+    }, [defaultValue, values]);
 
     const handleChange = (index: number, newValue: number) => {
       const updatedValues = [...values];
+      // Ensure the value is within the min/max range
       updatedValues[index] = Math.max(min, Math.min(max, newValue));
       
-      // Ensure values don't cross
+      // Ensure values don't cross each other (prevent min > max)
       if (index === 0 && updatedValues[0] > updatedValues[1]) {
         updatedValues[0] = updatedValues[1];
       } else if (index === 1 && updatedValues[1] < updatedValues[0]) {
@@ -41,7 +44,7 @@ export const Slider = React.forwardRef<HTMLDivElement, SliderProps>(
       }
     };
 
-    // Calculate thumb positions as percentages
+    // Calculate thumb positions as percentages for CSS positioning
     const getPosition = (value: number) => {
       return ((value - min) / (max - min)) * 100;
     };
@@ -65,18 +68,18 @@ export const Slider = React.forwardRef<HTMLDivElement, SliderProps>(
             }}
           />
           
-          {/* Thumbs */}
-          {values.map((value, index) => (
+          {/* Thumbs inputs (invisible but handle interactions) */}
+          {[0, 1].map((index) => (
             <input
               key={index}
               type="range"
               min={min}
               max={max}
               step={step}
-              value={value}
+              value={values[index]}
               onChange={(e) => handleChange(index, Number(e.target.value))}
               className={cn(
-                "absolute w-full h-2 opacity-0 cursor-pointer",
+                "absolute w-full h-2 opacity-0 cursor-pointer z-10",
                 "appearance-none"
               )}
               style={{
@@ -86,12 +89,12 @@ export const Slider = React.forwardRef<HTMLDivElement, SliderProps>(
           ))}
           
           {/* Thumb visuals */}
-          {values.map((value, index) => (
+          {[0, 1].map((index) => (
             <div
               key={`thumb-${index}`}
               className="absolute h-5 w-5 rounded-full bg-white border-2 border-purple-600 shadow-md"
               style={{
-                left: `calc(${getPosition(value)}% - 10px)`,
+                left: `calc(${getPosition(values[index])}% - 10px)`,
                 top: "-6px"
               }}
             />
