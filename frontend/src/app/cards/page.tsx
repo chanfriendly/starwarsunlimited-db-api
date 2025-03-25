@@ -1,3 +1,5 @@
+// frontend/src/app/cards/page.tsx - Update the component with pagination support
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -7,12 +9,11 @@ import { CardFilters } from '@/components/CardFilters';
 import { CardDetailDialog } from '@/components/CardDetailDialog';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Search, Filter } from 'lucide-react';
+import { Search, Filter, Loader } from 'lucide-react';
 
 export default function CardBrowser() {
   // State
   const [cards, setCards] = useState<ApiCard[]>([]);
-  const [filteredCards, setFilteredCards] = useState<ApiCard[]>([]);
   const [selectedCard, setSelectedCard] = useState<ApiCard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -22,6 +23,12 @@ export default function CardBrowser() {
   const [types, setTypes] = useState<string[]>([]);
   const [keywords, setKeywords] = useState<string[]>([]);
   const [sets, setSets] = useState<string[]>([]);
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [totalCards, setTotalCards] = useState(0);
   
   // Filter state
   const [filters, setFilters] = useState({
@@ -34,17 +41,10 @@ export default function CardBrowser() {
     sets: [] as string[],
   });
 
-  // Fetch data on component mount
+  // Fetch filter options on mount
   useEffect(() => {
-    const loadData = async () => {
+    const loadFilterOptions = async () => {
       try {
-        setLoading(true);
-        // Fetch cards with large limit for browsing
-        const cardsData = await fetchCards({ limit: '100' });
-        setCards(cardsData);
-        setFilteredCards(cardsData);
-        
-        // Fetch filter options
         const [aspectsData, typesData, keywordsData, setsData] = await Promise.all([
           fetchAspects(),
           fetchTypes(),
@@ -57,69 +57,63 @@ export default function CardBrowser() {
         setKeywords(keywordsData);
         setSets(setsData);
       } catch (err) {
+        console.error('Error loading filter options:', err);
+      }
+    };
+
+    loadFilterOptions();
+  }, []);
+
+  // Fetch cards when filters or page changes
+  useEffect(() => {
+    const loadCards = async () => {
+      try {
+        if (currentPage === 1) {
+          setLoading(true);
+        } else {
+          setIsLoadingMore(true);
+        }
+        
+        // Prepare filter parameters for the API
+        const params = {
+          limit: '24',  // Show 24 cards per page for better grid layout
+          page: currentPage.toString(),
+          search: filters.search,
+          type: filters.types.length > 0 ? filters.types.join(',') : undefined,
+          aspect: filters.aspects.length > 0 ? filters.aspects.join(',') : undefined,
+          costMin: filters.costMin.toString(),
+          costMax: filters.costMax.toString(),
+          keyword: filters.keywords.length > 0 ? filters.keywords.join(',') : undefined,
+          set: filters.sets.length > 0 ? filters.sets.join(',') : undefined
+        };
+        
+        const response = await fetchCards({ 
+            ...params,
+            structured: true // Request structured response with pagination
+          });        
+        // If it's page 1, replace the cards
+        // If it's past page 1, append the new cards
+        if (currentPage === 1) {
+          setCards(response.data);
+        } else {
+          setCards(prevCards => [...prevCards, ...response.data]);
+        }
+        
+        // Update pagination information
+        setTotalPages(response.meta.pages);
+        setTotalCards(response.meta.total);
+        
+      } catch (err) {
         console.error('Error loading cards:', err);
         setError('Failed to load cards. Please try again later.');
       } finally {
         setLoading(false);
+        setIsLoadingMore(false);
       }
     };
 
-    loadData();
-  }, []);
-
-  // Apply filters when filters state changes
-  useEffect(() => {
-    let result = [...cards];
-    
-    // Apply search filter
-    if (filters.search) {
-      const searchTerm = filters.search.toLowerCase();
-      result = result.filter(
-        card => card.name.toLowerCase().includes(searchTerm) || 
-               (card.text && card.text.toLowerCase().includes(searchTerm))
-      );
-    }
-    
-    // Apply type filter
-    if (filters.types.length > 0) {
-      result = result.filter(card => filters.types.includes(card.type));
-    }
-    
-    // Apply aspect filter
-    if (filters.aspects.length > 0) {
-      result = result.filter(card => 
-        card.aspects?.some(aspect => 
-          filters.aspects.includes(aspect.aspect_name)
-        )
-      );
-    }
-    
-    // Apply keyword filter
-    if (filters.keywords.length > 0) {
-      result = result.filter(card => 
-        card.keywords?.some(keyword => 
-          filters.keywords.includes(keyword)
-        )
-      );
-    }
-    
-    // Apply cost filter - using both energy_cost and cost fields for compatibility
-    result = result.filter(card => {
-      const cost = card.energy_cost !== undefined ? card.energy_cost : 
-                  (card.cost !== undefined ? card.cost : 0);
-      return cost >= filters.costMin && cost <= filters.costMax;
-    });
-    
-    // Apply set filter
-    if (filters.sets.length > 0) {
-      result = result.filter(card => {
-        const cardSet = card.set_code || card.set_name || '';
-        return filters.sets.includes(cardSet);
-      });
-    }
-    
-    setFilteredCards(result);
-  }, [filters, cards]);
+    loadCards();
+  }, [currentPage, filters]);
 
   // Handle card selection
   const handleCardClick = (card: ApiCard) => {
@@ -130,6 +124,12 @@ export default function CardBrowser() {
   // Handle updating filters
   const handleFilterChange = (newFilters: any) => {
     setFilters({ ...filters, ...newFilters });
+    setCurrentPage(1); // Reset to first page when filters change
+  };
+  
+  // Load more cards
+  const handleLoadMore = () => {
+    setCurrentPage(prev => prev + 1);
   };
 
   return (
@@ -175,7 +175,7 @@ export default function CardBrowser() {
             
             {/* Card Count */}
             <div className="text-gray-300 text-sm">
-              {loading ? 'Loading...' : `${filteredCards.length} cards found`}
+              {loading && currentPage === 1 ? 'Loading...' : `${totalCards} cards found`}
             </div>
           </div>
         </div>
@@ -213,7 +213,7 @@ export default function CardBrowser() {
 
           {/* Card Grid */}
           <div className="md:col-span-3">
-            {loading ? (
+            {loading && currentPage === 1 ? (
               <div className="flex items-center justify-center h-96">
                 <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
               </div>
@@ -228,7 +228,7 @@ export default function CardBrowser() {
                   Try Again
                 </Button>
               </div>
-            ) : filteredCards.length === 0 ? (
+            ) : cards.length === 0 ? (
               <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-10 text-center">
                 <p className="text-gray-400 mb-3">No cards found matching your filters.</p>
                 <Button 
@@ -247,10 +247,32 @@ export default function CardBrowser() {
                 </Button>
               </div>
             ) : (
-              <CardGrid
-                cards={filteredCards}
-                onCardClick={handleCardClick}
-              />
+              <>
+                <CardGrid
+                  cards={cards}
+                  onCardClick={handleCardClick}
+                />
+                
+                {/* Pagination/Load More */}
+                {currentPage < totalPages && (
+                  <div className="flex justify-center mt-8">
+                    <Button
+                      onClick={handleLoadMore}
+                      disabled={isLoadingMore}
+                      className="bg-purple-600 hover:bg-purple-700 text-white"
+                    >
+                      {isLoadingMore ? (
+                        <span className="flex items-center">
+                          <span className="animate-spin mr-2 h-4 w-4 border-t-2 border-b-2 border-white rounded-full"></span>
+                          Loading more cards...
+                        </span>
+                      ) : (
+                        'Load More Cards'
+                      )}
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

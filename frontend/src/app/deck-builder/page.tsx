@@ -112,18 +112,24 @@ export default function DeckBuilder() {
     
                 if (currentStage === 'leaders') {
                     // For leaders, fetch all cards and then filter for leaders only
-                    fetchedCards = await fetchCards();
+                    const response = await fetchCards();
+                    // Extract the cards array from the response
+                    fetchedCards = response.data || response;
                     console.log(`Loaded ${fetchedCards.length} cards, filtering for leaders...`);
                     setCards(fetchedCards);
                 } else if (currentStage === 'base') {
                     // For base selection, specifically fetch base cards
-                    fetchedCards = await fetchBaseCards();
+                    const response = await fetchBaseCards();
+                    // The fetchBaseCards function should also be updated to handle the new format
+                    fetchedCards = Array.isArray(response) ? response : response.data || [];
                     console.log(`Loaded ${fetchedCards.length} base cards`);
                     setBaseCards(fetchedCards);
                     setFilteredCards(fetchedCards); // Directly set filtered cards
                 } else if (currentStage === 'cards') {
                     // For regular cards, use the new function that excludes leaders and bases
-                    fetchedCards = await fetchRegularCards();
+                    const response = await fetchRegularCards();
+                    // The fetchRegularCards function should also be updated to handle the new format
+                    fetchedCards = Array.isArray(response) ? response : response.data || [];
                     console.log(`Loaded ${fetchedCards.length} regular cards (non-Leader, non-Base)`);
                     setCards(fetchedCards);
                 }
@@ -133,8 +139,9 @@ export default function DeckBuilder() {
                     if (currentStage === 'cards') {
                         // As a fallback for cards stage, try loading all cards
                         console.log('Trying fallback method for cards stage...');
-                        const allCards = await fetchCards({ limit: '200' });
-                        const regularCards = allCards.filter(card => 
+                        const allCardsResponse = await fetchCards({ limit: '200' });
+                        const allCards = allCardsResponse.data || allCardsResponse;
+                        const regularCards = allCards.filter((card: CardType) => 
                             card.type !== 'Leader' && card.type !== 'Base'
                         );
                         console.log(`Fallback found ${regularCards.length} regular cards`);
@@ -230,72 +237,75 @@ export default function DeckBuilder() {
     }, [cards, currentStage, cardTypeFilter, searchQuery, leaders, baseCards, base, showAllCards, isCardInAspect]);
 
     // Handle card selection
-    const handleCardClick = (card: CardType) => {
-        console.log('Card clicked:', card.name, 'Type:', card.type, 'Current stage:', currentStage);
-        
-        // If the card is already in the deck, we don't want to add it again
-        if (currentStage === 'cards' && isCardInDeck(card.id)) {
-            console.log('Card already in deck, not adding again');
-            // Still set it as selected to show details
-            setSelectedCard(card);
-            return;
-        }
-        
+    // frontend/src/app/deck-builder/page.tsx - Just fixing the function with the 'any' type
+
+// Update the function to have proper type annotation
+const handleCardClick = (card: CardType) => {
+    console.log('Card clicked:', card.name, 'Type:', card.type, 'Current stage:', currentStage);
+    
+    // If the card is already in the deck, we don't want to add it again
+    if (currentStage === 'cards' && isCardInDeck(card.id)) {
+        console.log('Card already in deck, not adding again');
+        // Still set it as selected to show details
         setSelectedCard(card);
+        return;
+    }
+    
+    setSelectedCard(card);
 
-        // Auto-add leaders when clicked (if in leaders stage and we have room)
-        if (currentStage === 'leaders' && leaders.length < 2 && !leaders.some(l => l.id === card.id)) {
-            console.log('Auto-adding leader on click');
+    // Auto-add leaders when clicked (if in leaders stage and we have room)
+    if (currentStage === 'leaders' && leaders.length < 2 && !leaders.some(l => l.id === card.id)) {
+        console.log('Auto-adding leader on click');
+        addLeader(card);
+    }
+    
+    // Auto-add base when clicked (if in base stage and no base is selected)
+    if (currentStage === 'base' && !base && card.type === 'Base') {
+        console.log('Auto-adding base on click');
+        setBaseContext(card);
+    }
+};
+
+// Update other functions that need type fixing
+const handleCardDoubleClick = (card: CardType) => {
+    console.log('Card double-clicked:', card.name);
+    
+    // Don't add if already in deck
+    if (isCardInDeck(card.id)) {
+        console.log('Card already in deck, not adding again');
+        return;
+    }
+    
+    handleAddToDeck(card);
+};
+
+// Handle adding card to deck
+const handleAddToDeck = (card: CardType) => {
+    console.log(`Adding ${card.type} to deck:`, card.name, 'Current stage:', currentStage);
+
+    if (currentStage === 'leaders') {
+        if (leaders.length < 2 && !leaders.some(l => l.id === card.id)) {
+            console.log('Adding leader to deck');
             addLeader(card);
-        }
-        
-        // Auto-add base when clicked (if in base stage and no base is selected)
-        if (currentStage === 'base' && !base && card.type === 'Base') {
-            console.log('Auto-adding base on click');
-            setBaseContext(card);
-        }
-    };
-
-    // Handle double-clicking to add card to deck
-    const handleCardDoubleClick = (card: CardType) => {
-        console.log('Card double-clicked:', card.name);
-        
-        // Don't add if already in deck
-        if (isCardInDeck(card.id)) {
-            console.log('Card already in deck, not adding again');
-            return;
-        }
-        
-        handleAddToDeck(card);
-    };
-
-    // Handle adding card to deck
-    const handleAddToDeck = (card: CardType) => {
-        console.log(`Adding ${card.type} to deck:`, card.name, 'Current stage:', currentStage);
-
-        if (currentStage === 'leaders') {
-            if (leaders.length < 2 && !leaders.some(l => l.id === card.id)) {
-                console.log('Adding leader to deck');
-                addLeader(card);
-            } else {
-                console.log('Not adding leader - already have 2 or leader already selected');
-            }
-        } else if (currentStage === 'base') {
-            if (card.type === 'Base') {
-                console.log('Setting base');
-                setBaseContext(card);
-            } else {
-                console.log('Not setting base - wrong card type:', card.type);
-            }
         } else {
-            if (!isCardInDeck(card.id)) {
-                console.log('Adding card to deck');
-                addCard(card);
-            } else {
-                console.log('Card already in deck, not adding again');
-            }
+            console.log('Not adding leader - already have 2 or leader already selected');
         }
-    };
+    } else if (currentStage === 'base') {
+        if (card.type === 'Base') {
+            console.log('Setting base');
+            setBaseContext(card);
+        } else {
+            console.log('Not setting base - wrong card type:', card.type);
+        }
+    } else {
+        if (!isCardInDeck(card.id)) {
+            console.log('Adding card to deck');
+            addCard(card);
+        } else {
+            console.log('Card already in deck, not adding again');
+        }
+    }
+};
 
     // Handle removing card from deck
     const handleRemoveFromDeck = (cardId: string) => {
