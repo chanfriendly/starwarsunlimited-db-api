@@ -1,27 +1,16 @@
-# Corrected version of backend/src/api/main.py
-from fastapi import FastAPI, HTTPException, Query
+# backend/src/api/main.py
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import sqlite3
-import os
 import logging
-from typing import Optional
-
-# Import routers
-from src.routes import auth
-from src.routes import cards
-from src.routes import decks
-from src.routes import stats
-from src.utils.vector_db import VectorDB
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # Change to DEBUG for more details
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Star Wars Unlimited API")
-app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 
 # Configure CORS
 origins = [
@@ -36,46 +25,56 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize vector database
-vector_db = VectorDB()
+# Import auth router from the correct location
+try:
+    # CHANGE THIS LINE to import from auth.routes instead of routes.auth
+    from src.auth.routes import router as auth_router 
+    app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+    logger.info("Successfully loaded auth router")
+except Exception as e:
+    logger.error(f"Failed to load auth router: {str(e)}")
+    logger.error(f"Make sure src/auth/routes.py exists and contains a FastAPI router")
 
-# Include routers with proper error handling
-app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
-if hasattr(cards, 'router'):
-    app.include_router(cards.router, prefix="/api/cards", tags=["cards"])
-if hasattr(decks, 'router'):
-    app.include_router(decks.router, prefix="/api/decks", tags=["decks"])
-if hasattr(stats, 'router'):
-    app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
+# Other routers
+try:
+    from src.routes.cards import router as cards_router
+    app.include_router(cards_router, prefix="/api/cards", tags=["cards"])
+    logger.info("Successfully loaded cards router")
+except Exception as e:
+    logger.error(f"Failed to load cards router: {str(e)}")
 
-# Database connection function
-def get_db():
-    # Use the database in the user's home directory
-    home_dir = os.path.expanduser("~")
-    db_path = os.path.join(home_dir, '.swu', 'swu_cards.db')
-    
-    logger.debug(f"Attempting to connect to database at: {db_path}")
-    
-    if not os.path.exists(db_path):
-        logger.error(f"Database not found at {db_path}")
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Database not found at {db_path}. Please run build_database.py first."
-        )
-    
-    try:
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        logger.debug("Successfully connected to database")
-        yield conn
-        conn.close()
-    except sqlite3.Error as e:
-        logger.error(f"Database error: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Database error: {str(e)}"
-        )
+try:
+    from src.routes.decks import router as decks_router
+    app.include_router(decks_router, prefix="/api/decks", tags=["decks"])
+    logger.info("Successfully loaded decks router") 
+except Exception as e:
+    logger.error(f"Failed to load decks router: {str(e)}")
+
+try:
+    from src.routes.stats import router as stats_router
+    app.include_router(stats_router, prefix="/api/stats", tags=["stats"])
+    logger.info("Successfully loaded stats router")
+except Exception as e:
+    logger.error(f"Failed to load stats router: {str(e)}")
 
 @app.get("/")
 async def root():
     return {"message": "Star Wars Unlimited API is running"}
+
+# Debug endpoint to help test the API
+@app.get("/debug-routes")
+async def debug_routes():
+    """List all registered routes for debugging"""
+    routes = []
+    for route in app.routes:
+        routes.append({
+            "path": route.path,
+            "name": route.name,
+            "methods": [method for method in route.methods] if hasattr(route, "methods") else None
+        })
+    return {"routes": routes}
+
+# Health check endpoint
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}

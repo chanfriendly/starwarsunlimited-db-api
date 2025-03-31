@@ -19,7 +19,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # OAuth2 setup
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")  # Add leading slash
 
 # Pydantic models
 class Token(BaseModel):
@@ -41,7 +41,7 @@ class UserResponse(BaseModel):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        model_config = {"from_attributes": True}
 
 # Helper functions
 def verify_password(plain_password, hashed_password):

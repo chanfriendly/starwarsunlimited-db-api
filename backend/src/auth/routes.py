@@ -18,7 +18,6 @@ from src.auth.auth import (
 )
 
 router = APIRouter(
-    prefix="/api/auth",
     tags=["auth"]
 )
 
