@@ -1,5 +1,4 @@
 # src/database/build_vector_db.py
-
 import os
 import sys
 import asyncio
@@ -7,10 +6,10 @@ import logging
 from pathlib import Path
 
 # Add the parent directory to the Python path
-sys.path.append(str(Path(__file__).parent.parent.parent))
+sys.path.append(str(Path(__file__).parent.parent))
 
-from src.api.vector_db import VectorDB
-from src.database.rules_parser import parse_rulebook
+from src.utils.vector_db import VectorDB
+from scripts.rules_parser import parse_rulebook
 import sqlite3
 from typing import List, Dict
 

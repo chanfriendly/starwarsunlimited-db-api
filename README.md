@@ -213,6 +213,41 @@ The project incorporates advanced AI capabilities to enhance deck building and g
 
 ## Technical Details
 
+### Database Access Patterns
+
+The project implements a hybrid database access approach:
+
+#### SQLAlchemy ORM
+Used for standard CRUD operations, relationship management, and simple queries:
+
+```python
+# Example: Get all decks for a user
+user_decks = db.query(Deck).filter(Deck.user_id == current_user.id).all()
+Benefits include:
+
+Type safety and validation
+Automatic relationship management
+Protection against SQL injection
+Database agnosticism
+
+Raw SQL with SQLAlchemy
+Used for complex queries, especially in card search and analytics:
+pythonCopy# Example: Complex filtering with performance optimization
+sql = text("""
+    SELECT c.* FROM cards c
+    JOIN card_aspects ca ON c.id = ca.card_id
+    WHERE ca.aspect_name = :aspect
+    ORDER BY c.name
+    LIMIT :limit OFFSET :offset
+""")
+result = db.execute(sql, {"aspect": "Command", "limit": 20, "offset": 0})
+Benefits include:
+
+Maximum flexibility for complex queries
+Better performance for multi-table operations
+Full access to database-specific features
+Fine-grained control over query execution
+
 ### Database Schema
 
 The database uses multiple tables to store card information:

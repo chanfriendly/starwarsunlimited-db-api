@@ -1,7 +1,24 @@
-from fastapi import FastAPI
+# Corrected version of backend/src/api/main.py
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+import sqlite3
+import os
+import logging
+from typing import Optional
+
 # Import routers
-from src.routes import auth, cards, decks, stats
+from src.routes import auth
+from src.routes import cards
+from src.routes import decks
+from src.routes import stats
+from src.utils.vector_db import VectorDB
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Star Wars Unlimited API")
 
@@ -18,35 +35,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
-app.include_router(auth.router)
-if hasattr(cards, 'router'):
-    app.include_router(cards.router)
-if hasattr(decks, 'router'):
-    app.include_router(decks.router)
-if hasattr(stats, 'router'):
-    app.include_router(stats.router)
-
-@app.get("/")
-async def root():
-    return {"message": "Star Wars Unlimited API is running"}
-
-# Configure CORS for frontend access
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 # Initialize vector database
 vector_db = VectorDB()
 
-# Include routers
-app.include_router(auth_router)
-app.include_router(deck_router)
+# Include routers with proper error handling
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+if hasattr(cards, 'router'):
+    app.include_router(cards.router, prefix="/api/cards", tags=["cards"])
+if hasattr(decks, 'router'):
+    app.include_router(decks.router, prefix="/api/decks", tags=["decks"])
+if hasattr(stats, 'router'):
+    app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
 
+# Database connection function
 def get_db():
     # Use the database in the user's home directory
     home_dir = os.path.expanduser("~")
@@ -65,252 +66,15 @@ def get_db():
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         logger.debug("Successfully connected to database")
-        return conn
+        yield conn
+        conn.close()
     except sqlite3.Error as e:
-        logger.error(f"Failed to connect to database: {str(e)}")
+        logger.error(f"Database error: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to connect to database: {str(e)}"
+            detail=f"Database error: {str(e)}"
         )
 
 @app.get("/")
 async def root():
     return {"message": "Star Wars Unlimited API is running"}
-
-@app.get("/api/cards")
-async def get_cards(
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
-    search: Optional[str] = None,
-    type: Optional[str] = None,
-    aspect: Optional[str] = None
-):
-    try:
-        # Connect to database
-        db = get_db()
-        
-        # Build query
-        query = "SELECT * FROM cards"
-        params = []
-        
-        # Add conditions if filters are provided
-        conditions = []
-        if search:
-            conditions.append("name LIKE ?")
-            params.append(f"%{search}%")
-        if type:
-            conditions.append("type = ?")
-            params.append(type)
-        if aspect:
-            query = """
-                SELECT c.* FROM cards c
-                JOIN card_aspects ca ON c.id = ca.card_id
-                WHERE ca.aspect_name = ?
-            """
-            params = [aspect]
-            # Add other conditions
-            if search:
-                query += " AND name LIKE ?"
-                params.append(f"%{search}%")
-            if type:
-                query += " AND type = ?"
-                params.append(type)
-        elif conditions:
-            query += " WHERE " + " AND ".join(conditions)
-        
-        # Add pagination
-        query += " LIMIT ? OFFSET ?"
-        params.extend([limit, (page - 1) * limit])
-        
-        # Execute query
-        cursor = db.execute(query, params)
-        cards = []
-        
-        # Process results
-        for row in cursor:
-            card = dict(row)
-            card_id = str(card["id"])
-            
-            # Log the card data
-            print(f"Card ID: {card_id}, Name: {card.get('name')}, Image URI: {card.get('image_uri')}")
-            
-            # Get aspects
-            aspects_cursor = db.execute(
-                "SELECT aspect_name, aspect_color FROM card_aspects WHERE card_id = ?",
-                [card_id]
-            )
-            card["aspects"] = [dict(row) for row in aspects_cursor]
-            
-            # Get keywords
-            keywords_cursor = db.execute(
-                "SELECT keyword FROM card_keywords WHERE card_id = ?",
-                [card_id]
-            )
-            card["keywords"] = [row["keyword"] for row in keywords_cursor]
-            
-            # Get traits
-            traits_cursor = db.execute(
-                "SELECT trait FROM card_traits WHERE card_id = ?",
-                [card_id]
-            )
-            card["traits"] = [row["trait"] for row in traits_cursor]
-            
-            # Get arenas
-            arenas_cursor = db.execute(
-                "SELECT arena FROM card_arenas WHERE card_id = ?",
-                [card_id]
-            )
-            card["arenas"] = [row["arena"] for row in arenas_cursor]
-            
-            cards.append(card)
-        
-        # Get total count for pagination
-        count_query = "SELECT COUNT(*) FROM cards"
-        if aspect:
-            count_query = """
-                SELECT COUNT(*) FROM cards c
-                JOIN card_aspects ca ON c.id = ca.card_id
-                WHERE ca.aspect_name = ?
-            """
-            count_params = [aspect]
-            if search:
-                count_query += " AND name LIKE ?"
-                count_params.append(f"%{search}%")
-            if type:
-                count_query += " AND type = ?"
-                count_params.append(type)
-            cursor = db.execute(count_query, count_params)
-        elif conditions:
-            count_query += " WHERE " + " AND ".join(conditions)
-            cursor = db.execute(count_query, params[:-2])  # exclude LIMIT params
-        else:
-            cursor = db.execute(count_query)
-        
-        total = cursor.fetchone()[0]
-        
-        db.close()
-        
-        return {
-            "cards": cards,
-            "total": total,
-            "page": page,
-            "limit": limit
-        }
-    except Exception as e:
-        print(f"Error in get_cards: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    
-@app.get("/api/cards/{card_id}")
-async def get_card(card_id: str):
-    try:
-        logger.debug(f"Getting card with ID: {card_id}")
-        db = get_db()
-        cursor = db.execute("SELECT * FROM cards WHERE id = ?", [card_id])
-        result = cursor.fetchone()
-        
-        if not result:
-            logger.warning(f"Card not found with ID: {card_id}")
-            raise HTTPException(status_code=404, detail="Card not found")
-            
-        card = dict(result)
-        card_id = str(card["id"])  # Convert ID to string
-        
-        # Get aspects
-        aspects_cursor = db.execute(
-            "SELECT aspect_name, aspect_color FROM card_aspects WHERE card_id = ?",
-            [card_id]
-        )
-        card["aspects"] = [dict(row) for row in aspects_cursor]
-        
-        # Get keywords
-        keywords_cursor = db.execute(
-            "SELECT keyword FROM card_keywords WHERE card_id = ?",
-            [card_id]
-        )
-        card["keywords"] = [row["keyword"] for row in keywords_cursor]
-        
-        # Get traits
-        traits_cursor = db.execute(
-            "SELECT trait FROM card_traits WHERE card_id = ?",
-            [card_id]
-        )
-        card["traits"] = [row["trait"] for row in traits_cursor]
-        
-        # Get arenas
-        arenas_cursor = db.execute(
-            "SELECT arena FROM card_arenas WHERE card_id = ?",
-            [card_id]
-        )
-        card["arenas"] = [row["arena"] for row in arenas_cursor]
-        
-        db.close()
-        logger.debug(f"Successfully retrieved card: {card['name']}")
-        return card
-    except sqlite3.Error as e:
-        logger.error(f"Database error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-    except Exception as e:
-        logger.error(f"Server error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
-
-@app.get("/api/aspects")
-async def get_aspects():
-    try:
-        logger.debug("Getting all aspects")
-        db = get_db()
-        cursor = db.execute("SELECT DISTINCT aspect_name, aspect_color FROM card_aspects")
-        aspects = [dict(row) for row in cursor]
-        db.close()
-        logger.debug(f"Successfully retrieved {len(aspects)} aspects")
-        return aspects
-    except sqlite3.Error as e:
-        logger.error(f"Database error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-@app.get("/api/types")
-async def get_types():
-    try:
-        logger.debug("Getting all card types")
-        db = get_db()
-        cursor = db.execute("SELECT DISTINCT type FROM cards")
-        types = [row["type"] for row in cursor]
-        db.close()
-        logger.debug(f"Successfully retrieved {len(types)} types")
-        return types
-    except sqlite3.Error as e:
-        logger.error(f"Database error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-    
-@app.get("/api/stats")
-async def get_stats():
-    try:
-        # Connect to database
-        db = get_db()
-        
-        # Get total cards count
-        cursor = db.execute("SELECT COUNT(*) FROM cards")
-        total_cards = cursor.fetchone()[0]
-        
-        # Get unique aspects count
-        cursor = db.execute("SELECT COUNT(DISTINCT aspect_name) FROM card_aspects")
-        aspects_count = cursor.fetchone()[0]
-        
-        # Get unique card types count
-        cursor = db.execute("SELECT COUNT(DISTINCT type) FROM cards")
-        types_count = cursor.fetchone()[0]
-        
-        # Get unique sets count
-        cursor = db.execute("SELECT COUNT(DISTINCT set_name) FROM cards WHERE set_name IS NOT NULL")
-        sets_count = cursor.fetchone()[0]
-        
-        db.close()
-        
-        return {
-            "total_cards": total_cards,
-            "aspects_count": aspects_count,
-            "types_count": types_count,
-            "sets_count": sets_count
-        }
-    except Exception as e:
-        logger.error(f"Error getting stats: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")

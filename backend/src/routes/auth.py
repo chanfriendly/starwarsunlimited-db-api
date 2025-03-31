@@ -5,10 +5,17 @@ from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel, EmailStr, validator
 from typing import Optional
 from datetime import timedelta
+import jwt
 
-from ..database.db import get_db
-from ..models.user import User
-from ..utils.auth import get_password_hash, verify_password, create_access_token, SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_DAYS
+from src.database.db import get_db
+from src.database.models import User
+from src.utils.auth import (
+    get_current_user, 
+    SECRET_KEY, 
+    ALGORITHM, 
+    ACCESS_TOKEN_EXPIRE_DAYS,
+    create_access_token
+)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -100,19 +107,6 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
             detail="Invalid username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    # Create access token
-    access_token_expires = timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
-    access_token = create_access_token(
-        data={"sub": user.id, "username": user.username}, 
-        expires_delta=access_token_expires
-    )
-    
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": user
-    }
 
 # Helper function to get current user from token
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):

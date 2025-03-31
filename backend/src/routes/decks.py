@@ -1,24 +1,22 @@
+# backend/src/routes/decks.py
+
 from typing import Annotated, List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from src.models.deck import Deck
-from src.models.deck_card import DeckCard
-from src.models.card import Card
-from src.models.user import User
-
-from src.routes.auth import get_current_user 
+# Import models directly from database/models.py
+from src.database.models import Deck, DeckCard, Card, User
+from src.database.db import get_db
+# Import auth utilities but avoid circular imports
+from src.utils.auth import get_current_user  # Move this function to utils/auth.py
 
 from src.schemas.decks import (
     DeckCreate, DeckUpdate, DeckResponse, DeckListResponse,
     DeckCardCreate, DeckCardUpdate, DeckCardResponse
 )
 
-router = APIRouter(
-    prefix="/api/decks",
-    tags=["decks"]
-)
+router = APIRouter()
 
 # Deck routes
 @router.get("/", response_model=List[DeckListResponse])
@@ -27,7 +25,7 @@ async def get_user_decks(
     db: Annotated[Session, Depends(get_db)]
 ):
     """Get all decks for the current user"""
-    # Query decks with card count
+    # Query decks with card count 
     decks_with_count = db.query(
         Deck,
         func.count(DeckCard.id).label("card_count")

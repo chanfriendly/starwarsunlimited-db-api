@@ -1,16 +1,26 @@
+# Web Framework
 fastapi==0.109.0
 uvicorn==0.27.0
-python-multipart==0.0.6
 pydantic==2.5.3
-requests==2.31.0
+python-multipart==0.0.6
+
+# Database
 SQLAlchemy==2.0.25
-python-dotenv==1.0.0
 aiosqlite==0.19.0
+
+# Authentication
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.1.2
+
+# Vector Database & AI
 qdrant-client==1.13.2
 sentence-transformers>=2.2.2
 numpy>=1.24.0
 torch>=2.0.0
 transformers>=4.30.0
-passlib[bcrypt]==1.7.4
-python-jose[cryptography]==3.3.0
-bcrypt==4.1.2
+
+# Utilities
+requests==2.31.0
+python-dotenv==1.0.0
+pytest==7.4.3

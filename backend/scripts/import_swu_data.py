@@ -1,5 +1,11 @@
-from swu_api_client import SWUApiClient
+# Corrected version of backend/scripts/import_swu_data.py
 import os
+import sys
+
+# Add parent directory to path to allow importing from module
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from scripts.swu_api_client import SWUApiClient
 
 def main():
     # Use absolute path to the database in the backend directory
@@ -44,4 +50,4 @@ def main():
         client._close_db_connection()
 
 if __name__ == "__main__":
-    main() 
+    main()
