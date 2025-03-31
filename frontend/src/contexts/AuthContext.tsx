@@ -2,6 +2,8 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { registerUser, loginUser, logoutUser } from '@/lib/auth';
+import { fetchUserProfile } from '@/lib/api';
 
 interface User {
   id: string;
@@ -29,19 +31,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        const response = await fetch('/api/auth/me');
-        if (response.ok) {
-          const userData = await response.json();
-          setUser(userData);
+        // Check if we have a token
+        const token = localStorage.getItem('accessToken');
+        
+        if (!token) {
+          setUser(null);
+          setIsLoading(false);
+          return;
         }
+        
+        // Verify token by fetching user profile
+        const userData = await fetchUserProfile();
+        setUser(userData);
       } catch (error) {
         console.error('Auth check error:', error);
+        // Clear invalid token
+        localStorage.removeItem('accessToken');
+        setUser(null);
       } finally {
         setIsLoading(false);
       }
     };
 
     checkAuth();
+    
+    // Listen for storage events (e.g., user logs out in another tab)
+    const handleStorageChange = () => {
+      checkAuth();
+    };
+    
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
   // Login function
@@ -49,21 +69,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ username, password }),
-      });
+      const authData = await loginUser(username, password);
       
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Login failed');
+      if (!authData.access_token) {
+        throw new Error('Login failed: No access token received');
       }
       
-      const data = await response.json();
-      setUser(data.user);
+      // Fetch user profile
+      const userData = await fetchUserProfile();
+      setUser(userData);
     } finally {
       setIsLoading(false);
     }
@@ -72,8 +86,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Logout function
   const logout = async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      await logoutUser();
       setUser(null);
+      // Dispatch event to notify other tabs
+      window.dispatchEvent(new Event("authChange"));
     } catch (error) {
       console.error('Logout error:', error);
     }
@@ -84,18 +100,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     
     try {
-      const response = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ username, email, password }),
-      });
-      
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Registration failed');
-      }
+      await registerUser(username, email, password);
+      // Note: We don't automatically log in after registration
+      // User will need to log in explicitly
     } finally {
       setIsLoading(false);
     }

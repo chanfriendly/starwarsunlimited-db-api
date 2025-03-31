@@ -10,7 +10,7 @@ import { LeaderSelection } from '@/components/LeaderSelection';
 import { DeckStats } from '@/components/DeckStats';
 import SaveDeckDialog from '@/components/SaveDeckDialog';
 import { useDeckBuilder } from '@/contexts/DeckBuilderContext';
-import { Card as CardType, fetchCards, fetchBaseCards, fetchRegularCards, fetchDeckById } from '@/lib/api';
+import { Card as CardType, fetchCards, fetchBaseCards, fetchRegularCards, fetchDeckById, fetchLeaderCards } from '@/lib/api';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 
@@ -104,60 +104,34 @@ export default function DeckBuilder() {
     // Fetch cards from API
     useEffect(() => {
         const loadCards = async () => {
-            try {
-                setLoading(true);
-                console.log(`Fetching cards for stage: ${currentStage}`);
-    
-                let fetchedCards: CardType[] = [];
-    
-                if (currentStage === 'leaders') {
-                    // For leaders, fetch all cards and then filter for leaders only
-                    const response = await fetchCards();
-                    // Extract the cards array from the response
-                    fetchedCards = response.data || response;
-                    console.log(`Loaded ${fetchedCards.length} cards, filtering for leaders...`);
-                    setCards(fetchedCards);
-                } else if (currentStage === 'base') {
-                    // For base selection, specifically fetch base cards
-                    const response = await fetchBaseCards();
-                    // The fetchBaseCards function should also be updated to handle the new format
-                    fetchedCards = Array.isArray(response) ? response : response.data || [];
-                    console.log(`Loaded ${fetchedCards.length} base cards`);
-                    setBaseCards(fetchedCards);
-                    setFilteredCards(fetchedCards); // Directly set filtered cards
-                } else if (currentStage === 'cards') {
-                    // For regular cards, use the new function that excludes leaders and bases
-                    const response = await fetchRegularCards();
-                    // The fetchRegularCards function should also be updated to handle the new format
-                    fetchedCards = Array.isArray(response) ? response : response.data || [];
-                    console.log(`Loaded ${fetchedCards.length} regular cards (non-Leader, non-Base)`);
-                    setCards(fetchedCards);
-                }
-    
-                if (fetchedCards.length === 0) {
-                    console.warn('No cards returned from API for stage:', currentStage);
-                    if (currentStage === 'cards') {
-                        // As a fallback for cards stage, try loading all cards
-                        console.log('Trying fallback method for cards stage...');
-                        const allCardsResponse = await fetchCards({ limit: '200' });
-                        const allCards = allCardsResponse.data || allCardsResponse;
-                        const regularCards = allCards.filter((card: CardType) => 
-                            card.type !== 'Leader' && card.type !== 'Base'
-                        );
-                        console.log(`Fallback found ${regularCards.length} regular cards`);
-                        setCards(regularCards);
-                    }
-                }
-            } catch (err) {
-                console.error('Error loading cards:', err);
-                setError('Failed to load cards. Please try again later.');
-            } finally {
-                setLoading(false);
+          try {
+            setLoading(true);
+            console.log(`Fetching cards for stage: ${currentStage}`);
+      
+            if (currentStage === 'leaders') {
+              const response = await fetchLeaderCards();
+              // Use response.data instead of response.cards
+              setCards(response.data);
+            } else if (currentStage === 'base') {
+              const response = await fetchBaseCards();
+              // Use response.data instead of response.cards
+              setBaseCards(response.data);
+              setFilteredCards(response.data);
+            } else if (currentStage === 'cards') {
+              const response = await fetchRegularCards();
+              // Use response.data instead of response.cards
+              setCards(response.data);
             }
+          } catch (err) {
+            console.error('Error loading cards:', err);
+            setError('Failed to load cards. Please try again later.');
+          } finally {
+            setLoading(false);
+          }
         };
-    
+      
         loadCards();
-    }, [currentStage]);
+      }, [currentStage]);
 
     // Filter cards based on stage and search/type filters
     useEffect(() => {
@@ -402,7 +376,7 @@ const handleAddToDeck = (card: CardType) => {
                                 <div className="aspect-[7/10] relative rounded-lg overflow-hidden border-2 border-purple-500">
                                     {base.image_uri || base.image_url ? (
                                         <img
-                                            src={base.image_uri || base.image_url}
+                                            src={base.image_uri ?? base.image_url ?? undefined}
                                             alt={base.name}
                                             className="w-full h-full object-contain cursor-pointer"
                                             onClick={() => setSelectedCard(base)}
@@ -478,7 +452,7 @@ const handleAddToDeck = (card: CardType) => {
                                     <div className="aspect-[7/10] relative rounded-lg overflow-hidden border border-gray-700 hover:border-purple-500 transition-colors cursor-pointer">
                                         {deckCard.card.image_uri || deckCard.card.image_url ? (
                                             <img
-                                                src={deckCard.card.image_uri || deckCard.card.image_url}
+                                                src={deckCard.card.image_uri ?? deckCard.card.image_url ?? ''}
                                                 alt={deckCard.card.name}
                                                 className="w-full h-full object-contain"
                                                 onClick={() => setSelectedCard(deckCard.card)}
@@ -559,12 +533,12 @@ const handleAddToDeck = (card: CardType) => {
                     // Use the dedicated function to fetch base cards
                     const bases = await fetchBaseCards();
                     
-                    if (bases.length > 0) {
-                        console.log(`Successfully loaded ${bases.length} base cards`);
+                    if (bases.data.length > 0) {
+                        console.log(`Successfully loaded ${bases.data.length} base cards`);
                         
                         // Update both the base cards state and filtered cards
-                        setBaseCards(bases);
-                        setFilteredCards(bases);
+                        setBaseCards(bases.data);
+                        setFilteredCards(bases.data);
                     } else {
                         console.warn('No base cards returned from the API');
                         setError('No base cards found. They may not exist in the database or may have an incorrect type.');

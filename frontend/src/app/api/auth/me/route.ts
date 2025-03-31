@@ -6,11 +6,11 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export async function GET(request: NextRequest) {
   try {
-    // Add await here to properly resolve the Promise
     const cookieStore = await cookies();
     const token = cookieStore.get('auth_token');
     
-    if (!token) {
+    // Check if token exists
+    if (!token || !token.value) {
       return NextResponse.json(
         { detail: 'Not authenticated' },
         { status: 401 }

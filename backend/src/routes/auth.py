@@ -17,7 +17,6 @@ from src.utils.auth import (
     create_access_token
 )
 
-router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 # Models for request/response - NEEDS TO BE BEFORE ROUTE DEFINITIONS
 class UserCreate(BaseModel):

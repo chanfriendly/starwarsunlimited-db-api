@@ -8,6 +8,7 @@ from src.database.db import get_db
 from src.database.models import Card, CardAspect
 from src.utils.db_helpers import enrich_card_with_relationships, card_to_dict
 import logging
+import math
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ async def get_cards(
     limit: int = Query(20, ge=1, le=100),
     search: Optional[str] = None,
     type: Optional[str] = None,
+    not_type: Optional[str] = None,
     aspect: Optional[str] = None,
     sort: Optional[str] = None
 ):
@@ -131,18 +133,16 @@ async def get_cards(
             
         # Return results with pagination info
         return {
-            "cards": cards,
+            "data": cards,
+            "meta":{
             "total": total,
             "page": page,
             "limit": limit,
-            "has_next": page * limit < total,
-            "has_prev": page > 1
+            "pages": math.ceil(total / limit) if limit > 0 else 1
+            }
         }
-        
     except Exception as e:
         logger.error(f"Error in get_cards: {str(e)}", exc_info=True)
-        import traceback
-        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{card_id}")

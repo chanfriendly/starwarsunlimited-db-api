@@ -21,6 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Star Wars Unlimited API")
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 
 # Configure CORS
 origins = [
