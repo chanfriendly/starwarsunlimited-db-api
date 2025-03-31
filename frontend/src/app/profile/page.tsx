@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { cookies } from 'next/headers';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -31,6 +31,10 @@ import {
     fetchUserCollection,
     deleteUserDeck
 } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
+import { useRouter } from 'next/navigation';
+
+const cookieStore = await cookies();
 
 // Default user profile data
 const defaultUserProfile = {

@@ -21,3 +21,11 @@ def get_db():
         yield db
     finally:
         db.close()
+
+# Create tables
+def init_db():
+    from ..models.user import User
+    # Import other models here
+    
+    # Create all tables
+    Base.metadata.create_all(bind=engine)

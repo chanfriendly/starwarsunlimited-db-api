@@ -1,19 +1,35 @@
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import sqlite3
-from typing import List, Optional
-import json
-import os
-import logging
-from .vector_db import VectorDB
-from .auth import router as auth_router
-from .decks import router as deck_router
-
-# Configure logging
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
+# Import routers
+from src.routes import auth, cards, decks, stats
 
 app = FastAPI(title="Star Wars Unlimited API")
+
+# Configure CORS
+origins = [
+    "http://localhost:3000",  # Frontend in development
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include routers
+app.include_router(auth.router)
+if hasattr(cards, 'router'):
+    app.include_router(cards.router)
+if hasattr(decks, 'router'):
+    app.include_router(decks.router)
+if hasattr(stats, 'router'):
+    app.include_router(stats.router)
+
+@app.get("/")
+async def root():
+    return {"message": "Star Wars Unlimited API is running"}
 
 # Configure CORS for frontend access
 app.add_middleware(
@@ -59,7 +75,7 @@ def get_db():
 
 @app.get("/")
 async def root():
-    return {"message": "Star Wars Unlimited API"}
+    return {"message": "Star Wars Unlimited API is running"}
 
 @app.get("/api/cards")
 async def get_cards(

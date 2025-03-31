@@ -3,10 +3,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from src.database.db import get_db
-from src.database.models import Deck, DeckCard, Card, User
-from src.auth.auth import get_current_user
-from src.deck.schemas import (
+from src.models.deck import Deck
+from src.models.deck_card import DeckCard
+from src.models.card import Card
+from src.models.user import User
+
+from src.routes.auth import get_current_user 
+
+from src.schemas.decks import (
     DeckCreate, DeckUpdate, DeckResponse, DeckListResponse,
     DeckCardCreate, DeckCardUpdate, DeckCardResponse
 )

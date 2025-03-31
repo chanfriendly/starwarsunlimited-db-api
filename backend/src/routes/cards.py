@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Query, HTTPException
 from typing import Optional
 import sqlite3
-from ..database import get_db
+from src.database.db import get_db
 
+# Define prefix and tags in the router
 router = APIRouter()
 
 @router.get("/")
@@ -15,10 +16,9 @@ async def get_cards(
 ):
     try:
         db = get_db()
-        cursor = db.execute("SELECT * FROM cards LIMIT ? OFFSET ?", 
+        cursor = next(db).execute("SELECT * FROM cards LIMIT ? OFFSET ?", 
                           [limit, (page - 1) * limit])
         cards = [dict(row) for row in cursor]
-        db.close()
         return {"cards": cards}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
