@@ -38,8 +38,22 @@ The project has a functional backend and frontend structure, but key user featur
     *   Basic card display and filtering capabilities.
 
 3.  **Current Focus & Issues**:
-    *   **Signup Troubleshooting:** The user registration process (`/api/auth/register`) successfully creates the user in the `swu_app.db` database but fails when serializing the response, resulting in a `500 Internal Server Error` and a `fastapi.exceptions.ResponseValidationError: value is not a valid dict`. This prevents the frontend from getting a successful confirmation.
-    *   **Login Troubleshooting:** The login flow (`/api/auth/token` and frontend implementation) needs verification, particularly ensuring the frontend sends credentials as `application/x-www-form-urlencoded` data as required by `OAuth2PasswordRequestForm`.
+
+    ### Authentication System
+- ✅ Fixed user registration functionality
+- ✅ Implemented proper response serialization for SQLAlchemy models
+- ✅ Added logout feature to the navbar
+- ✅ Enhanced error handling in auth routes
+
+### User Profile Features
+- ✅ Created user-specific endpoints for decks and collections
+- ✅ Implemented `/api/me/decks` endpoint for personalized deck management
+- ✅ Added foundation for `/api/me/collection` endpoint 
+- ✅ Updated frontend to handle auth state properly
+
+### Database Architecture
+- ✅ Resolved database connection issues between app and card databases
+- ✅ Created proper model relationships between users, decks, and cards
 
 ## Features
 

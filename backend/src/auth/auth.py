@@ -62,11 +62,28 @@ def get_user(db: Session, username: str):
     return db.query(User).filter(User.username == username).first()
 
 def authenticate_user(db: Session, username: str, password: str):
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.debug(f"Attempting to authenticate user: {username}")
     user = get_user(db, username)
+    
     if not user:
+        logger.debug(f"User '{username}' not found in database")
         return False
-    if not verify_password(password, user.password_hash):
+    
+    logger.debug(f"Found user {username}, verifying password")
+    
+    # Log password hash for debugging (hash is safe to log)
+    logger.debug(f"Stored password hash: {user.password_hash[:10]}...")
+    
+    # Verify password
+    is_valid = verify_password(password, user.password_hash)
+    logger.debug(f"Password verification result: {is_valid}")
+    
+    if not is_valid:
         return False
+    
     return user
 
 async def get_current_user(
@@ -100,4 +117,26 @@ def create_user(db: Session, user_data: UserCreate):
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    return db_user
+    
+    # Convert to dictionary that matches UserResponse model
+    user_dict = {
+        "id": db_user.id,
+        "username": db_user.username,
+        "email": db_user.email,
+        "created_at": db_user.created_at
+    }
+    return user_dict
+
+# Simple test user 
+def create_test_user(db: Session):
+    # Check if test user exists
+    test_user = get_user(db, "testuser")
+    if not test_user:
+        # Create a test user with a simple password
+        user_data = UserCreate(
+            username="testuser",
+            email="test@example.com",
+            password="password123"
+        )
+        return create_user(db, user_data)
+    return test_user

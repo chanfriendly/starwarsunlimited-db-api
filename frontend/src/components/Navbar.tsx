@@ -1,14 +1,31 @@
 // src/components/Navbar.tsx
 'use client';
-
 import React from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button'; // Import your Button component
 
 export function Navbar() {
   const pathname = usePathname();
+  const router = useRouter();
   
   const isActive = (path: string) => pathname === path;
+  
+  // Logout function
+  const handleLogout = async () => {
+    try {
+      // Call the logout endpoint
+      await fetch('/api/auth/logout', { method: 'POST' });
+      
+      // Clear the auth token
+      document.cookie = "auth_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+      
+      // Redirect to login page
+      router.push('/login');
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
+  };
   
   return (
     <nav className="bg-gray-900 border-b border-gray-800 py-4 px-6">
@@ -54,6 +71,15 @@ export function Navbar() {
           >
             Profile
           </Link>
+          
+          {/* Logout Button */}
+          <Button 
+            onClick={handleLogout}
+            variant="ghost"
+            className="text-gray-300 hover:text-white"
+          >
+            Logout
+          </Button>
         </div>
       </div>
     </nav>

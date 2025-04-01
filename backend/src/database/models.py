@@ -23,6 +23,7 @@ class User(Base):
     updated_at = Column(DateTime, onupdate=datetime.datetime.utcnow)
     
     decks = relationship("Deck", back_populates="user", cascade="all, delete-orphan")
+    collection = relationship("UserCollection", back_populates="user", cascade="all, delete-orphan")
 
 print(f"--- Defining Deck class in models.py using Base ID: {id(Base)} ---")
 
@@ -83,7 +84,7 @@ class Card(Base):
     is_unique = Column(Boolean, nullable=True)
     artist = Column(String, nullable=True)
     serial_code = Column(String, nullable=True)
-    
+   
     # Relationships
     aspects = relationship("CardAspect", back_populates="card", cascade="all, delete-orphan")
     keywords = relationship("CardKeyword", back_populates="card", cascade="all, delete-orphan")
@@ -91,6 +92,7 @@ class Card(Base):
     arenas = relationship("CardArena", back_populates="card", cascade="all, delete-orphan")
     price_history = relationship("PriceHistory", back_populates="card", cascade="all, delete-orphan")
     deck_entries = relationship("DeckCard", back_populates="card")
+    collectors = relationship("UserCollection", back_populates="card")
 
 class CardAspect(Base):
     __tablename__ = 'card_aspects'
@@ -139,6 +141,16 @@ class PriceHistory(Base):
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)
     
     card = relationship("Card", back_populates="price_history")
+
+class UserCollection(Base):
+    __tablename__ = 'user_collection'
+    
+    user_id = Column(String, ForeignKey('users.id'), primary_key=True)
+    card_id = Column(String, ForeignKey('cards.id'), primary_key=True)
+    count = Column(Integer, nullable=False, default=1)
+    
+    user = relationship("User", back_populates="collection")
+    card = relationship("Card", back_populates="collectors")
 
 print(f"--- Finished defining models in models.py ---")
 print(f"--- Tables known to models.Base.metadata: {list(Base.metadata.tables.keys())} ---")

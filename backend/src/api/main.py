@@ -57,6 +57,13 @@ try:
 except Exception as e:
     logger.error(f"Failed to load stats router: {str(e)}")
 
+try:
+    from src.routes.me import router as me_router
+    app.include_router(me_router, prefix="/api/me", tags=["me"])
+    logger.info("Successfully loaded me router")
+except Exception as e:
+    logger.error(f"Failed to load me router: {str(e)}")
+
 @app.get("/")
 async def root():
     return {"message": "Star Wars Unlimited API is running"}
