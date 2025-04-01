@@ -5,10 +5,10 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from src.database.models import User
-from src.database.db import get_db
+from src.database.db import get_app_db
 
 # Configuration
 SECRET_KEY = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"  # Should be in env var
@@ -40,8 +40,6 @@ class UserResponse(BaseModel):
     email: str
     created_at: datetime
 
-    class Config:
-        model_config = {"from_attributes": True}
 
 # Helper functions
 def verify_password(plain_password, hashed_password):
@@ -73,7 +71,7 @@ def authenticate_user(db: Session, username: str, password: str):
 
 async def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)],
-    db: Annotated[Session, Depends(get_db)]
+    db: Annotated[Session, Depends(get_app_db)]
 ):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

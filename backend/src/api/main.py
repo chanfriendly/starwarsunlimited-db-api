@@ -78,3 +78,31 @@ async def debug_routes():
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
+try:
+    from src.routes.aspects import router as aspects_router
+    app.include_router(aspects_router, prefix="/api/aspects", tags=["aspects"])
+    logger.info("Successfully loaded aspects router")
+except Exception as e:
+    logger.error(f"Failed to load aspects router: {str(e)}")
+
+try:
+    from src.routes.types import router as types_router
+    app.include_router(types_router, prefix="/api/types", tags=["types"])
+    logger.info("Successfully loaded types router")
+except Exception as e:
+    logger.error(f"Failed to load types router: {str(e)}")
+
+try:
+    from src.routes.keywords import router as keywords_router
+    app.include_router(keywords_router, prefix="/api/keywords", tags=["keywords"])
+    logger.info("Successfully loaded keywords router")
+except Exception as e:
+    logger.error(f"Failed to load keywords router: {str(e)}")
+
+try:
+    from src.routes.sets import router as sets_router
+    app.include_router(sets_router, prefix="/api/sets", tags=["sets"])
+    logger.info("Successfully loaded sets router")
+except Exception as e:
+    logger.error(f"Failed to load sets router: {str(e)}")

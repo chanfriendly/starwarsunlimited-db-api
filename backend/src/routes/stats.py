@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from src.database.db import get_db
+from src.database.db import get_card_db
 import logging
 
 # Configure logging
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.get("/")
-async def get_stats(db: Session = Depends(get_db)):
+async def get_stats(db: Session = Depends(get_card_db)):
     """Get card database statistics.
     
     Uses raw SQL for complex aggregations and analytics.

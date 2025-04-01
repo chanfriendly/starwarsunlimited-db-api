@@ -21,72 +21,63 @@ Our mission is to support growth for the Star Wars Unlimited community, offering
 <img width="1293" alt="Screenshot 2025-03-23 at 1 05 35 PM" src="https://github.com/user-attachments/assets/b35a8216-c01c-4b5e-a5b7-350850decfef" />
 <img width="1333" alt="Screenshot 2025-03-23 at 1 06 07 PM" src="https://github.com/user-attachments/assets/0f8ecea8-f18d-4d8a-b54c-3df901fe2f37" />
 
-### Current Status (2025-03-23)
+### Current Status (2025-04-01)
 
-The project has made significant progress with several key improvements:
+The project has a functional backend and frontend structure, but key user features are currently under development and debugging:
 
-1. **Complete Backend Development**:
-   - Robust SQLite database with detailed card schema
-   - Full card data import from official Star Wars Unlimited API
-   - RESTful API endpoints for cards, decks, and aspects
-   - Authentication system with JWT implementation
-   - Vector database integration for semantic search capabilities
+1.  **Backend Development**:
+    *   Robust database setup using **two separate SQLite databases**: `swu_cards.db` for static card data and `swu_app.db` for user/deck data.
+    *   Full card data import mechanism (presumably populating `swu_cards.db`).
+    *   RESTful API endpoints using FastAPI for cards, decks, aspects, etc.
+    *   Authentication system using JWT and passlib/bcrypt. Auth logic consolidated.
+    *   SQLAlchemy ORM used for application database schema and access.
+    *   Vector database integration foundation (if applicable).
 
-2. **Advanced Deck Builder Functionality**:
-   - Multi-stage deck building workflow (Leaders → Base → Cards)
-   - Intelligent aspect compatibility checking based on Twin Suns format rules
-   - Visual indicators for card selection and compatibility status
-   - Interactive card detail view with flip functionality for double-sided leader cards
-   - Real-time deck statistics and validation
+2.  **Frontend Development**:
+    *   Next.js/React frontend with components for card browsing, signup, and login.
+    *   Basic card display and filtering capabilities.
 
-3. **User Interface Enhancements**:
-   - Responsive grid layout with card filtering and search
-   - Detailed card view with aspect color coding
-   - Card grid with selection indicators and type badges
-   - Stage progress indicators in deck builder
-   - Dark mode optimized interface
-
-4. **AI Integration (In Progress)**:
-   - Vector database setup for semantic card relationship analysis
-   - Foundation for AI deck suggestions and playtesting
+3.  **Current Focus & Issues**:
+    *   **Signup Troubleshooting:** The user registration process (`/api/auth/register`) successfully creates the user in the `swu_app.db` database but fails when serializing the response, resulting in a `500 Internal Server Error` and a `fastapi.exceptions.ResponseValidationError: value is not a valid dict`. This prevents the frontend from getting a successful confirmation.
+    *   **Login Troubleshooting:** The login flow (`/api/auth/token` and frontend implementation) needs verification, particularly ensuring the frontend sends credentials as `application/x-www-form-urlencoded` data as required by `OAuth2PasswordRequestForm`.
 
 ## Features
 
 ### Backend
-- Fetches complete card data from the official Star Wars Unlimited API
-- Handles all card types (Leaders, Bases, Units, Events, etc.)
-- Stores both card faces for Leader cards
-- Maintains relationships between cards and their aspects, keywords, traits, and arenas
-- Includes price history tracking capability
-- Provides detailed logging of the database building process
-- Rate-limited API access to be respectful of the server
-- User authentication and authorization
+- Fetches complete card data from external sources (populates `swu_cards.db`).
+- Handles all card types (Leaders, Bases, Units, Events, etc.).
+- Stores both card faces for Leader cards.
+- Manages relationships between cards and their aspects, keywords, etc. (in `swu_cards.db`).
+- Provides API endpoints for accessing card data.
+- User authentication and authorization (using `swu_app.db`).
+- API endpoints for creating/managing user decks (using `swu_app.db`).
+- Detailed logging capabilities.
 
 ### Frontend
-- Modern, responsive card browser interface
-- Filter cards by type, aspect, and other attributes
-- Search cards by name and text
-- Detailed card view with full card information
-- Multi-stage deck building process
-- Compatibility checking for proper deck construction
-- Dark mode interface
+- Modern, responsive card browser interface (connected to backend).
+- Filter cards by type, aspect, and other attributes.
+- Search cards by name and text.
+- Signup and Login pages.
+- Dark mode interface.
 
 ### AI Features (In Development)
-- Semantic card analysis using vector database
-- Deck suggestion engine based on card synergies
-- AI opponent for deck playtesting
+- Semantic card analysis using vector database.
+- Deck suggestion engine based on card synergies.
+- AI opponent for deck playtesting.
 
 ### Technical Architecture
 
 #### Database
 
-- SQLite for structured card data storage
-- Qdrant Vector Database for advanced semantic search capabilities
+-   **Application Database:** SQLite (`~/.swu/swu_app.db`) for user accounts, decks, and other dynamic application data. Managed via SQLAlchemy ORM.
+-   **Card Database:** SQLite (`~/.swu/swu_cards.db`) for static card data. Populated via scripts.
+-   **Vector Database:** Qdrant (if implemented) for advanced semantic search capabilities.
 
 #### Technologies
 
-- Frontend: Next.js 15, React 18, Tailwind CSS 4
-- Backend: FastAPI, SQLite, Qdrant
+- Frontend: Next.js, React, Tailwind CSS 
+- Backend: FastAPI, SQLAlchemy, Pydantic, SQLite, Passlib, python-jose
+- Vector DB: Qdrant (if implemented)
 - Authentication: JWT with bcrypt password hashing
 
 ## Getting Started
@@ -98,13 +89,13 @@ The project has made significant progress with several key improvements:
 
 ### Installation
 
-1. Clone this repository:
+1. **Clone this repository:**
 ```bash
 git clone https://github.com/yourusername/starwarsunlimited-db-api.git
 cd starwarsunlimited-db-api
 ```
 
-2. Set up the backend:
+2. **Set up the backend:**
 ```bash
 cd backend
 python -m venv .venv
@@ -112,20 +103,26 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-3. Set up the frontend:
+3. **Set up the frontend:**
 ```bash
 cd frontend
 npm install
 ```
 
-4. Build the database:
-```bash
-cd backend
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-python -m src.api.import_swu_data
-```
+4.  **Initialize Databases:**
+    *   **Card Database:** Populate the static card data. (Update this command based on your actual script name, e.g., `db_setup.py` or `import_swu_data.py`)
+      ```bash
+      cd ../backend # Go back to backend directory
+      source .venv/bin/activate # Activate venv if not already active
+      python -m src.database.db_setup # Or your data import script
+      ```
+    *   **Application Database:** Create the necessary tables for users, decks, etc.
+      ```bash
+      # Still in backend directory with venv active
+      python init_app_database.py
+      ```
 
-Note: The database will be created in your home directory at `~/.swu/swu_cards.db`
+    *Note: Databases will be created in your home directory at `~/.swu/` (`swu_cards.db` and `swu_app.db`).*
 
 ### Development
 
@@ -140,43 +137,44 @@ This will start:
 
 ## Current Status and Known Issues
 
-The project is actively under development. Current limitations include:
+The project is actively under development.
+
+### Current Focus
+
+-   **Resolving Signup Error:** Fixing the `ResponseValidationError` that occurs after successful user creation in the database, preventing the API from returning a successful response.
+-   **Verifying Login Flow:** Ensuring the frontend correctly sends login credentials (form data) and the backend successfully authenticates and returns a JWT token.
 
 ### Incomplete Functionality
-
-- Deck saving and sharing functionality needs to be completed
-- User profile management is partially implemented
-- AI features are still in early development
+- Deck saving, sharing, and management APIs/frontend need completion.
+- User profile management beyond basic auth.
+- AI features are in early development/planning.
 
 ### User Interface
-
-- Card grid layout needs optimization for variable card sizes
-- Mobile responsiveness improvements needed for deck builder
-
-### Features in Active Development
-
-- AI deck suggestion system
-- Comprehensive deck analysis
-- Full vector database integration for semantic card relationships
-- Playtesting against AI opponents
+- Card grid layout may need optimization.
+- Mobile responsiveness improvements may be needed.
 
 ## Development Roadmap
 
-### Phase 1: Core Functionality (Completed)
-- ✅ Card database with comprehensive data model
-- ✅ Card browser with filtering and search
-- ✅ Multi-stage deck builder
-- ✅ Aspect compatibility checking
-- ✅ Leader card flip view
+### Phase 1: Core Functionality (Mostly Completed)
+- ✅ Card database schema & population (`swu_cards.db`)
+- ✅ Application database schema (`swu_app.db` via SQLAlchemy)
+- ✅ Card browser API endpoints
+- ✅ Basic frontend card browser
+- ⏳ Multi-stage deck builder (Backend/Frontend implementation needed)
+- ⏳ Aspect compatibility checking (Logic needed)
+- ⏳ Leader card flip view (Frontend component)
 
 ### Phase 2: User Management (In Progress)
-- ✅ Authentication backend
+- ✅ Authentication backend logic (Password Hashing, JWT)
+- ✅ Basic User model and DB table
+- ⏳ **Fix Signup Response Error** (Current focus)
+- ⏳ **Verify/Fix Login Flow** (Current focus)
 - ⏳ User profile frontend
-- ⏳ Deck saving and sharing
+- ⏳ Deck saving and sharing (Requires user association)
 - ⏳ Deck versioning and history
 
 ### Phase 3: AI Integration (Starting)
-- ✅ Vector database setup
+- ✅ Vector database setup (if applicable)
 - ⏳ Semantic card relationship analysis
 - ⏳ AI deck suggestions
 - ⏳ Deck performance predictions
@@ -215,50 +213,12 @@ The project incorporates advanced AI capabilities to enhance deck building and g
 
 ### Database Access Patterns
 
-The project implements a hybrid database access approach:
-
-#### SQLAlchemy ORM
-Used for standard CRUD operations, relationship management, and simple queries:
-
-```python
-# Example: Get all decks for a user
-user_decks = db.query(Deck).filter(Deck.user_id == current_user.id).all()
-Benefits include:
-
-Type safety and validation
-Automatic relationship management
-Protection against SQL injection
-Database agnosticism
-
-Raw SQL with SQLAlchemy
-Used for complex queries, especially in card search and analytics:
-pythonCopy# Example: Complex filtering with performance optimization
-sql = text("""
-    SELECT c.* FROM cards c
-    JOIN card_aspects ca ON c.id = ca.card_id
-    WHERE ca.aspect_name = :aspect
-    ORDER BY c.name
-    LIMIT :limit OFFSET :offset
-""")
-result = db.execute(sql, {"aspect": "Command", "limit": 20, "offset": 0})
-Benefits include:
-
-Maximum flexibility for complex queries
-Better performance for multi-table operations
-Full access to database-specific features
-Fine-grained control over query execution
+The project implements a hybrid database access approach using **two SQLite databases**. See `Development.md` and `db_best_practices.md` for details on using `get_app_db` vs. `get_card_db` and ORM vs. Raw SQL.
 
 ### Database Schema
 
-The database uses multiple tables to store card information:
-
-#### Main Tables
-- `cards`: Core card information (name, cost, stats, etc.)
-- `price_history`: Historical price data for cards
-- `card_aspects`: Card faction/alignment information
-- `card_keywords`: Card keyword abilities
-- `card_traits`: Card traits (Force, Pilot, etc.)
-- `card_arenas`: Card arena affiliations (Ground, Space)
+-   **Application Database (`swu_app.db`):** Contains `users`, `decks`, `deck_cards` tables managed by SQLAlchemy models in `src/database/models.py`.
+-   **Card Database (`swu_cards.db`):** Contains `cards`, `card_aspects`, `card_keywords`, `card_traits`, `card_arenas`, `price_history` tables, typically populated via scripts.
 
 #### Key Fields
 Each card entry includes:

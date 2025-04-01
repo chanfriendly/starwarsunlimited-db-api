@@ -1,6 +1,6 @@
 # build_database.py
 
-from ..api.swu_api_client import SWUApiClient
+from swu_api_client import SWUApiClient
 import logging
 from datetime import datetime
 import sqlite3

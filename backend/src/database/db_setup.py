@@ -3,16 +3,22 @@ import sqlite3
 import os
 from .import_sample_data import import_sample_data
 
-def setup_db():
-    # Get the absolute path to the backend directory
-    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    db_path = os.path.join(backend_dir, 'swu_cards.db')
-    
+home_dir = os.path.expanduser("~")
+db_dir = os.path.join(home_dir, '.swu')
+# Ensure this path is EXACTLY the one for the CARD database
+db_path = os.path.join(db_dir, 'swu_cards.db')
+
+def setup_card_db(): # Renamed for clarity
+    # Ensure the directory exists (optional, but good practice)
+    os.makedirs(db_dir, exist_ok=True)
+
     # Remove existing database if it exists
     if os.path.exists(db_path):
-        os.remove(db_path)
-    
-    print(f"Creating database at: {db_path}")
+         print(f"Removing existing CARD database at: {db_path}")
+         os.remove(db_path)
+    else:
+         print(f"Creating new CARD database at: {db_path}")
+
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
@@ -24,9 +30,11 @@ def setup_db():
         DROP TABLE IF EXISTS card_aspects;
         DROP TABLE IF EXISTS price_history;
         DROP TABLE IF EXISTS cards;
+        -- DO NOT DROP users, decks etc. here
+
     ''')
     
-    # Create cards table
+    # Create cards table only
     cursor.execute('''
     CREATE TABLE cards (
         id TEXT PRIMARY KEY,
@@ -121,10 +129,11 @@ def setup_db():
     
     conn.commit()
     conn.close()
-    print("Database setup completed successfully!")
+    print("CARD Database setup completed successfully!")
     
-    # Import sample data
-    import_sample_data()
+    # Import sample data into the CARD database
+    # Ensure import_sample_data uses the correct db_path
+    import_sample_data(db_path) # Pass path explicitly if needed
 
 if __name__ == '__main__':
-    setup_db()
+    setup_card_db()

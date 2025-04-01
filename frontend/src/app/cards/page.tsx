@@ -52,17 +52,18 @@ export default function CardBrowser() {
           fetchSets()
         ]);
         
-        setAspects(aspectsData);
-        setTypes(typesData);
-        setKeywords(keywordsData);
-        setSets(setsData);
-      } catch (err) {
-        console.error('Error loading filter options:', err);
-      }
-    };
+      // Extract aspect names for the filter options
+      setAspects(aspectsData.map(aspect => aspect.aspect_name));
+      setTypes(typesData);
+      setKeywords(keywordsData);
+      setSets(setsData);
+    } catch (err) {
+      console.error('Error loading filter options:', err);
+    }
+  };
 
-    loadFilterOptions();
-  }, []);
+  loadFilterOptions();
+}, []);
 
   // Fetch cards when filters or page changes
   useEffect(() => {

@@ -1,14 +1,19 @@
 from sqlalchemy import Column, String, Integer, Float, ForeignKey, Boolean, DateTime, Text
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 import datetime
 import uuid
+from .base import Base
 
-Base = declarative_base()
+print(f"--- Executing src/database/models.py ---")
+print(f"--- Imported Base in models.py - ID: {id(Base)} ---")
+
+
+# --- Models inherit Base from .base ---
+print(f"--- Defining User class in models.py using Base ID: {id(Base)} ---")
 
 class User(Base):
     __tablename__ = 'users'
-    __table_args__ = {'extend_existing': True}
+    # __table_args__ = {'extend_existing': True}
     
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     username = Column(String, unique=True, nullable=False)
@@ -19,9 +24,11 @@ class User(Base):
     
     decks = relationship("Deck", back_populates="user", cascade="all, delete-orphan")
 
+print(f"--- Defining Deck class in models.py using Base ID: {id(Base)} ---")
+
 class Deck(Base):
     __tablename__ = 'decks'
-    __table_args__ = {'extend_existing': True}
+    # __table_args__ = {'extend_existing': True}
     
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String, ForeignKey('users.id'), nullable=False)
@@ -35,7 +42,7 @@ class Deck(Base):
 
 class DeckCard(Base):
     __tablename__ = 'deck_cards'
-    __table_args__ = {'extend_existing': True}
+    # __table_args__ = {'extend_existing': True}
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     deck_id = Column(String, ForeignKey('decks.id'), nullable=False)
@@ -49,7 +56,7 @@ class DeckCard(Base):
 
 class Card(Base):
     __tablename__ = 'cards'
-    __table_args__ = {'extend_existing': True}
+    # __table_args__ = {'extend_existing': True}
     
     # Fixed column names to match the actual database schema
     id = Column(String, primary_key=True)
@@ -87,7 +94,7 @@ class Card(Base):
 
 class CardAspect(Base):
     __tablename__ = 'card_aspects'
-    __table_args__ = {'extend_existing': True}
+    # __table_args__ = {'extend_existing': True}
     
     card_id = Column(String, ForeignKey('cards.id'), primary_key=True)
     aspect_name = Column(String, primary_key=True)
@@ -97,7 +104,7 @@ class CardAspect(Base):
 
 class CardKeyword(Base):
     __tablename__ = 'card_keywords'
-    __table_args__ = {'extend_existing': True}
+    # __table_args__ = {'extend_existing': True}
     
     card_id = Column(String, ForeignKey('cards.id'), primary_key=True)
     keyword = Column(String, primary_key=True)
@@ -106,7 +113,7 @@ class CardKeyword(Base):
 
 class CardTrait(Base):
     __tablename__ = 'card_traits'
-    __table_args__ = {'extend_existing': True}
+    # __table_args__ = {'extend_existing': True}
     
     card_id = Column(String, ForeignKey('cards.id'), primary_key=True)
     trait = Column(String, primary_key=True)
@@ -115,7 +122,7 @@ class CardTrait(Base):
 
 class CardArena(Base):
     __tablename__ = 'card_arenas'
-    __table_args__ = {'extend_existing': True}
+    # __table_args__ = {'extend_existing': True}
     
     card_id = Column(String, ForeignKey('cards.id'), primary_key=True)
     arena = Column(String, primary_key=True)
@@ -124,7 +131,7 @@ class CardArena(Base):
 
 class PriceHistory(Base):
     __tablename__ = 'price_history'
-    __table_args__ = {'extend_existing': True}
+    # __table_args__ = {'extend_existing': True}
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     card_id = Column(String, ForeignKey('cards.id'))
@@ -132,3 +139,6 @@ class PriceHistory(Base):
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)
     
     card = relationship("Card", back_populates="price_history")
+
+print(f"--- Finished defining models in models.py ---")
+print(f"--- Tables known to models.Base.metadata: {list(Base.metadata.tables.keys())} ---")

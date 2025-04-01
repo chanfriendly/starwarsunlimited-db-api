@@ -62,7 +62,7 @@ export function CardFilters({
       sets: []
     });
   };
-
+  
   return (
     <Card className="bg-gray-900 border-gray-800 sticky top-4">
       <CardHeader className="flex flex-row items-center justify-between border-b border-gray-800">

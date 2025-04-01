@@ -7,9 +7,9 @@ from sqlalchemy import func
 
 # Import models directly from database/models.py
 from src.database.models import Deck, DeckCard, Card, User
-from src.database.db import get_db
+from src.database.db import get_app_db
 # Import auth utilities but avoid circular imports
-from src.utils.auth import get_current_user  # Move this function to utils/auth.py
+from src.auth.auth import get_current_user  # Move this function to utils/auth.py
 
 from src.schemas.decks import (
     DeckCreate, DeckUpdate, DeckResponse, DeckListResponse,
@@ -21,8 +21,8 @@ router = APIRouter()
 # Deck routes
 @router.get("/", response_model=List[DeckListResponse])
 async def get_user_decks(
-    current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_db)]
+    get_current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_app_db)]
 ):
     """Get all decks for the current user"""
     # Query decks with card count 
@@ -56,7 +56,7 @@ async def get_user_decks(
 async def create_deck(
     deck_data: DeckCreate,
     current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_db)]
+    db: Annotated[Session, Depends(get_app_db)]
 ):
     """Create a new deck"""
     # Create new deck
@@ -97,7 +97,7 @@ async def create_deck(
 async def get_deck(
     deck_id: str,
     current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_db)]
+    db: Annotated[Session, Depends(get_app_db)]
 ):
     """Get a specific deck"""
     deck = db.query(Deck).filter(
@@ -118,7 +118,7 @@ async def update_deck(
     deck_id: str,
     deck_data: DeckUpdate,
     current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_db)]
+    db: Annotated[Session, Depends(get_app_db)]
 ):
     """Update a deck's name or description"""
     deck = db.query(Deck).filter(
@@ -143,7 +143,7 @@ async def update_deck(
 async def delete_deck(
     deck_id: str,
     current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_db)]
+    db: Annotated[Session, Depends(get_app_db)]
 ):
     """Delete a deck"""
     deck = db.query(Deck).filter(
@@ -167,7 +167,7 @@ async def add_card_to_deck(
     deck_id: str,
     card_data: DeckCardCreate,
     current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_db)]
+    db: Annotated[Session, Depends(get_app_db)]
 ):
     """Add a card to a deck"""
     # Verify deck exists and belongs to user
@@ -224,7 +224,7 @@ async def update_card_in_deck(
     card_id: str,
     card_data: DeckCardUpdate,
     current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_db)]
+    db: Annotated[Session, Depends(get_app_db)]
 ):
     """Update a card in a deck"""
     # Verify deck exists and belongs to user
@@ -265,7 +265,7 @@ async def remove_card_from_deck(
     deck_id: str,
     card_id: str,
     current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_db)]
+    db: Annotated[Session, Depends(get_app_db)]
 ):
     """Remove a card from a deck"""
     # Verify deck exists and belongs to user

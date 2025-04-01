@@ -4,7 +4,7 @@ from fastapi import APIRouter, Query, HTTPException, Depends
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import text, or_
-from src.database.db import get_db
+from src.database.db import get_card_db
 from src.database.models import Card, CardAspect
 from src.utils.db_helpers import enrich_card_with_relationships, card_to_dict
 import logging
@@ -17,7 +17,7 @@ router = APIRouter()
 
 @router.get("/")
 async def get_cards(
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_card_db),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     search: Optional[str] = None,
@@ -146,7 +146,7 @@ async def get_cards(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{card_id}")
-async def get_card(card_id: str, db: Session = Depends(get_db)):
+async def get_card(card_id: str, db: Session = Depends(get_card_db)):
     """Get a single card by ID."""
     try:
         # Use ORM for simple lookup by ID
