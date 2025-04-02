@@ -1,8 +1,8 @@
+// frontend/src/app/profile/page.tsx
 'use client';
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-// REMOVE THIS LINE: import { cookies } from 'next/headers';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -32,7 +32,7 @@ import {
     deleteUserDeck
 } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { useRouter } from 'next/navigation';;
+import { useRouter } from 'next/navigation';
 
 // Default user profile data
 const defaultUserProfile = {
@@ -211,12 +211,27 @@ const ErrorMessage = ({ message, retryFn }: { message: string, retryFn: () => vo
     </div>
 );
 
+interface UserProfileData {
+    id: string;
+    username: string;
+    avatarUrl?: string;
+    createdAt: string;
+}
+
 const UserProfilePage = () => {
     const router = useRouter();
-    const [isLoading, setIsLoading] = useState(true);
+    const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+    
+    // State
     const [decks, setDecks] = useState<SavedDeck[]>([]);
     const [collection, setCollection] = useState<CollectionItem[]>([]);
-    const [userProfile, setUserProfile] = useState(defaultUserProfile);
+    const [isPageLoading, setIsPageLoading] = useState(true);  
+    const [userProfile, setUserProfile] = useState<UserProfileData>(user ? {
+        id: user.id,
+        username: user.username,
+        avatarUrl: user.avatar_url,
+        createdAt: user.created_at || defaultUserProfile.createdAt
+    } : defaultUserProfile);   
     const [isEditing, setIsEditing] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedTab, setSelectedTab] = useState('decks'); // 'decks', 'collection', etc.
@@ -225,39 +240,105 @@ const UserProfilePage = () => {
     });
     const [error, setError] = useState<string | null>(null);
 
-    // Fetch data on component mount
-    useEffect(() => {
-        loadData();
-    }, []);
-
+    // Define loadData function first so it can be referenced later
     const loadData = async () => {
-        setIsLoading(true);
+        setIsPageLoading(true);
         setError(null);
         
         try {
+            // Get auth token from localStorage
+            const token = localStorage.getItem('auth_token');
+            
+            if (!token) {
+                console.log('[Profile] No auth token found in localStorage');
+                setError('Authentication required');
+                setIsPageLoading(false);
+                return;
+            }
+            
+            console.log('[Profile] Fetching user data...');
+            
+            // Make authenticated API calls with bearer token
+            const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+            
             // Fetch decks and collection in parallel
-            const [decksData, collectionData] = await Promise.all([
-                fetchUserDecks(),
-                fetchUserCollection()
+            const [decksResponse, collectionResponse] = await Promise.all([
+                fetch(`${API_URL}/api/me/decks`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                }),
+                fetch(`${API_URL}/api/me/collection`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                })
             ]);
             
-            console.log("Fetched decks:", decksData);
-            console.log("Fetched collection:", collectionData);
+            if (!decksResponse.ok || !collectionResponse.ok) {
+                console.log('[Profile] API responses not OK:', { 
+                    decks: decksResponse.status, 
+                    collection: collectionResponse.status 
+                });
+                throw new Error('Failed to load profile data');
+            }
+            
+            const decksData = await decksResponse.json();
+            const collectionData = await collectionResponse.json();
+            
+            console.log("[Profile] Fetched decks:", decksData.length);
+            console.log("[Profile] Fetched collection:", collectionData.length);
             
             setDecks(decksData);
             setCollection(collectionData);
-            
-            // In a real app, would also fetch user profile data
-            // const profileData = await fetchUserProfile();
-            // setUserProfile(profileData);
-            
         } catch (err) {
-            console.error('Error loading profile data:', err);
+            console.error('[Profile] Error loading profile data:', err);
             setError('Failed to load profile data. Please check your connection and try again.');
         } finally {
-            setIsLoading(false);
+            setIsPageLoading(false);
         }
     };
+
+    // Redirect if not authenticated, but only after auth is done loading
+    useEffect(() => {
+        // Log the auth state
+        console.log('[Profile] Auth state:', { 
+            isAuthenticated, 
+            authLoading, 
+            token: localStorage.getItem('auth_token') ? "exists" : "missing"
+        });
+        
+        // Don't redirect while still loading auth state
+        if (authLoading) {
+            console.log('[Profile] Auth still loading, waiting...');
+            return;
+        }
+        
+        // Only redirect if definitely not authenticated
+        if (!isAuthenticated) {
+            console.log('[Profile] Not authenticated, redirecting to login');
+            router.push('/login');
+        } else {
+            console.log('[Profile] Authenticated as:', user?.username);
+            // Load profile data when authenticated
+            loadData();
+        }
+    }, [isAuthenticated, authLoading, router, user]);
+
+    // Effect to update user profile when user data changes
+    useEffect(() => {
+        if (user) {
+            setUserProfile({
+                id: user.id,
+                username: user.username,
+                avatarUrl: user.avatar_url,
+                createdAt: user.created_at || defaultUserProfile.createdAt
+            });
+            setFormData({
+                username: user.username
+            });
+        }
+    }, [user]);
 
     // Handlers for editing profile
     const handleEditProfile = () => {
@@ -335,7 +416,9 @@ const UserProfilePage = () => {
                             )}
                             <div className="text-sm text-gray-500 flex items-center gap-1">
                                 <UserCircle className="w-4 h-4" />
-                                <span>Member Since: {new Date(userProfile.createdAt).toLocaleDateString()}</span>
+                                <span>
+                                    Member Since: {new Date(userProfile.createdAt).toLocaleDateString()}
+                                </span>
                             </div>
                         </div>
                     </div>
@@ -411,7 +494,7 @@ const UserProfilePage = () => {
                         
                         {error && selectedTab === 'decks' ? (
                             <ErrorMessage message={error} retryFn={loadData} />
-                        ) : isLoading ? (
+                        ) : isPageLoading ? (
                             <div className="text-center py-16">
                                 <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500 mx-auto"></div>
                                 <p className="mt-4 text-gray-400">Loading your decks...</p>
@@ -472,7 +555,7 @@ const UserProfilePage = () => {
                         
                         {error && selectedTab === 'collection' ? (
                             <ErrorMessage message={error} retryFn={loadData} />
-                        ) : isLoading ? (
+                        ) : isPageLoading ? (
                             <div className="text-center py-16">
                                 <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500 mx-auto"></div>
                                 <p className="mt-4 text-gray-400">Loading your collection...</p>

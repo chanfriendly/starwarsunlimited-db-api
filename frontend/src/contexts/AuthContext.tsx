@@ -2,14 +2,14 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { registerUser, loginUser, logoutUser } from '@/lib/auth';
-import { fetchUserProfile } from '@/lib/api';
+import { useRouter } from 'next/navigation';
 
 interface User {
   id: string;
   username: string;
   email: string;
   avatar_url?: string;
+  created_at?: string;
 }
 
 interface AuthContextType {
@@ -26,42 +26,56 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const router = useRouter();
 
   // Check for existing session on mount
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        // Check if we have a token
-        const token = localStorage.getItem('accessToken');
+        const token = localStorage.getItem('auth_token');
         
         if (!token) {
+          console.log('[Auth] No token found in localStorage');
           setUser(null);
           setIsLoading(false);
           return;
         }
         
-        // Verify token by fetching user profile
-        const userData = await fetchUserProfile();
+        console.log('[Auth] Token found in localStorage, verifying...');
+        
+        // Directly call backend API to get user data
+        const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+        const authUrl = `${API_URL}/api/auth/me`;
+        console.log('[Auth] Fetching user data from:', authUrl);
+        
+        const response = await fetch(authUrl, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        if (!response.ok) {
+          console.log('[Auth] Token verification failed, status:', response.status);
+          localStorage.removeItem('auth_token');
+          setUser(null);
+          setIsLoading(false);
+          return;
+        }
+        
+        const userData = await response.json();
+        console.log('[Auth] User authenticated successfully:', userData.username);
         setUser(userData);
       } catch (error) {
-        console.error('Auth check error:', error);
-        // Clear invalid token
-        localStorage.removeItem('accessToken');
+        console.error('[Auth] Auth check error:', error);
+        localStorage.removeItem('auth_token');
         setUser(null);
       } finally {
         setIsLoading(false);
       }
     };
 
+    // Important: Run this check immediately
     checkAuth();
-    
-    // Listen for storage events (e.g., user logs out in another tab)
-    const handleStorageChange = () => {
-      checkAuth();
-    };
-    
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
   // Login function
@@ -69,15 +83,68 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     
     try {
-      const authData = await loginUser(username, password);
+      console.log('[Auth] Login attempt for:', username);
       
-      if (!authData.access_token) {
-        throw new Error('Login failed: No access token received');
+      // Direct login to backend
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      
+      // Convert to form data for OAuth2
+      const formData = new URLSearchParams();
+      formData.append('username', username);
+      formData.append('password', password);
+      
+      const loginUrl = `${API_URL}/api/auth/token`;
+      console.log('[Auth] Sending login request to:', loginUrl);
+      
+      const response = await fetch(loginUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: formData.toString(),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.log('[Auth] Login failed:', errorData);
+        throw new Error(errorData.detail || 'Login failed');
       }
       
-      // Fetch user profile
-      const userData = await fetchUserProfile();
+      const data = await response.json();
+      console.log('[Auth] Login successful, token received');
+      
+      // Store token in localStorage
+      localStorage.setItem('auth_token', data.access_token);
+      console.log('[Auth] Token saved to localStorage:', data.access_token ? "✓" : "✗");
+      
+      // Get user data
+      const userUrl = `${API_URL}/api/auth/me`;
+      console.log('[Auth] Fetching user data from:', userUrl);
+      
+      const userResponse = await fetch(userUrl, {
+        headers: {
+          'Authorization': `Bearer ${data.access_token}`
+        }
+      });
+      
+      if (!userResponse.ok) {
+        console.log('[Auth] Failed to get user data, status:', userResponse.status);
+        throw new Error('Failed to get user data');
+      }
+      
+      const userData = await userResponse.json();
+      console.log('[Auth] User data retrieved successfully');
       setUser(userData);
+      
+      // Allow the state update to complete before redirecting
+      // This will prevent race conditions with the profile page
+      setTimeout(() => {
+        router.push('/profile');
+      }, 100);
+      
+    } catch (error) {
+      console.error('[Auth] Login error:', error);
+      throw error;
     } finally {
       setIsLoading(false);
     }
@@ -86,12 +153,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Logout function
   const logout = async () => {
     try {
-      await logoutUser();
+      console.log('[Auth] Logging out user');
+      localStorage.removeItem('auth_token');
       setUser(null);
-      // Dispatch event to notify other tabs
-      window.dispatchEvent(new Event("authChange"));
+      router.push('/login');
     } catch (error) {
-      console.error('Logout error:', error);
+      console.error('[Auth] Logout error:', error);
     }
   };
 
@@ -100,25 +167,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     
     try {
-      await registerUser(username, email, password);
-      // Note: We don't automatically log in after registration
-      // User will need to log in explicitly
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      
+      const response = await fetch(`${API_URL}/api/auth/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ username, email, password }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Registration failed');
+      }
+    } catch (error) {
+      console.error('[Auth] Registration error:', error);
+      throw error;
     } finally {
       setIsLoading(false);
     }
   };
 
+  // The value we're providing to consumers
+  const value = {
+    user,
+    isAuthenticated: !!user,
+    isLoading,
+    login,
+    logout,
+    register,
+  };
+
+  console.log('[Auth] Current auth state:', { 
+    isAuthenticated: !!user, 
+    isLoading, 
+    user: user ? user.username : 'none' 
+  });
+
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        isAuthenticated: !!user,
-        isLoading,
-        login,
-        logout,
-        register,
-      }}
-    >
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

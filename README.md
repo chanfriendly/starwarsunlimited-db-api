@@ -21,21 +21,21 @@ Our mission is to support growth for the Star Wars Unlimited community, offering
 <img width="1293" alt="Screenshot 2025-03-23 at 1 05 35 PM" src="https://github.com/user-attachments/assets/b35a8216-c01c-4b5e-a5b7-350850decfef" />
 <img width="1333" alt="Screenshot 2025-03-23 at 1 06 07 PM" src="https://github.com/user-attachments/assets/0f8ecea8-f18d-4d8a-b54c-3df901fe2f37" />
 
-### Current Status (2025-04-01)
+### Current Status (2025-04-02)
 
-The project has a functional backend and frontend structure, but key user features are currently under development and debugging:
+The project now has functional authentication, with several key features implemented:
 
 1.  **Backend Development**:
     *   Robust database setup using **two separate SQLite databases**: `swu_cards.db` for static card data and `swu_app.db` for user/deck data.
     *   Full card data import mechanism (presumably populating `swu_cards.db`).
     *   RESTful API endpoints using FastAPI for cards, decks, aspects, etc.
     *   Authentication system using JWT and passlib/bcrypt. Auth logic consolidated.
-    *   SQLAlchemy ORM used for application database schema and access.
-    *   Vector database integration foundation (if applicable).
 
 2.  **Frontend Development**:
     *   Next.js/React frontend with components for card browsing, signup, and login.
     *   Basic card display and filtering capabilities.
+    *   Implemented authentication flow with direct FastAPI backend communication.
+    *   Basic deck builder interface (building but not saving yet).
 
 3.  **Current Focus & Issues**:
 
@@ -155,17 +155,35 @@ The project is actively under development.
 
 ### Current Focus
 
--   **Resolving Signup Error:** Fixing the `ResponseValidationError` that occurs after successful user creation in the database, preventing the API from returning a successful response.
--   **Verifying Login Flow:** Ensuring the frontend correctly sends login credentials (form data) and the backend successfully authenticates and returns a JWT token.
+-   🔍 Fix "Method Not Allowed" error when saving decks to /api/me/decks endpoint
+-   🔍 Debug request/response format between frontend and backend
+-   🔍 Ensure backend has proper route handlers for deck CRUD operations
+-   🔍 Verify authentication headers are correctly passed to backend for deck operations
 
-### Incomplete Functionality
-- Deck saving, sharing, and management APIs/frontend need completion.
-- User profile management beyond basic auth.
-- AI features are in early development/planning.
+**Specific Troubleshooting Steps:**
 
-### User Interface
-- Card grid layout may need optimization.
-- Mobile responsiveness improvements may be needed.
+1. Verify backend route exists:
+
+Check backend/src/routes/me.py for POST method implementation on /decks endpoint
+Compare with existing GET /api/me/decks endpoint that works
+
+
+2. Validate request format:
+
+Examine the payload being sent from the deck builder
+Ensure it matches the schema expected by the backend
+
+
+3. Fix authentication token passing:
+
+Confirm fetchWithAuth is correctly including the token in request headers
+Test with Postman or similar tool to validate API independently
+
+
+4. Backend route implementation:
+
+Implement or fix the POST endpoint for /api/me/decks in backend/src/routes/me.py
+Ensure proper error handling and validation
 
 ## Development Roadmap
 

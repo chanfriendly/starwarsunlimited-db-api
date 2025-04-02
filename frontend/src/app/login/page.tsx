@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertTriangle } from "lucide-react";
-import { useAuth } from '@/contexts/AuthContext'; // Make sure useAuth is correctly implemented
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function LoginPage() {
     const router = useRouter();
@@ -25,33 +25,17 @@ export default function LoginPage() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setError(null);
-
-        if (!username || !password) {
-            setError("Please enter both username and password");
-            return;
-        }
-
         setIsLoading(true);
-
+        setError(null);
+        
         try {
-            // login function from useAuth should handle API call and token storage
+            // Use the login function from auth context
+            console.log('Attempting to log in with:', username);
             await login(username, password);
-
-            // Redirect after successful login
-            console.log(`Login successful, redirecting to: ${redirectPath}`);
-            router.push(redirectPath);
-            // router.refresh(); // Optionally refresh router state if needed
-
-        } catch (err: any) {
-            console.error("Login page submit error:", err);
-            // Set error message from the caught error
-            // Check if the error object has a specific message structure from fetch utils
-            if (err instanceof Error) {
-                 setError(err.message || "Invalid username or password.");
-            } else {
-                 setError("An unexpected error occurred during login.");
-            }
+            // Auth context will handle redirect
+        } catch (err) {
+            console.error('Login error:', err);
+            setError('Invalid username or password. Please try again.');
         } finally {
             setIsLoading(false);
         }
@@ -74,11 +58,10 @@ export default function LoginPage() {
                 <CardContent>
                     {error && (
                         <Alert variant="destructive" className="mb-6 bg-red-900/30 border-red-800 text-red-300">
-                             <AlertTriangle className="h-4 w-4 !text-red-400" /> {/* Ensure icon color */}
+                             <AlertTriangle className="h-4 w-4 !text-red-400" />
                              <AlertTitle>Login Failed</AlertTitle>
                              <AlertDescription>{error}</AlertDescription>
                          </Alert>
-
                     )}
 
                     <form onSubmit={handleSubmit} className="space-y-4">
@@ -86,14 +69,14 @@ export default function LoginPage() {
                             <Label htmlFor="username">Username</Label>
                             <Input
                                 id="username"
-                                name="username" // Add name attribute for accessibility/forms
+                                name="username" 
                                 type="text"
                                 placeholder="Enter your username"
                                 value={username}
                                 onChange={(e) => setUsername(e.target.value)}
-                                className="bg-gray-800 border border-gray-700 focus:border-purple-500 focus:ring-purple-500" // Added focus styles
+                                className="bg-gray-800 border border-gray-700 focus:border-purple-500 focus:ring-purple-500" 
                                 disabled={isLoading}
-                                autoComplete="username" // Add autocomplete
+                                autoComplete="username"
                             />
                         </div>
 
@@ -101,20 +84,20 @@ export default function LoginPage() {
                             <Label htmlFor="password">Password</Label>
                             <Input
                                 id="password"
-                                name="password" // Add name attribute
+                                name="password"
                                 type="password"
                                 placeholder="Enter your password"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
-                                className="bg-gray-800 border border-gray-700 focus:border-purple-500 focus:ring-purple-500" // Added focus styles
+                                className="bg-gray-800 border border-gray-700 focus:border-purple-500 focus:ring-purple-500"
                                 disabled={isLoading}
-                                autoComplete="current-password" // Add autocomplete
+                                autoComplete="current-password"
                             />
                         </div>
 
                         <Button
                             type="submit"
-                            className="w-full bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50" // Added disabled style
+                            className="w-full bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50"
                             disabled={isLoading}
                         >
                             {isLoading ? 'Signing In...' : 'Sign In'}

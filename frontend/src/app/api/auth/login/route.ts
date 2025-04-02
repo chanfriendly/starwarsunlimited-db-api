@@ -1,4 +1,5 @@
 // frontend/src/app/api/auth/login/route.ts
+
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
@@ -9,14 +10,17 @@ export async function POST(request: NextRequest) {
   try {
     // Get login data
     const userData = await request.json();
+    console.log('Login attempt for:', userData.username);
     
     // Convert to form data format expected by OAuth2
     const formData = new URLSearchParams();
     formData.append('username', userData.username);
     formData.append('password', userData.password);
     
+    console.log('Sending login request to backend:', `${API_URL}/api/auth/token`);
+    
     // Forward the request to the backend
-    const response = await fetch(`${API_URL}/api/auth/login`, {
+    const response = await fetch(`${API_URL}/api/auth/token`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -24,14 +28,16 @@ export async function POST(request: NextRequest) {
       body: formData.toString(),
     });
     
-    const cookieStore = await cookies();
-
-
+    // Log response status
+    console.log('Backend login response status:', response.status);
+    
     // Get response data
     const responseData = await response.json();
-   
+    console.log('Token received:', responseData.access_token ? 'Yes (length: ' + responseData.access_token.length + ')' : 'No');
+    
     // Check for errors
     if (!response.ok) {
+      console.error('Login failed:', responseData);
       return NextResponse.json(
         { detail: responseData.detail || 'Login failed' },
         { status: response.status }
@@ -39,10 +45,14 @@ export async function POST(request: NextRequest) {
     }
     
     // Create a response
-    const authResponse = NextResponse.json(responseData);
+    const nextResponse = NextResponse.json({
+      success: true,
+      message: 'Login successful'
+    });
     
-    // Set HTTP-only cookie with the token (for better security)
-    authResponse.cookies.set({
+    // Set HTTP-only cookie with the token
+    console.log('Setting auth_token cookie with path: /');
+    nextResponse.cookies.set({
       name: 'auth_token',
       value: responseData.access_token,
       httpOnly: true,
@@ -51,7 +61,8 @@ export async function POST(request: NextRequest) {
       path: '/',
     });
     
-    return authResponse;
+    console.log('Response cookies set, returning response');
+    return nextResponse;
   } catch (error) {
     console.error('Error in login API route:', error);
     

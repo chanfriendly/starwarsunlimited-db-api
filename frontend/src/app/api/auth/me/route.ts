@@ -6,8 +6,13 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export async function GET(request: NextRequest) {
   try {
+    console.log('GET /api/auth/me called');
+    // Fix: await the cookies function
     const cookieStore = await cookies();
     const token = cookieStore.get('auth_token');
+    
+    // Debug output
+    console.log('Auth token in cookie:', token ? token.value.substring(0, 10) + '...' : 'not found');
     
     // Check if token exists
     if (!token || !token.value) {
