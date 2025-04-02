@@ -56,26 +56,38 @@ const DeckCard = ({ deck, onDelete }: { deck: SavedDeck, onDelete: (deckId: stri
     // Extract unique aspects from the leaders and base
     const deckAspects = new Set<string>();
     
-    // Add aspects from leaders
-    deck.leaders.forEach(leader => {
-        leader.aspects?.forEach(aspect => {
-            deckAspects.add(aspect.aspect_name);
+    // Add aspects from leaders (with safety checks)
+    if (deck.leaders && Array.isArray(deck.leaders)) {
+        deck.leaders.forEach(leader => {
+            if (leader && leader.aspects && Array.isArray(leader.aspects)) {
+                leader.aspects.forEach(aspect => {
+                    if (aspect && aspect.aspect_name) {
+                        deckAspects.add(aspect.aspect_name);
+                    }
+                });
+            }
         });
-    });
+    }
     
-    // Add aspects from base if it exists
-    if (deck.base) {
-        deck.base.aspects?.forEach(aspect => {
-            deckAspects.add(aspect.aspect_name);
+    // Add aspects from base if it exists (with safety checks)
+    if (deck.base && deck.base.aspects && Array.isArray(deck.base.aspects)) {
+        deck.base.aspects.forEach(aspect => {
+            if (aspect && aspect.aspect_name) {
+                deckAspects.add(aspect.aspect_name);
+            }
         });
     }
     
     // Calculate total cards
-    const totalCards = deck.cards.reduce((sum, item) => sum + item.quantity, 0);
+    const totalCards = deck.cards ? deck.cards.reduce((sum, item) => sum + item.quantity, 0) : 0;
     
     // Format date
-    const formattedDate = new Date(deck.updated_at).toLocaleDateString();
-    
+    const formattedDate = deck.updated_at ? 
+        new Date(deck.updated_at).getTime() > 0 ?
+            new Date(deck.updated_at).toLocaleDateString() : 
+            "Recently" : 
+        "Recently";   
+
     return (
         <motion.div
             whileHover={{ scale: 1.03, boxShadow: "0px 4px 12px rgba(0, 0, 0, 0.2)" }}

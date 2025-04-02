@@ -6,6 +6,8 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, ConfigDict
+import logging
+logger = logging.getLogger(__name__)
 
 from src.database.models import User
 from src.database.db import get_app_db
@@ -96,16 +98,29 @@ async def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
+        # Log token info for debugging (not the full token)
+        logger.debug(f"Processing token (first 10 chars): {token[:10]}...")
+        
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
+        
         if username is None:
+            logger.warn("Token payload missing 'sub' field")
             raise credentials_exception
+            
+        logger.debug(f"Token contains username: {username}")
         token_data = TokenData(username=username)
-    except JWTError:
+    except JWTError as e:
+        logger.error(f"JWT error: {str(e)}")
         raise credentials_exception
+        
     user = get_user(db, username=token_data.username)
+    
     if user is None:
+        logger.warn(f"User not found for username: {token_data.username}")
         raise credentials_exception
+        
+    logger.debug(f"Successfully authenticated user: {user.username}")
     return user
 
 def create_user(db: Session, user_data: UserCreate):

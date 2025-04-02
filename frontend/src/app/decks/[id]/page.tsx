@@ -13,12 +13,13 @@ export default function DeckViewPage({ params }: { params: { id: string } }) {
   const [deck, setDeck] = useState<SavedDeck | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const id = params.id; // Get ID once here
 
   useEffect(() => {
     const loadDeck = async () => {
       try {
         setLoading(true);
-        const deckData = await fetchDeckById(params.id);
+        const deckData = await fetchDeckById(id); // Use the extracted id
         if (deckData) {
           setDeck(deckData);
         } else {
@@ -33,10 +34,10 @@ export default function DeckViewPage({ params }: { params: { id: string } }) {
     };
 
     loadDeck();
-  }, [params.id]);
-
+  }, [id]); // Use id in dependency array
+  
   const handleEditDeck = () => {
-    router.push(`/deck-builder?deckId=${params.id}`);
+    router.push(`/deck-builder?deckId=${id}`); // Use the extracted id
   };
 
   if (loading) {
@@ -95,11 +96,11 @@ export default function DeckViewPage({ params }: { params: { id: string } }) {
                 {deck.leaders.map(leader => (
                   <div key={leader.id} className="w-32 text-center">
                     <div className="aspect-[7/10] rounded-lg overflow-hidden border border-gray-700 mb-2">
-                      <img 
-                        src={leader.image_uri || leader.image_url} 
-                        alt={leader.name}
-                        className="w-full h-full object-contain" 
-                      />
+                    <img 
+                      src={leader.image_uri || leader.image_url || `/placeholder-card.png`} 
+                      alt={leader.name || "Leader card"}
+                      className="w-full h-full object-contain" 
+                    />
                     </div>
                     <p className="text-sm font-medium">{leader.name}</p>
                   </div>
@@ -113,11 +114,11 @@ export default function DeckViewPage({ params }: { params: { id: string } }) {
               {deck.base ? (
                 <div className="w-32 text-center">
                   <div className="aspect-[7/10] rounded-lg overflow-hidden border border-gray-700 mb-2">
-                    <img 
-                      src={deck.base.image_uri || deck.base.image_url} 
-                      alt={deck.base.name}
-                      className="w-full h-full object-contain" 
-                    />
+                  <img 
+                    src={deck.base.image_uri || deck.base.image_url || `/placeholder-card.png`} 
+                    alt={deck.base.name || "Base card"}
+                    className="w-full h-full object-contain" 
+                  />
                   </div>
                   <p className="text-sm font-medium">{deck.base.name}</p>
                 </div>
@@ -149,11 +150,11 @@ export default function DeckViewPage({ params }: { params: { id: string } }) {
           {deck.cards.map(item => (
             <div key={item.card.id} className="relative">
               <div className="aspect-[7/10] rounded-lg overflow-hidden border border-gray-700">
-                <img 
-                  src={item.card.image_uri || item.card.image_url} 
-                  alt={item.card.name}
-                  className="w-full h-full object-contain" 
-                />
+              <img 
+                src={item.card.image_uri || item.card.image_url || `/placeholder-card.png`} 
+                alt={item.card.name || "Card"}
+                className="w-full h-full object-contain" 
+              />
               </div>
               {item.quantity > 1 && (
                 <div className="absolute top-1 left-1 bg-purple-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold">
