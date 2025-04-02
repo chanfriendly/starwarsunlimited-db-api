@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { fetchDeckById } from '@/lib/api';
 import { SavedDeck } from '@/lib/api';
@@ -13,13 +13,20 @@ export default function DeckViewPage({ params }: { params: { id: string } }) {
   const [deck, setDeck] = useState<SavedDeck | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const id = params.id; // Get ID once here
+  
+  // Extract id as a string directly during render to avoid React.use() warning
+  // This approach works for client components in the current version
+  const deckId = String(params.id);
 
   useEffect(() => {
+    console.log("Loading deck with ID:", deckId);
+    
     const loadDeck = async () => {
       try {
         setLoading(true);
-        const deckData = await fetchDeckById(id); // Use the extracted id
+        const deckData = await fetchDeckById(deckId);
+        console.log("Received deck data:", deckData);
+        
         if (deckData) {
           setDeck(deckData);
         } else {
@@ -34,11 +41,14 @@ export default function DeckViewPage({ params }: { params: { id: string } }) {
     };
 
     loadDeck();
-  }, [id]); // Use id in dependency array
+  }, [deckId]);
   
   const handleEditDeck = () => {
-    router.push(`/deck-builder?deckId=${id}`); // Use the extracted id
+    router.push(`/deck-builder?deckId=${deckId}`);
   };
+
+  // Add debugging logs to see what's happening
+  console.log("Component state:", { loading, error, deckId, hasDeckData: !!deck });
 
   if (loading) {
     return (
@@ -93,7 +103,7 @@ export default function DeckViewPage({ params }: { params: { id: string } }) {
             <div className="flex-1">
               <h2 className="text-xl font-semibold mb-4">Leaders</h2>
               <div className="flex gap-4">
-                {deck.leaders.map(leader => (
+                {deck.leaders && deck.leaders.map(leader => (
                   <div key={leader.id} className="w-32 text-center">
                     <div className="aspect-[7/10] rounded-lg overflow-hidden border border-gray-700 mb-2">
                     <img 
@@ -137,7 +147,7 @@ export default function DeckViewPage({ params }: { params: { id: string } }) {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-400">Last Updated:</span>
-                  <span className="font-semibold">{new Date(deck.updated_at).toLocaleDateString()}</span>
+                  <span className="font-semibold">{deck.updated_at ? new Date(deck.updated_at).toLocaleDateString() : 'Unknown'}</span>
                 </div>
               </div>
             </div>
@@ -147,7 +157,7 @@ export default function DeckViewPage({ params }: { params: { id: string } }) {
         {/* Cards in deck */}
         <h2 className="text-2xl font-bold mb-4">Cards</h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          {deck.cards.map(item => (
+          {deck.cards && deck.cards.map(item => (
             <div key={item.card.id} className="relative">
               <div className="aspect-[7/10] rounded-lg overflow-hidden border border-gray-700">
               <img 

@@ -3,12 +3,13 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Annotated
 import uuid
-from src.database.db import get_app_db
+from src.database.db import get_app_db, get_card_db
 from src.database.models import User, Deck, DeckCard, Card
 from src.schemas.decks import DeckListResponse, DeckCreate, DeckResponse
 from src.schemas.collection import CollectionItemResponse
 from src.auth.auth import get_current_user
 import logging
+from src.utils.db_helpers import enrich_card_with_relationships
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
