@@ -14,9 +14,11 @@ export default function DeckViewPage({ params }: { params: { id: string } }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
-  // Extract id as a string directly during render to avoid React.use() warning
-  // This approach works for client components in the current version
-  const deckId = String(params.id);
+  // Using useMemo to avoid re-computing the ID on every render
+  const deckId = React.useMemo(() => {
+    // Cast to string for safety and extract only once
+    return typeof params.id === 'string' ? params.id : String(params.id);
+  }, [params]);
 
   useEffect(() => {
     console.log("Loading deck with ID:", deckId);

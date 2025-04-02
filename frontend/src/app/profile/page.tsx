@@ -1,4 +1,3 @@
-// frontend/src/app/profile/page.tsx
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -9,6 +8,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch'; 
+import { Label } from '@/components/ui/label'; 
 import { cn } from '@/lib/utils';
 import {
     BookOpen,
@@ -26,13 +27,32 @@ import {
 import { motion } from 'framer-motion';
 import { 
     SavedDeck,
-    CollectionItem,
     fetchUserDecks,
     fetchUserCollection,
     deleteUserDeck
 } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
+
+// Update CollectionItem interface to include in_collection property
+interface CollectionItem {
+    card: {
+        id: string;
+        name: string;
+        type?: string;
+        image_uri?: string;
+        image_url?: string;
+        set_name?: string;
+        set_code?: string;
+        card_number?: string;
+        aspects?: Array<{
+            aspect_name: string;
+            aspect_color?: string;
+        }>;
+    };
+    count: number;
+    in_collection?: boolean;
+}
 
 // Default user profile data
 const defaultUserProfile = {
@@ -44,6 +64,7 @@ const defaultUserProfile = {
 
 // Component to display a single deck
 const DeckCard = ({ deck, onDelete }: { deck: SavedDeck, onDelete: (deckId: string) => void }) => {
+    // ... DeckCard code (unchanged)
     const aspectColors: Record<string, string> = {
         'Command': 'border-red-600 bg-red-900/20 text-red-400',
         'Heroism': 'border-blue-600 bg-blue-900/20 text-blue-400',
@@ -149,18 +170,24 @@ const DeckCard = ({ deck, onDelete }: { deck: SavedDeck, onDelete: (deckId: stri
     );
 };
 
-// Component to display a single card in a collection
-const CollectionCard = ({ collectionItem }: { collectionItem: CollectionItem }) => {
-    const { card, count } = collectionItem;
+// Component to display a single card in a collection - MOVED OUTSIDE
+const CollectionCard = ({ 
+    collectionItem,
+    onAddToCollection 
+}: { 
+    collectionItem: CollectionItem;
+    onAddToCollection: (cardId: string, quantity?: number) => Promise<void>;
+}) => {
+    const { card, count, in_collection = false } = collectionItem;
     
     return (
         <motion.div
             whileHover={{ scale: 1.05 }}
             transition={{ type: "spring", stiffness: 300 }}
-            className="group"
+            className={`group ${!in_collection ? 'opacity-60 hover:opacity-90' : ''}`}
         >
-            <Card className="bg-gray-800 border-gray-700 hover:border-purple-500 transition-colors duration-200
-                       hover:shadow-lg hover:shadow-purple-500/20 flex flex-col h-full">
+            <Card className={`bg-gray-800 border-gray-700 hover:border-purple-500 transition-colors duration-200
+                    hover:shadow-lg hover:shadow-purple-500/20 flex flex-col h-full ${!in_collection ? 'grayscale-[30%]' : ''}`}>
                 <CardHeader className="p-2">
                     <div className="aspect-[2/3] relative rounded-lg overflow-hidden border border-gray-700">
                         <img
@@ -193,18 +220,31 @@ const CollectionCard = ({ collectionItem }: { collectionItem: CollectionItem }) 
                         <div className="text-xs text-gray-500 mt-1">
                             {/* Handle both possible property names */}
                             {card.set_name || card.set_code ? 
-                              `Set: ${card.set_name || card.set_code}` : 
-                              `Card #: ${card.card_number || 'Unknown'}`
+                                `Set: ${card.set_name || card.set_code}` : 
+                                `Card #: ${card.card_number || 'Unknown'}`
                             }
                         </div>
                     </div>
-                    <Badge
-                        variant="secondary"
-                        className="mt-2 self-start bg-gray-700 text-gray-300 border-gray-600 group-hover:bg-purple-500 group-hover:text-white
-                               group-hover:border-purple-500 transition-colors duration-200"
-                    >
-                        x{count}
-                    </Badge>
+                    
+                    {/* For cards in collection, show the count */}
+                    {in_collection ? (
+                        <Badge
+                            variant="secondary"
+                            className="mt-2 self-start bg-gray-700 text-gray-300 border-gray-600 group-hover:bg-purple-500 group-hover:text-white
+                                group-hover:border-purple-500 transition-colors duration-200"
+                        >
+                            x{count}
+                        </Badge>
+                    ) : (
+                        <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="mt-2 self-start text-xs"
+                            onClick={() => onAddToCollection(card.id)}
+                        >
+                            Add to Collection
+                        </Button>
+                    )}
                 </CardContent>
             </Card>
         </motion.div>
@@ -251,8 +291,43 @@ const UserProfilePage = () => {
         username: userProfile.username,
     });
     const [error, setError] = useState<string | null>(null);
+    const [showAllCards, setShowAllCards] = useState(false);
 
-    // Define loadData function first so it can be referenced later
+    // Handle adding to collection - KEPT IN MAIN COMPONENT
+    const handleAddToCollection = async (cardId: string, quantity: number = 1) => {
+        try {
+            const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+            const token = localStorage.getItem('auth_token');
+            
+            if (!token) {
+                console.error('No auth token available');
+                return;
+            }
+            
+            const response = await fetch(`${API_URL}/api/me/collection`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    card_id: cardId,
+                    count: quantity
+                })
+            });
+            
+            if (response.ok) {
+                // Reload collection data
+                loadData();
+            } else {
+                console.error('Failed to update collection');
+            }
+        } catch (error) {
+            console.error('Error updating collection:', error);
+        }
+    };
+
+    // Define loadData function inside the component
     const loadData = async () => {
         setIsPageLoading(true);
         setError(null);
@@ -274,32 +349,44 @@ const UserProfilePage = () => {
             const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
             
             // Fetch decks and collection in parallel
-            const [decksResponse, collectionResponse] = await Promise.all([
-                fetch(`${API_URL}/api/me/decks`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                }),
-                fetch(`${API_URL}/api/me/collection`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                })
-            ]);
+            let decksData = [];
+            let collectionData = [];
             
-            if (!decksResponse.ok || !collectionResponse.ok) {
-                console.log('[Profile] API responses not OK:', { 
-                    decks: decksResponse.status, 
-                    collection: collectionResponse.status 
+            try {
+                const decksResponse = await fetch(`${API_URL}/api/me/decks`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
                 });
-                throw new Error('Failed to load profile data');
+                
+                if (decksResponse.ok) {
+                    decksData = await decksResponse.json();
+                    console.log("[Profile] Fetched decks:", decksData.length);
+                } else {
+                    console.warn('[Profile] Failed to fetch decks:', decksResponse.status);
+                }
+            } catch (deckError) {
+                console.error('[Profile] Error fetching decks:', deckError);
             }
             
-            const decksData = await decksResponse.json();
-            const collectionData = await collectionResponse.json();
-            
-            console.log("[Profile] Fetched decks:", decksData.length);
-            console.log("[Profile] Fetched collection:", collectionData.length);
+            try {
+                // Add the all_cards parameter to the URL
+                const collectionUrl = `${API_URL}/api/me/collection${showAllCards ? '?all_cards=true' : ''}`;
+                const collectionResponse = await fetch(collectionUrl, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                if (collectionResponse.ok) {
+                    collectionData = await collectionResponse.json();
+                    console.log("[Profile] Fetched collection:", collectionData.length);
+                } else {
+                    console.warn('[Profile] Failed to fetch collection:', collectionResponse.status);
+                }
+            } catch (collectionError) {
+                console.error('[Profile] Error fetching collection:', collectionError);
+            }
             
             setDecks(decksData);
             setCollection(collectionData);
@@ -311,31 +398,31 @@ const UserProfilePage = () => {
         }
     };
 
+    // Effect to load data when authentication state changes or showAllCards changes
+    useEffect(() => {
+        if (isAuthenticated && !authLoading) {
+            loadData();
+        }
+    }, [isAuthenticated, authLoading, showAllCards]);
+
     // Redirect if not authenticated, but only after auth is done loading
     useEffect(() => {
-        // Log the auth state
         console.log('[Profile] Auth state:', { 
             isAuthenticated, 
             authLoading, 
             token: localStorage.getItem('auth_token') ? "exists" : "missing"
         });
         
-        // Don't redirect while still loading auth state
         if (authLoading) {
             console.log('[Profile] Auth still loading, waiting...');
             return;
         }
         
-        // Only redirect if definitely not authenticated
         if (!isAuthenticated) {
             console.log('[Profile] Not authenticated, redirecting to login');
             router.push('/login');
-        } else {
-            console.log('[Profile] Authenticated as:', user?.username);
-            // Load profile data when authenticated
-            loadData();
         }
-    }, [isAuthenticated, authLoading, router, user]);
+    }, [isAuthenticated, authLoading, router]);
 
     // Effect to update user profile when user data changes
     useEffect(() => {
@@ -358,14 +445,11 @@ const UserProfilePage = () => {
     };
     
     const handleSaveProfile = () => {
-        // In a real implementation, send update to the API
-        // Example: updateUserProfile(userId, formData).then(() => {
         setUserProfile({
             ...userProfile,
             username: formData.username,
         });
         setIsEditing(false);
-        // });
     };
     
     const handleCancelEdit = () => {
@@ -378,7 +462,6 @@ const UserProfilePage = () => {
             try {
                 const success = await deleteUserDeck(deckId);
                 if (success) {
-                    // Update the local state
                     setDecks(decks.filter(deck => deck.id !== deckId));
                 } else {
                     throw new Error('Failed to delete deck');
@@ -546,6 +629,16 @@ const UserProfilePage = () => {
                         <div className="mb-8 flex justify-between items-start">
                             <h2 className="text-2xl font-semibold">My Collection</h2>
                             <div className="flex gap-2 items-center">
+                                <div className="flex items-center space-x-2">
+                                    <Switch
+                                        id="show-all-cards"
+                                        checked={showAllCards}
+                                        onCheckedChange={setShowAllCards}
+                                    />
+                                    <Label htmlFor="show-all-cards">
+                                        Show all cards
+                                    </Label>
+                                </div>
                                 <Input
                                     type="text"
                                     placeholder="Search Collection..."
@@ -577,7 +670,8 @@ const UserProfilePage = () => {
                                 {filteredCollection.map((collectionItem) => (
                                     <CollectionCard 
                                         key={collectionItem.card.id} 
-                                        collectionItem={collectionItem} 
+                                        collectionItem={collectionItem}
+                                        onAddToCollection={handleAddToCollection}
                                     />
                                 ))}
                             </div>
