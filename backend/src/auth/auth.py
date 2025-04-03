@@ -7,15 +7,20 @@ from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, ConfigDict
 import logging
+import os
+from dotenv import load_dotenv
+from pydantic import BaseModel, Field, EmailStr, validator
+import re
+
 logger = logging.getLogger(__name__)
 
 from src.database.models import User
 from src.database.db import get_app_db
 
-# Configuration
-SECRET_KEY = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"  # Should be in env var
+# Configuration from environment variables
+SECRET_KEY = os.getenv("JWT_SECRET", "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 10080  # 7 days (60 min * 24 hours * 7 days)
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -32,9 +37,33 @@ class TokenData(BaseModel):
     username: Optional[str] = None
 
 class UserCreate(BaseModel):
-    username: str
-    email: str
-    password: str
+    username: str = Field(..., min_length=3, max_length=50, 
+                         pattern=r'^[a-zA-Z0-9_]+$')
+    email: EmailStr = Field(...)
+    password: str = Field(..., min_length=8, max_length=100)
+    
+    @validator('username')
+    def validate_username(cls, v):
+        # Additional validation beyond regex pattern
+        if not re.match(r'^[a-zA-Z0-9_]+$', v):
+            raise ValueError('Username must contain only alphanumeric characters and underscores')
+        return v
+        
+    @validator('password')
+    def validate_password(cls, v):
+        # Check for password strength
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters long')
+            
+        # Check for at least one number
+        if not any(c.isdigit() for c in v):
+            raise ValueError('Password must contain at least one number')
+            
+        # Check for at least one letter
+        if not any(c.isalpha() for c in v):
+            raise ValueError('Password must contain at least one letter')
+            
+        return v
 
 class UserResponse(BaseModel):
     id: str
@@ -42,6 +71,8 @@ class UserResponse(BaseModel):
     email: str
     created_at: datetime
 
+# Load environment variables
+load_dotenv()
 
 # Helper functions
 def verify_password(plain_password, hashed_password):

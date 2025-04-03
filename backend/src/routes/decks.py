@@ -54,19 +54,19 @@ async def get_user_decks(
 
 @router.post("/", response_model=DeckResponse, status_code=status.HTTP_201_CREATED)
 async def create_deck(
-    deck_data: DeckCreate,
+    deck_data: DeckCreate,  # Validated by Pydantic model
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_app_db)]
 ):
     """Create a new deck"""
+    # No need for manual validation, Pydantic handles it
+    
     # Create new deck
     new_deck = Deck(
         name=deck_data.name,
         description=deck_data.description,
         user_id=current_user.id
     )
-    db.add(new_deck)
-    db.flush()
     
     # Add cards to deck
     for card_data in deck_data.cards:
