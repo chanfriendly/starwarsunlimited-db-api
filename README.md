@@ -21,39 +21,43 @@ Our mission is to support growth for the Star Wars Unlimited community, offering
 <img width="1293" alt="Screenshot 2025-03-23 at 1 05 35 PM" src="https://github.com/user-attachments/assets/b35a8216-c01c-4b5e-a5b7-350850decfef" />
 <img width="1333" alt="Screenshot 2025-03-23 at 1 06 07 PM" src="https://github.com/user-attachments/assets/0f8ecea8-f18d-4d8a-b54c-3df901fe2f37" />
 
-### Current Status (2025-04-02)
+### Current Status (2025-04-03)
 
-The project now has functional authentication, with several key features implemented:
+We've made several important improvements to the authentication system and collection functionality:
 
-1.  **Backend Development**:
-    *   Robust database setup using **two separate SQLite databases**: `swu_cards.db` for static card data and `swu_app.db` for user/deck data.
-    *   Full card data import mechanism (presumably populating `swu_cards.db`).
-    *   RESTful API endpoints using FastAPI for cards, decks, aspects, etc.
-    *   Authentication system using JWT and passlib/bcrypt. Auth logic consolidated.
+- **Authentication System Overhaul**
 
-2.  **Frontend Development**:
-    *   Next.js/React frontend with components for card browsing, signup, and login.
-    *   Basic card display and filtering capabilities.
-    *   Implemented authentication flow with direct FastAPI backend communication.
-    *   Basic deck builder interface (building but not saving yet).
+✅ Fixed critical login issues by properly implementing HTTP-only cookie authentication
+✅ Extended JWT token expiration time from 30 minutes to 7 days for better user experience
+✅ Refactored frontend components to use the new authentication system
+✅ Added graceful handling of token expiration and authentication errors
 
-3.  **Current Focus & Issues**:
+- **Collection Management**
 
-    ### Authentication System
-- ✅ Fixed user registration functionality
-- ✅ Implemented proper response serialization for SQLAlchemy models
-- ✅ Added logout feature to the navbar
-- ✅ Enhanced error handling in auth routes
+✅ Implemented backend collection endpoints with proper user association
+✅ Created Next.js API routes for collection operations (GET/POST)
+✅ Updated CardDetailDialog component to support adding cards to collection
+✅ Added visual feedback for collection operations
 
-### User Profile Features
-- ✅ Created user-specific endpoints for decks and collections
-- ✅ Implemented `/api/me/decks` endpoint for personalized deck management
-- ✅ Added foundation for `/api/me/collection` endpoint 
-- ✅ Updated frontend to handle auth state properly
+- **Deck Viewing Improvements**
 
-### Database Architecture
-- ✅ Resolved database connection issues between app and card databases
-- ✅ Created proper model relationships between users, decks, and cards
+✅ Fixed deck viewing functionality on profile page
+✅ Added API routes for fetching individual decks with authentication
+✅ Updated frontend to properly communicate with backend deck endpoints
+
+- **Architecture Improvements**
+
+✅ Standardized API route pattern for better security and CORS handling
+✅ Improved error handling throughout the application
+✅ Enhanced logging for easier troubleshooting
+
+- **Current Status**
+The application now supports:
+
+User authentication with secure HTTP-only cookies
+Viewing and managing card collections
+Creating, viewing, and editing decks
+Browsing the card database with filtering
 
 ## Features
 
@@ -155,10 +159,10 @@ The project is actively under development.
 
 ### Current Focus
 
--   🔍 Fix "Method Not Allowed" error when saving decks to /api/me/decks endpoint
--   🔍 Debug request/response format between frontend and backend
--   🔍 Ensure backend has proper route handlers for deck CRUD operations
--   🔍 Verify authentication headers are correctly passed to backend for deck operations
+-   🔍 Enhance Collection UI: Improve the visual display of collection items and card counts
+-   🔍 Filter and Sort: Add more advanced filtering and sorting options to card views
+-   🔍 Deck Sharing: Enable sharing decks with other users
+-   🔍 AI Integration: Continue work on the planned AI features for deck recommendations
 
 **Specific Troubleshooting Steps:**
 

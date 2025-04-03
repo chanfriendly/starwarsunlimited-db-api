@@ -293,39 +293,6 @@ const UserProfilePage = () => {
     const [error, setError] = useState<string | null>(null);
     const [showAllCards, setShowAllCards] = useState(false);
 
-    // Handle adding to collection - KEPT IN MAIN COMPONENT
-    const handleAddToCollection = async (cardId: string, quantity: number = 1) => {
-        try {
-            const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-            const token = localStorage.getItem('auth_token');
-            
-            if (!token) {
-                console.error('No auth token available');
-                return;
-            }
-            
-            const response = await fetch(`${API_URL}/api/me/collection`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    card_id: cardId,
-                    count: quantity
-                })
-            });
-            
-            if (response.ok) {
-                // Reload collection data
-                loadData();
-            } else {
-                console.error('Failed to update collection');
-            }
-        } catch (error) {
-            console.error('Error updating collection:', error);
-        }
-    };
 
     // Define loadData function inside the component
     const loadData = async () => {
@@ -333,70 +300,58 @@ const UserProfilePage = () => {
         setError(null);
         
         try {
-            // Get auth token from localStorage
-            const token = localStorage.getItem('auth_token');
+          console.log('[Profile] Fetching user data...');
+          
+          // Fetch decks and collection from Next.js API routes
+          let decksData = [];
+          let collectionData = [];
+          
+          try {
+            // Use the Next.js API routes (which will forward the cookies)
+            const decksResponse = await fetch(`/api/me/decks`);
             
-            if (!token) {
-                console.log('[Profile] No auth token found in localStorage');
-                setError('Authentication required');
-                setIsPageLoading(false);
-                return;
+            if (decksResponse.ok) {
+              decksData = await decksResponse.json();
+              console.log("[Profile] Fetched decks:", decksData.length);
+            } else if (decksResponse.status === 401) {
+              console.warn('[Profile] Not authenticated for decks');
+              setError('Authentication required');
+            } else {
+              console.warn('[Profile] Failed to fetch decks:', decksResponse.status);
             }
+          } catch (deckError) {
+            console.error('[Profile] Error fetching decks:', deckError);
+          }
+          
+          try {
+            // Add the all_cards parameter to the URL
+            const collectionUrl = `/api/me/collection${showAllCards ? '?all_cards=true' : ''}`;
+            const collectionResponse = await fetch(collectionUrl);
             
-            console.log('[Profile] Fetching user data...');
-            
-            // Make authenticated API calls with bearer token
-            const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-            
-            // Fetch decks and collection in parallel
-            let decksData = [];
-            let collectionData = [];
-            
-            try {
-                const decksResponse = await fetch(`${API_URL}/api/me/decks`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-                
-                if (decksResponse.ok) {
-                    decksData = await decksResponse.json();
-                    console.log("[Profile] Fetched decks:", decksData.length);
-                } else {
-                    console.warn('[Profile] Failed to fetch decks:', decksResponse.status);
-                }
-            } catch (deckError) {
-                console.error('[Profile] Error fetching decks:', deckError);
+            if (collectionResponse.ok) {
+              collectionData = await collectionResponse.json();
+              console.log("[Profile] Fetched collection:", collectionData.length);
+            } else if (collectionResponse.status === 401) {
+              console.warn('[Profile] Not authenticated for collection');
+              setError('Authentication required');
+            } else {
+              console.warn('[Profile] Failed to fetch collection:', collectionResponse.status);
             }
-            
-            try {
-                // Add the all_cards parameter to the URL
-                const collectionUrl = `${API_URL}/api/me/collection${showAllCards ? '?all_cards=true' : ''}`;
-                const collectionResponse = await fetch(collectionUrl, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-                
-                if (collectionResponse.ok) {
-                    collectionData = await collectionResponse.json();
-                    console.log("[Profile] Fetched collection:", collectionData.length);
-                } else {
-                    console.warn('[Profile] Failed to fetch collection:', collectionResponse.status);
-                }
-            } catch (collectionError) {
-                console.error('[Profile] Error fetching collection:', collectionError);
-            }
-            
-            setDecks(decksData);
-            setCollection(collectionData);
+          } catch (collectionError) {
+            console.error('[Profile] Error fetching collection:', collectionError);
+          }
+          
+          setDecks(decksData);
+          setCollection(collectionData);
         } catch (err) {
-            console.error('[Profile] Error loading profile data:', err);
-            setError('Failed to load profile data. Please check your connection and try again.');
+          console.error('[Profile] Error loading profile data:', err);
+          setError('Failed to load profile data. Please check your connection and try again.');
         } finally {
-            setIsPageLoading(false);
+          setIsPageLoading(false);
         }
-    };
+      };
+
+    // Duplicate function removed. The correct handleAddToCollection function inside UserProfilePage is used.
 
     // Effect to load data when authentication state changes or showAllCards changes
     useEffect(() => {
@@ -671,7 +626,7 @@ const UserProfilePage = () => {
                                     <CollectionCard 
                                         key={collectionItem.card.id} 
                                         collectionItem={collectionItem}
-                                        onAddToCollection={handleAddToCollection}
+                                        onAddToCollection={(cardId, quantity) => handleAddToCollection(cardId, quantity, loadData)}
                                     />
                                 ))}
                             </div>
@@ -699,6 +654,31 @@ const UserProfilePage = () => {
             </main>
         </div>
     );
+};
+
+const handleAddToCollection = async (cardId: string, quantity: number = 1, reloadData: () => Promise<void>) => {
+  try {
+    // Use the Next.js API route instead of direct backend call
+    const response = await fetch('/api/me/collection', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        card_id: cardId,
+        count: quantity
+      })
+    });
+    
+    if (response.ok) {
+      // Reload collection data
+      reloadData();
+    } else {
+      console.error('Failed to update collection:', await response.text());
+    }
+  } catch (error) {
+    console.error('Error updating collection:', error);
+  }
 };
 
 export default UserProfilePage;

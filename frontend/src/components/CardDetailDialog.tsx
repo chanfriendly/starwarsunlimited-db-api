@@ -19,7 +19,9 @@ export function CardDetailDialog({ card, onClose }: CardDetailDialogProps) {
   const [showBackSide, setShowBackSide] = useState(false);
   const [addingToCollection, setAddingToCollection] = useState(false);
   const [addedToCollection, setAddedToCollection] = useState(false);
-  
+  const [isInCollection, setIsInCollection] = useState(false);
+  const [addMessage, setAddMessage] = useState('');
+
   // Only allow flipping for cards with a back side (mainly Leaders)
   const canFlip = card?.image_back_uri !== undefined && card?.image_back_uri !== null;
   
@@ -39,12 +41,66 @@ export function CardDetailDialog({ card, onClose }: CardDetailDialogProps) {
   const handleAddToCollection = async () => {
     try {
       setAddingToCollection(true);
-      // Add the card to collection with count 1
-      await addCardToCollection(card.id, 1);
+      
+      console.log('Adding card to collection:', card.id);
+      
+      // Use Next.js API route directly
+      const response = await fetch('/api/me/collection', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          card_id: card.id,
+          count: 1
+        }),
+        credentials: 'include'
+      });
+      
+      // Log the full response for debugging
+      console.log('Response status:', response.status);
+      const responseText = await response.text();
+      console.log('Response text:', responseText);
+      
+      // Handle auth errors specifically
+      if (response.status === 401) {
+        setAddMessage('Authentication required. Please log in again.');
+        setTimeout(() => {
+          // Redirect to login page after a short delay
+          router.push('/login');
+        }, 2000);
+        return;
+      }
+      
+      // Parse the response if it's JSON
+      let responseData;
+      try {
+        responseData = JSON.parse(responseText);
+        console.log('Parsed response data:', responseData);
+      } catch (e) {
+        console.error('Failed to parse response as JSON');
+      }
+      
+      if (!response.ok) {
+        throw new Error(responseText || 'Failed to add card to collection');
+      }
+      
+      setIsInCollection(true);
       setAddedToCollection(true);
-    } catch (error) {
-      console.error('Error adding card to collection:', error);
-      // You could add error handling UI here
+      setAddMessage('Added to collection!');
+      
+      // Clear message after a delay
+      setTimeout(() => {
+        setAddMessage('');
+      }, 3000);
+    } catch (err) {
+      console.error('Error adding to collection:', err);
+      setAddMessage('Failed to add to collection');
+      
+      // Clear error message after a delay
+      setTimeout(() => {
+        setAddMessage('');
+      }, 3000);
     } finally {
       setAddingToCollection(false);
     }

@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 from typing import List, Annotated
 import uuid
 from src.database.db import get_app_db, get_card_db
-from src.database.models import User, Deck, DeckCard, Card
+from src.database.models import User, Deck, DeckCard, Card, UserCollection
 from src.auth.auth import get_current_user
 import logging
 
@@ -594,4 +594,179 @@ async def get_user_deck(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch deck"
         )
+
+@router.post("/collection")
+async def update_collection_item(
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_app_db)]
+):
+    """Add or update a card in the user's collection"""
+    try:
+        # Parse request body
+        item_data = await request.json()
+        card_id = item_data.get('card_id')
+        count = item_data.get('count', 0)
+        
+        # Add more logging for debugging
+        logger.info(f"Received collection update request: card_id={card_id}, count={count}")
+        
+        # Validate data
+        if not card_id:
+            logger.warning("Missing card_id in request")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing card_id"
+            )
+        
+        # If count is 0, remove from collection
+        if count <= 0:
+            # Delete the collection item if it exists
+            db.query(UserCollection).filter(
+                UserCollection.user_id == current_user.id,
+                UserCollection.card_id == card_id
+            ).delete()
+            db.commit()
+            logger.info(f"Removed card {card_id} from collection for user {current_user.username}")
+            
+            return {"success": True, "message": "Card removed from collection"}
+        else:
+            # Check if item already exists
+            existing_item = db.query(UserCollection).filter(
+                UserCollection.user_id == current_user.id,
+                UserCollection.card_id == card_id
+            ).first()
+            
+            if existing_item:
+                # Update count
+                existing_item.count = count
+                db.commit()
+                logger.info(f"Updated card {card_id} quantity to {count} for user {current_user.username}")
+            else:
+                # Create new collection item
+                new_item = UserCollection(
+                    user_id=current_user.id,
+                    card_id=card_id,
+                    count=count
+                )
+                db.add(new_item)
+                db.commit()
+                logger.info(f"Added card {card_id} with quantity {count} to user {current_user.username}'s collection")
+            
+            # Return simplified success response
+            return {"success": True, "card_id": card_id, "count": count}
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating collection: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update collection: {str(e)}"
+        )
     
+@router.get("/collection")
+async def get_user_collection(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_app_db)],
+    all_cards: bool = Query(False)
+):
+    """Get the card collection for the logged-in user"""
+    try:
+        # If all_cards parameter is True, return all cards with in_collection flag
+        if all_cards:
+            # Get user's collection
+            user_collection = db.query(UserCollection).filter(
+                UserCollection.user_id == current_user.id
+            ).all()
+            
+            # Create a set of card IDs in collection for faster lookups
+            collection_card_ids = {item.card_id for item in user_collection}
+            
+            # Get card DB session
+            card_db_gen = get_card_db()
+            card_db = next(card_db_gen)
+            
+            try:
+                # Fetch all cards
+                cards_query = text("SELECT * FROM cards LIMIT 100")  # Limit for performance
+                cards_proxy = card_db.execute(cards_query)
+                
+                result = []
+                for card_row in cards_proxy:
+                    # Convert to dict
+                    card_dict = {key: card_row._mapping[key] for key in card_row._mapping.keys()}
+                    
+                    # Add relationships
+                    card_with_relations = enrich_card_with_relationships(card_db, card_dict)
+                    
+                    # Check if card is in collection
+                    card_id = card_dict['id']
+                    in_collection = card_id in collection_card_ids
+                    count = 0
+                    
+                    if in_collection:
+                        # Get count from collection
+                        collection_item = next(
+                            (item for item in user_collection if item.card_id == card_id), 
+                            None
+                        )
+                        if collection_item:
+                            count = collection_item.count
+                    
+                    # Add to result
+                    result.append({
+                        "card": card_with_relations,
+                        "count": count,
+                        "in_collection": in_collection
+                    })
+                
+                return result
+            finally:
+                card_db.close()
+        else:
+            # Just return cards in collection
+            collection_items = db.query(UserCollection).filter(
+                UserCollection.user_id == current_user.id
+            ).all()
+            
+            if not collection_items:
+                return []
+            
+            # Get card details from card database
+            card_db_gen = get_card_db()
+            card_db = next(card_db_gen)
+            
+            try:
+                result = []
+                for item in collection_items:
+                    # Fetch card details
+                    card_query = text("SELECT * FROM cards WHERE id = :card_id")
+                    card_proxy = card_db.execute(card_query, {"card_id": item.card_id})
+                    
+                    if card_proxy.returns_rows:
+                        card_row = card_proxy.fetchone()
+                        if card_row:
+                            # Convert to dict
+                            card_dict = {key: card_row._mapping[key] for key in card_row._mapping.keys()}
+                            
+                            # Add relationships
+                            card_with_relations = enrich_card_with_relationships(card_db, card_dict)
+                            
+                            # Add to result
+                            result.append({
+                                "card": card_with_relations,
+                                "count": item.count,
+                                "in_collection": True
+                            })
+                
+                return result
+            finally:
+                card_db.close()
+    except Exception as e:
+        logger.error(f"Error fetching collection: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch collection"
+        )

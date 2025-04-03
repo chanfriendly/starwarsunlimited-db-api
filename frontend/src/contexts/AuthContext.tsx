@@ -78,6 +78,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     checkAuth();
   }, []);
 
+  const checkAuth = async () => {
+    try {
+      // Use the Next.js API route to check auth status
+      const response = await fetch('/api/auth/me', {
+        credentials: 'include', // Important for cookies
+      });
+      
+      if (!response.ok) {
+        console.log('[Auth] Not authenticated, status:', response.status);
+        setUser(null);
+        setIsLoading(false);
+        return;
+      }
+      
+      const userData = await response.json();
+      console.log('[Auth] User authenticated as:', userData.username);
+      setUser(userData);
+    } catch (error) {
+      console.error('[Auth] Auth check error:', error);
+      setUser(null);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+
   // Login function
   const login = async (username: string, password: string) => {
     setIsLoading(true);
@@ -85,23 +111,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       console.log('[Auth] Login attempt for:', username);
       
-      // Direct login to backend
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      
-      // Convert to form data for OAuth2
-      const formData = new URLSearchParams();
-      formData.append('username', username);
-      formData.append('password', password);
-      
-      const loginUrl = `${API_URL}/api/auth/token`;
+      // Use the Next.js API route instead of direct backend call
+      const loginUrl = '/api/auth/login';
       console.log('[Auth] Sending login request to:', loginUrl);
       
       const response = await fetch(loginUrl, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Type': 'application/json',
         },
-        body: formData.toString(),
+        body: JSON.stringify({ username, password }),
+        credentials: 'include', // Important for cookies
       });
       
       if (!response.ok) {
@@ -111,20 +131,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       
       const data = await response.json();
-      console.log('[Auth] Login successful, token received');
+      console.log('[Auth] Login successful');
       
-      // Store token in localStorage
-      localStorage.setItem('auth_token', data.access_token);
-      console.log('[Auth] Token saved to localStorage:', data.access_token ? "✓" : "✗");
-      
-      // Get user data
-      const userUrl = `${API_URL}/api/auth/me`;
+      // Get user data from the Next.js API route
+      const userUrl = '/api/auth/me';
       console.log('[Auth] Fetching user data from:', userUrl);
       
       const userResponse = await fetch(userUrl, {
-        headers: {
-          'Authorization': `Bearer ${data.access_token}`
-        }
+        credentials: 'include', // Important for cookies
       });
       
       if (!userResponse.ok) {
@@ -137,7 +151,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(userData);
       
       // Allow the state update to complete before redirecting
-      // This will prevent race conditions with the profile page
       setTimeout(() => {
         router.push('/profile');
       }, 100);

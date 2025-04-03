@@ -8,19 +8,33 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle } from 'lucide-react';
 
-export default function DeckViewPage({ params }: { params: { id: string } }) {
+export default function DeckViewPage({ params }: { params: { id: string | Promise<string> } }) {
   const router = useRouter();
   const [deck, setDeck] = useState<SavedDeck | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
-  // Using useMemo to avoid re-computing the ID on every render
-  const deckId = React.useMemo(() => {
-    // Cast to string for safety and extract only once
-    return typeof params.id === 'string' ? params.id : String(params.id);
-  }, [params]);
+  // Extract the deck ID directly - no need for a separate state variable
+  // This follows Next.js's recommended pattern using React.use()
+  let deckId: string;
+  try {
+    // If params.id is a Promise, React.use will suspend the component until it resolves
+    // If it's already a string, it will just return it directly
+    deckId = React.use(params.id as any);
+  } catch (err) {
+    // This would only happen if there's an issue with the params
+    console.error('Error with deck ID params:', err);
+    deckId = typeof params.id === 'string' ? params.id : '';
+  }
 
+  // Use effect to load the deck data
   useEffect(() => {
+    if (!deckId) {
+      setError('Invalid deck ID');
+      setLoading(false);
+      return;
+    }
+    
     console.log("Loading deck with ID:", deckId);
     
     const loadDeck = async () => {
@@ -48,6 +62,7 @@ export default function DeckViewPage({ params }: { params: { id: string } }) {
   const handleEditDeck = () => {
     router.push(`/deck-builder?deckId=${deckId}`);
   };
+
 
   // Add debugging logs to see what's happening
   console.log("Component state:", { loading, error, deckId, hasDeckData: !!deck });
