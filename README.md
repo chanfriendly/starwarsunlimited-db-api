@@ -1,276 +1,180 @@
-# Star Wars Unlimited Card Database & Browser
+# Star Wars Unlimited Card Database & Browser - Progress Report
 
-## Overview
+## Project Overview
 
-SWU Deck Builder is a comprehensive tool for Star Wars Unlimited players, designed specifically to support the Twin Suns format. 
+Star Wars Unlimited Deck Builder is a comprehensive tool designed for Star Wars Unlimited card game players, specifically optimized for the Twin Suns format. The application provides card browsing, deck building, and collection management features with plans to incorporate AI-based deck suggestions and playtesting capabilities.
 
-In the Twin Suns format, players build decks with distinctive rules:
+## Recently Completed Tasks
 
-- Each deck is built around two central Leader cards (similar to Commander in MTG)
-- Only one copy of each card is allowed in a deck (unlike standard Star Wars Unlimited rules of 3-4 copies)
-- The Leaders define the deck's core strategy and set the deck's aspectual identity
+### Database Management
 
-## Project Goals
-Our mission is to support growth for the Star Wars Unlimited community, offering:
+- ✅ **Intelligent Database Update Mechanism**: Implemented a system that checks for new card data before performing updates
+- ✅ **Atomic Database Updates**: Added a temporary database approach for safer updates
+- ✅ **Environment Variable Configuration**: Created flexible path handling via environment variables
+- ✅ **Database Backup System**: Added automatic backups before critical operations
 
-- Comprehensive card database with full card details and images
-- Intuitive deck-building interface with aspect compatibility checking
-- Advanced card search and filtering
-- AI-powered deck analysis and playtesting (in development)
+### Deployment Configuration
 
-<img width="1293" alt="Screenshot 2025-03-23 at 1 05 35 PM" src="https://github.com/user-attachments/assets/b35a8216-c01c-4b5e-a5b7-350850decfef" />
-<img width="1333" alt="Screenshot 2025-03-23 at 1 06 07 PM" src="https://github.com/user-attachments/assets/0f8ecea8-f18d-4d8a-b54c-3df901fe2f37" />
+- ✅ **Docker Configuration**: Developed container definitions for both frontend and backend
+- ✅ **Persistent Storage**: Configured volume mapping for databases and application code
+- ✅ **Environment Isolation**: Set up separate configurations for development and production
+- ✅ **Health Checks**: Added container health monitoring for automatic recovery
+- ✅ **Resource Management**: Implemented resource limits to prevent container abuse
 
-### Current Status (2025-04-03)
+### Security Enhancements
 
-We've made several important improvements to the authentication system and collection functionality:
+- ✅ **CORS Implementation**: Added proper cross-origin resource sharing configuration
+- ✅ **Environment Variable Management**: Created secure handling of sensitive configuration
+- ✅ **Input Validation**: Enhanced Pydantic models with stronger validation rules
+- ✅ **Security Headers**: Added HTTP security headers to prevent common web vulnerabilities
+- ✅ **JWT Authentication**: Updated token-based authentication with improved security
 
-- **Authentication System Overhaul**
+### API Development
 
-✅ Fixed critical login issues by properly implementing HTTP-only cookie authentication
-✅ Extended JWT token expiration time from 30 minutes to 7 days for better user experience
-✅ Refactored frontend components to use the new authentication system
-✅ Added graceful handling of token expiration and authentication errors
+- ✅ **Endpoint Organization**: Restructured API endpoints for better maintainability
+- ✅ **Error Handling**: Added comprehensive error handling across the application
+- ✅ **Documentation**: Enhanced API documentation and debug endpoints
+- ✅ **Health Checks**: Implemented health check endpoints for monitoring
 
-- **Collection Management**
+## Current Architecture
 
-✅ Implemented backend collection endpoints with proper user association
-✅ Created Next.js API routes for collection operations (GET/POST)
-✅ Updated CardDetailDialog component to support adding cards to collection
-✅ Added visual feedback for collection operations
+The application follows a modern web architecture:
 
-- **Deck Viewing Improvements**
+- **Frontend**: Next.js React application with Tailwind CSS
+- **Backend**: FastAPI Python application with SQLAlchemy ORM
+- **Database**: SQLite databases for card data and application state
+- **Authentication**: JWT-based authentication with secure password handling
+- **Deployment**: Docker containers managed via docker-compose
+- **Networking**: Nginx proxy with DuckDNS for domain management
 
-✅ Fixed deck viewing functionality on profile page
-✅ Added API routes for fetching individual decks with authentication
-✅ Updated frontend to properly communicate with backend deck endpoints
+## Future Plans
 
-- **Architecture Improvements**
+### Immediate Next Steps
 
-✅ Standardized API route pattern for better security and CORS handling
-✅ Improved error handling throughout the application
-✅ Enhanced logging for easier troubleshooting
+1. **Production Deployment**: Deploy the containerized application to NAS server
+2. **Database Population**: Run the database update scripts to populate card data
+3. **User Testing**: Perform comprehensive testing of deployed application
+4. **Monitoring Setup**: Implement basic monitoring of application health
 
-- **Current Status**
-The application now supports:
+### Medium Term Goals
 
-User authentication with secure HTTP-only cookies
-Viewing and managing card collections
-Creating, viewing, and editing decks
-Browsing the card database with filtering
+1. **Rate Limiting**: Implement nginx-based rate limiting to prevent abuse
+2. **CI/CD Pipeline**: Set up automated testing and deployment workflow
+3. **Vector Database**: Implement semantic search capabilities for cards
+4. **Collection Management**: Enhance the collection management features
 
-## Features
+### Long Term AI Integration
 
-### Backend
-- Fetches complete card data from external sources (populates `swu_cards.db`).
-- Handles all card types (Leaders, Bases, Units, Events, etc.).
-- Stores both card faces for Leader cards.
-- Manages relationships between cards and their aspects, keywords, etc. (in `swu_cards.db`).
-- Provides API endpoints for accessing card data.
-- User authentication and authorization (using `swu_app.db`).
-- API endpoints for creating/managing user decks (using `swu_app.db`).
-- Detailed logging capabilities.
+1. **Deck Recommendation Engine**: Build AI system to suggest cards based on deck theme
+2. **Playtesting Simulation**: Develop AI opponent for deck testing
+3. **Card Synergy Analysis**: Implement semantic analysis of card interactions
+4. **Game State Modeling**: Create comprehensive game state tracking for AI
 
-### Frontend
-- Modern, responsive card browser interface (connected to backend).
-- Filter cards by type, aspect, and other attributes.
-- Search cards by name and text.
-- Signup and Login pages.
-- Dark mode interface.
+## Deployment Instructions
 
-### AI Features (In Development)
-- Semantic card analysis using vector database.
-- Deck suggestion engine based on card synergies.
-- AI opponent for deck playtesting.
+### Prerequisites
 
-### Technical Architecture
+- Docker and docker-compose installed
+- Git access to the repository
+- Network access to Docker Hub
+- Proper firewall configuration for ports 80/443
 
-#### Database
+### Environment Setup
 
--   **Application Database:** SQLite (`~/.swu/swu_app.db`) for user accounts, decks, and other dynamic application data. Managed via SQLAlchemy ORM.
--   **Card Database:** SQLite (`~/.swu/swu_cards.db`) for static card data. Populated via scripts.
--   **Vector Database:** Qdrant (if implemented) for advanced semantic search capabilities.
+1. Create a `.env` file based on `.env.example`:
+   ```
+   # Database Configuration
+   DB_DIR=/data/.swu
+   DATABASE_URL=sqlite:////data/.swu/swu_app.db
+   CARD_DATABASE_URL=sqlite:////data/.swu/swu_cards.db
 
-#### Technologies
+   # Security
+   JWT_SECRET=your_generated_secure_key
+   ACCESS_TOKEN_EXPIRE_MINUTES=10080
 
-- Frontend: Next.js, React, Tailwind CSS 
-- Backend: FastAPI, SQLAlchemy, Pydantic, SQLite, Passlib, python-jose
-- Vector DB: Qdrant (if implemented)
-- Authentication: JWT with bcrypt password hashing
+   # CORS Configuration
+   CORS_ALLOWED_ORIGINS=https://twinsuns.chanfriendly.duckdns.org
+   ```
 
-## Getting Started
-
-### Requirements
-- Python 3.10 or higher
-- Node.js 16 or higher
-- SQLite3
-
-### Installation
-
-1. **Clone this repository:**
-```bash
-git clone https://github.com/yourusername/starwarsunlimited-db-api.git
-cd starwarsunlimited-db-api
-```
-
-2. **Set up the backend:**
-```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-3. **Set up the frontend:**
-```bash
-cd frontend
-npm install
-```
-
-4.  **Initialize Databases:**
-    *   **Card Database:** Populate the static card data. (Update this command based on your actual script name, e.g., `db_setup.py` or `import_swu_data.py`)
-      ```bash
-      cd ../backend # Go back to backend directory
-      source .venv/bin/activate # Activate venv if not already active
-      python -m src.database.db_setup # Or your data import script
-      ```
-    *   **Application Database:** Create the necessary tables for users, decks, etc.
-      ```bash
-      # Still in backend directory with venv active
-      python init_app_database.py
-      ```
-
-    *Note: Databases will be created in your home directory at `~/.swu/` (`swu_cards.db` and `swu_app.db`).*
-
-### Development
-
-Run both frontend and backend servers in development mode:
-```bash
-./dev.sh
-```
-
-This will start:
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:8000
-
-## Current Status and Known Issues
-
-The project is actively under development.
-
-### Current Focus
-
--   🔍 Enhance Collection UI: Improve the visual display of collection items and card counts
--   🔍 Filter and Sort: Add more advanced filtering and sorting options to card views
--   🔍 Deck Sharing: Enable sharing decks with other users
--   🔍 AI Integration: Continue work on the planned AI features for deck recommendations
-
-**Specific Troubleshooting Steps:**
-
-1. Verify backend route exists:
-
-Check backend/src/routes/me.py for POST method implementation on /decks endpoint
-Compare with existing GET /api/me/decks endpoint that works
-
-
-2. Validate request format:
-
-Examine the payload being sent from the deck builder
-Ensure it matches the schema expected by the backend
-
-
-3. Fix authentication token passing:
-
-Confirm fetchWithAuth is correctly including the token in request headers
-Test with Postman or similar tool to validate API independently
-
-
-4. Backend route implementation:
-
-Implement or fix the POST endpoint for /api/me/decks in backend/src/routes/me.py
-Ensure proper error handling and validation
-
-## Development Roadmap
-
-### Phase 1: Core Functionality (Mostly Completed)
-- ✅ Card database schema & population (`swu_cards.db`)
-- ✅ Application database schema (`swu_app.db` via SQLAlchemy)
-- ✅ Card browser API endpoints
-- ✅ Basic frontend card browser
-- ⏳ Multi-stage deck builder (Backend/Frontend implementation needed)
-- ⏳ Aspect compatibility checking (Logic needed)
-- ⏳ Leader card flip view (Frontend component)
-
-### Phase 2: User Management (In Progress)
-- ✅ Authentication backend logic (Password Hashing, JWT)
-- ✅ Basic User model and DB table
-- ⏳ **Fix Signup Response Error** (Current focus)
-- ⏳ **Verify/Fix Login Flow** (Current focus)
-- ⏳ User profile frontend
-- ⏳ Deck saving and sharing (Requires user association)
-- ⏳ Deck versioning and history
-
-### Phase 3: AI Integration (Starting)
-- ✅ Vector database setup (if applicable)
-- ⏳ Semantic card relationship analysis
-- ⏳ AI deck suggestions
-- ⏳ Deck performance predictions
-
-### Phase 4: Advanced AI Features (Planned)
-- ⏳ AI opponent implementation
-- ⏳ Game state tracking
-- ⏳ Strategy analysis
-- ⏳ Machine learning integration
-
-## AI Feature Details
-
-The project incorporates advanced AI capabilities to enhance deck building and gameplay:
-
-1. **Vector Database Integration**
-   - Cards are converted to vector embeddings capturing their semantic meaning
-   - Rulebook sections are indexed for contextual understanding
-   - Enables semantic search and relationship discovery
-
-2. **Deck Building Assistant**
-   - AI suggests cards based on synergies with selected leaders
-   - Identifies optimal aspect combinations
-   - Recommends cards based on play style preferences
-
-3. **Game State Analysis**
-   - Tracks and evaluates board states
-   - Analyzes card interactions and synergies
-   - Provides strategic recommendations
-
-4. **AI Opponent**
-   - Simulates gameplay for deck testing
-   - Uses reinforcement learning to improve play patterns
-   - Adapts to different deck archetypes and strategies
-
-## Technical Details
-
-### Database Access Patterns
-
-The project implements a hybrid database access approach using **two SQLite databases**. See `Development.md` and `db_best_practices.md` for details on using `get_app_db` vs. `get_card_db` and ORM vs. Raw SQL.
-
-### Database Schema
-
--   **Application Database (`swu_app.db`):** Contains `users`, `decks`, `deck_cards` tables managed by SQLAlchemy models in `src/database/models.py`.
--   **Card Database (`swu_cards.db`):** Contains `cards`, `card_aspects`, `card_keywords`, `card_traits`, `card_arenas`, `price_history` tables, typically populated via scripts.
-
-#### Key Fields
-Each card entry includes:
-  - Basic information (name, type, cost, etc.)
-  - Card text and abilities
-  - Image URIs (including back face for Leaders)
-  - Set information
-  - Release data
-  - Current price data
-
-### Vector Database
-
-The Qdrant vector database stores:
-- Card embeddings generated from card text and attributes
-- Rulebook section embeddings for context
-- Relationships between cards based on semantic similarity
+2. Create necessary directories:
+   ```bash
+   mkdir -p /mnt/tank/apps/twinsuns/databases
+   mkdir -p /mnt/tank/apps/twinsuns/backups
+   ```
+
+### Deployment Steps
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/starwarsunlimited-db-api.git
+   cd starwarsunlimited-db-api
+   ```
+
+2. Copy `.env` file to project root
+
+3. Build and start containers:
+   ```bash
+   docker-compose build
+   docker-compose up -d
+   ```
+
+4. Verify deployment:
+   ```bash
+   docker-compose ps
+   curl http://localhost:8000/health
+   ```
+
+5. Configure Nginx Proxy Manager:
+   - Add a new proxy host
+   - Point to the frontend container on port 3000
+   - Configure SSL with Let's Encrypt
+   - Add headers for security
+
+### Maintenance
+
+- Database updates can be run manually:
+  ```bash
+  docker-compose exec backend python scripts/build_database.py
+  ```
+
+- Viewing logs:
+  ```bash
+  docker-compose logs -f backend
+  docker-compose logs -f frontend
+  ```
+
+## Technical Notes
+
+### Database Structure
+
+- **Card Database** (`swu_cards.db`): Contains static card data including relationships 
+- **Application Database** (`swu_app.db`): Stores user accounts, decks, and collection data
+
+### API Endpoints
+
+- `/api/cards`: Browse and search card data
+- `/api/decks`: Manage user decks
+- `/api/auth`: User authentication
+- `/api/me`: User profile and collection
+- `/api/stats`: Database statistics
+
+### Security Considerations
+
+- JWT tokens expire after 7 days
+- All passwords are hashed using bcrypt
+- Input validation on all user-provided data
+- CORS configured to allow only specific origins
+- Environment variables for all sensitive configuration
+
+## Next Deployment Steps
+
+1. Update Docker configuration files with final settings
+2. Create proper backup system for databases
+3. Deploy to NAS server with Nginx
+4. Set up automated database updates
+5. Configure domain with DuckDNS
+
+This progress report highlights the significant improvements made to the Star Wars Unlimited Deck Builder application, especially in the areas of deployment configuration, security, and database management. The project is now ready for production deployment with a robust foundation for future enhancements.
 
 ## Contributing
 
