@@ -22,24 +22,31 @@ async def get_cards(
     limit: int = Query(20, ge=1, le=100),
     search: Optional[str] = None,
     type: Optional[str] = None,
-    not_type: Optional[str] = None,
-    aspect: Optional[str] = None,
+    not_type: Optional[str] = None,  # Add this for filtering out certain types
+    aspect: Optional[str] = None,    # Will handle comma-separated values
+    costMin: Optional[int] = Query(None, description="Minimum cost filter"),
+    costMax: Optional[int] = Query(None, description="Maximum cost filter"),
+    keyword: Optional[str] = Query(None, description="Filter by keywords (comma-separated)"),
+    set: Optional[str] = Query(None, description="Filter by sets (comma-separated)"),
     sort: Optional[str] = None
 ):
     """Get cards with flexible filtering options."""
     try:
         # Complex case: Aspect filtering (uses raw SQL for better performance)
         if aspect:
+            # Split aspect into a list if it's comma-separated
+            aspect_list = aspect.split(',') if ',' in aspect else [aspect]
+            
             # Build the SQL query with proper parameters
             base_sql = """
                 SELECT c.* FROM cards c
                 JOIN card_aspects ca ON c.id = ca.card_id
-                WHERE ca.aspect_name = :aspect
+                WHERE ca.aspect_name IN :aspects
             """
             
             # Add additional filtering
             conditions = []
-            params = {"aspect": aspect, "limit": limit, "offset": (page - 1) * limit}
+            params = {"aspects": tuple(aspect_list), "limit": limit, "offset": (page - 1) * limit}
             
             if search:
                 conditions.append("c.name LIKE :search")
@@ -49,13 +56,46 @@ async def get_cards(
                 conditions.append("c.type = :type")
                 params["type"] = type
             
-            # Handle not_type filter - ADDED CODE HERE
+            # Add not_type filter
             if not_type:
                 not_type_list = not_type.split(',')
                 for i, nt in enumerate(not_type_list):
                     param_name = f"not_type_{i}"
                     conditions.append(f"c.type != :{param_name}")
                     params[param_name] = nt.strip()
+            
+            # Add cost filters
+            if costMin is not None:
+                conditions.append("(c.energy_cost >= :cost_min OR c.cost >= :cost_min)")
+                params["cost_min"] = costMin
+            
+            if costMax is not None:
+                conditions.append("(c.energy_cost <= :cost_max OR c.cost <= :cost_max)")
+                params["cost_max"] = costMax
+            
+            # Add keyword filter
+            if keyword:
+                keyword_list = keyword.split(',')
+                keyword_conditions = []
+                for i, kw in enumerate(keyword_list):
+                    param_name = f"keyword_{i}"
+                    keyword_conditions.append(f"c.id IN (SELECT card_id FROM card_keywords WHERE keyword = :{param_name})")
+                    params[param_name] = kw.strip()
+                
+                if keyword_conditions:
+                    conditions.append(f"({' OR '.join(keyword_conditions)})")
+            
+            # Add set filter
+            if set:
+                set_list = set.split(',')
+                set_conditions = []
+                for i, s in enumerate(set_list):
+                    param_name = f"set_{i}"
+                    set_conditions.append(f"(c.set_code = :{param_name} OR c.set_name = :{param_name})")
+                    params[param_name] = s.strip()
+                
+                if set_conditions:
+                    conditions.append(f"({' OR '.join(set_conditions)})")
                 
             # Add WHERE conditions if any
             if conditions:
@@ -67,7 +107,7 @@ async def get_cards(
                 if sort == "name":
                     base_sql += " ORDER BY c.name ASC"
                 elif sort == "cost":
-                    base_sql += " ORDER BY c.energy_cost ASC"  # Fixed: energy_cost not cost
+                    base_sql += " ORDER BY COALESCE(c.energy_cost, c.cost) ASC"
             else:
                 # Default sort
                 base_sql += " ORDER BY c.name ASC"
@@ -78,6 +118,7 @@ async def get_cards(
             # Execute query
             sql = text(base_sql)
             result = db.execute(sql, params)
+            
             
             # Process results
             columns = result.keys()

@@ -27,14 +27,14 @@ export default function Home() {
               Start Building
             </Link>
           </Button>
-          <Button asChild variant="outline" className="border-white/20 hover:bg-white/10 py-6 px-8 text-lg">
-            <Link href="/cards">
-              <svg className="w-5 h-5 mr-2 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7" />
-              </svg>
-              Browse Cards
-            </Link>
-          </Button>
+          <Button asChild className="bg-transparent border border-pink-500 text-pink-500 hover:bg-pink-500/10 py-6 px-8 text-lg">
+          <Link href="/cards">
+            <svg className="w-5 h-5 mr-2 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7" />
+            </svg>
+            Browse Cards
+          </Link>
+        </Button>
         </div>
       </section>
 
@@ -113,11 +113,14 @@ export default function Home() {
           <p className="text-xl text-gray-300 mb-10">
             Connect with other Star Wars Unlimited players, share your decks, and discover new strategies.
           </p>
-          <Button asChild className="bg-purple-600 hover:bg-purple-700 text-white py-5 px-8 text-lg">
-            <Link href="/profile">
-              Create Your Profile
-            </Link>
-          </Button>
+          <Button asChild className="bg-transparent border border-pink-500 text-pink-500 hover:bg-pink-500/10 py-6 px-8 text-lg">
+          <Link href="/cards">
+            <svg className="w-5 h-5 mr-2 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7" />
+            </svg>
+            Browse Cards
+          </Link>
+        </Button>
         </div>
       </section>
     </div>
