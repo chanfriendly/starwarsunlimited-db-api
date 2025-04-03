@@ -40,15 +40,15 @@ export function CardGrid({
   
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-2">
-      {visibleCards.map((card) => {
+      {visibleCards.map((card, index) => {
         const isSelected = card.id === selectedCardId;
         const compatible = isCompatible ? isCompatible(card) : true;
         const inDeck = isInDeck ? isInDeck(card.id) : false;
         
         return (
           <div
-            key={card.id}
-            className={cn(
+          key={`${card.id}-${index}`}
+              className={cn(
               "relative cursor-pointer overflow-hidden rounded-lg transition-all duration-200",
               "border-2 flex-shrink-0", 
               isSelected ? "border-purple-500" : "border-gray-800",

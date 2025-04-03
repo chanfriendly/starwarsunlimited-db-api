@@ -13,6 +13,9 @@ interface CardDetailProps {
   currentStage?: 'leaders' | 'base' | 'cards';
 }
 
+const MemoizedCardDetail = React.memo(CardDetail);
+
+
 export function CardDetail({ 
   card, 
   onAddToDeck, 

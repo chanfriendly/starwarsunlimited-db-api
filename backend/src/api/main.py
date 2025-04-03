@@ -44,6 +44,13 @@ except Exception as e:
     logger.error(f"Failed to load decks router: {str(e)}")
 
 try:
+    from src.auth.routes import router as auth_router
+    app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+    logger.info("Successfully loaded auth router")
+except Exception as e:
+    logger.error(f"Failed to load auth router: {str(e)}")
+
+try:
     from src.routes.stats import router as stats_router
     app.include_router(stats_router, prefix="/api/stats", tags=["stats"])
     logger.info("Successfully loaded stats router")

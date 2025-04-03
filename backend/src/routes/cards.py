@@ -48,6 +48,14 @@ async def get_cards(
             if type:
                 conditions.append("c.type = :type")
                 params["type"] = type
+            
+            # Handle not_type filter - ADDED CODE HERE
+            if not_type:
+                not_type_list = not_type.split(',')
+                for i, nt in enumerate(not_type_list):
+                    param_name = f"not_type_{i}"
+                    conditions.append(f"c.type != :{param_name}")
+                    params[param_name] = nt.strip()
                 
             # Add WHERE conditions if any
             if conditions:
@@ -111,6 +119,12 @@ async def get_cards(
                 
             if type:
                 query = query.filter(Card.type == type)
+            
+            # Handle not_type filter - ADDED CODE HERE
+            if not_type:
+                not_type_list = not_type.split(',')
+                for nt in not_type_list:
+                    query = query.filter(Card.type != nt.strip())
                 
             # Add sorting
             if sort:
