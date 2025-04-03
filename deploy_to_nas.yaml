@@ -1,0 +1,37 @@
+name: Manual Deploy to NAS
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for deployment'
+        required: false
+        default: 'Manual deployment'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up SSH
+      uses: webfactory/ssh-agent@v0.5.0
+      with:
+        ssh-private-key: ${{ secrets.NAS_SSH_PRIVATE_KEY }}
+    
+    - name: Log deployment reason
+      run: echo "Deploying - ${{ github.event.inputs.reason }}"
+    
+    - name: Deploy to NAS
+      run: |
+        ssh ${{ secrets.NAS_USER }}@${{ secrets.NAS_HOST }} << EOF
+          cd /path/to/twinsuns/app
+          git pull origin main
+          docker-compose down
+          docker-compose build
+          docker-compose up -d
+        EOF
+    
+    - name: Notify on successful deployment
+      if: success()
+      run: echo "Deployment completed successfully"

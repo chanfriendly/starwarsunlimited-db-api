@@ -55,6 +55,7 @@ class SWUApiClient:
         self._close_db_connection()
         self.session.close()
 
+
     def _get_db_connection(self):
         """Get a database connection, creating it if necessary.
         
