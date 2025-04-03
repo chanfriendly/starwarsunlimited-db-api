@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Query, HTTPException, Depends
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
-from sqlalchemy import text, or_
+from sqlalchemy import text, or_, desc, asc, func
 from src.database.db import get_card_db
 from src.database.models import Card, CardAspect
 from src.utils.db_helpers import enrich_card_with_relationships, card_to_dict

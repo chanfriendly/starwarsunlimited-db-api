@@ -26,14 +26,7 @@ app.add_middleware(
 )
 
 # Import auth router from the correct location
-try:
-    # CHANGE THIS LINE to import from auth.routes instead of routes.auth
-    from src.auth.routes import router as auth_router 
-    app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
-    logger.info("Successfully loaded auth router")
-except Exception as e:
-    logger.error(f"Failed to load auth router: {str(e)}")
-    logger.error(f"Make sure src/auth/routes.py exists and contains a FastAPI router")
+
 
 # Other routers
 try:
