@@ -7,15 +7,13 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 export async function GET(request: NextRequest) {
   try {
     console.log('GET /api/auth/me called');
-    // Fix: await the cookies function
     const cookieStore = await cookies();
     const token = cookieStore.get('auth_token');
     
-    // Debug output
-    console.log('Auth token in cookie:', token ? token.value.substring(0, 10) + '...' : 'not found');
+    console.log('Auth token in cookie:', token ? 'exists' : 'not found');
     
-    // Check if token exists
     if (!token || !token.value) {
+      console.log('No token found');
       return NextResponse.json(
         { detail: 'Not authenticated' },
         { status: 401 }
@@ -28,7 +26,10 @@ export async function GET(request: NextRequest) {
       },
     });
     
+    console.log('Backend /me response status:', response.status);
+    
     if (!response.ok) {
+      console.log('Backend authentication failed');
       return NextResponse.json(
         { detail: 'Invalid or expired token' },
         { status: 401 }
@@ -36,6 +37,7 @@ export async function GET(request: NextRequest) {
     }
     
     const userData = await response.json();
+    console.log('User data retrieved:', userData);
     return NextResponse.json(userData);
   } catch (error) {
     console.error('Auth verification error:', error);

@@ -9,7 +9,7 @@ export async function GET(
   ) {
     try {
       // Await the params.id
-      const id = await params.id;
+      const id = params.id;
       
       console.log(`GET /api/me/decks/${id} called`);
       // Get the token from cookies

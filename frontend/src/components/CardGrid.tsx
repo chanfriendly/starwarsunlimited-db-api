@@ -1,5 +1,4 @@
 'use client';
-
 import React from 'react';
 import { Card } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -13,6 +12,7 @@ interface CardGridProps {
   onDoubleClick?: (card: Card) => void;
   currentStage?: 'leaders' | 'base' | 'cards';
   hideCardsInDeck?: boolean;
+  isInCollection?: (cardId: string) => boolean; 
 }
 
 export function CardGrid({ 
@@ -23,7 +23,8 @@ export function CardGrid({
   isInDeck,
   onDoubleClick,
   currentStage = 'cards',
-  hideCardsInDeck = false
+  hideCardsInDeck = false,
+  isInCollection
 }: CardGridProps) {
   
   // Handle double click to directly add card to deck
@@ -44,26 +45,42 @@ export function CardGrid({
         const isSelected = card.id === selectedCardId;
         const compatible = isCompatible ? isCompatible(card) : true;
         const inDeck = isInDeck ? isInDeck(card.id) : false;
+        const owned = isInCollection ? isInCollection(card.id) : false; // Check if card is owned
         
         return (
           <div
-          key={`${card.id}-${index}`}
-              className={cn(
+            key={`${card.id}-${index}`}
+            className={cn(
               "relative cursor-pointer overflow-hidden rounded-lg transition-all duration-200",
               "border-2 flex-shrink-0", 
               isSelected ? "border-purple-500" : "border-gray-800",
               !compatible && "opacity-60",
               inDeck && "opacity-50",
-              "hover:scale-105"
+              "hover:scale-105 group" // Added group for the tooltip
             )}
             onClick={() => onCardClick(card)}
             onDoubleClick={() => handleDoubleClick(card)}
           >
+            {/* Add owned indicator */}
+            {owned && (
+              <div className="absolute top-1 right-1 z-20 bg-green-600 text-white text-xs font-bold py-0.5 px-2 rounded shadow-md">
+                Owned
+              </div>
+            )}
+           
+            {/* Add double-click tooltip */}
+            <div className="absolute inset-0 bg-black/70 flex items-center justify-center opacity-0 group-hover:opacity-80 transition-opacity z-10">
+              <div className="text-white text-sm font-medium px-2 py-1 rounded">
+                Double-click to {currentStage === 'leaders' ? 'select leader' : currentStage === 'base' ? 'select base' : 'add to deck'}
+              </div>
+            </div>
+            
             <div className="aspect-[7/10] w-full h-auto relative">
-              {card.image_uri ? (
+              {/* This is the missing image rendering code */}
+              {card.image_uri || card.image_url ? (
                 <img
-                  src={card.image_uri}
-                  alt={card.name}
+                  src={card.image_uri || card.image_url || ''}
+                  alt={card.name || 'Card'}
                   className={cn(
                     "w-full h-full object-contain",
                     inDeck && "grayscale"

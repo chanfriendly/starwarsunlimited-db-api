@@ -4,10 +4,12 @@ import React from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button'; // Import your Button component
+import { useAuth } from '@/contexts/AuthContext';
 
 export function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
+  const { isAuthenticated } = useAuth(); // Add this line
   
   const isActive = (path: string) => pathname === path;
   
@@ -61,25 +63,40 @@ export function Navbar() {
             Deck Builder
           </Link>
           
-          <Link
-            href="/profile"
-            className={`text-lg transition-colors ${
-              isActive('/profile')
-                ? 'text-purple-400 font-medium'
-                : 'text-gray-300 hover:text-white'
-            }`}
-          >
-            Profile
-          </Link>
-          
-          {/* Logout Button */}
-          <Button 
-            onClick={handleLogout}
-            variant="ghost"
-            className="text-gray-300 hover:text-white"
-          >
-            Logout
-          </Button>
+          {/* Conditionally render Profile and Login/Logout */}
+          {isAuthenticated ? (
+            <>
+              <Link
+                href="/profile"
+                className={`text-lg transition-colors ${
+                  isActive('/profile')
+                    ? 'text-purple-400 font-medium'
+                    : 'text-gray-300 hover:text-white'
+                }`}
+              >
+                Profile
+              </Link>
+              
+              <Button 
+                onClick={handleLogout}
+                variant="ghost"
+                className="text-gray-300 hover:text-white"
+              >
+                Logout
+              </Button>
+            </>
+          ) : (
+            <Link
+              href="/login"
+              className={`text-lg transition-colors ${
+                isActive('/login')
+                  ? 'text-purple-400 font-medium'
+                  : 'text-gray-300 hover:text-white'
+              }`}
+            >
+              Login
+            </Link>
+          )}
         </div>
       </div>
     </nav>

@@ -32,168 +32,163 @@ async def get_cards(
 ):
     """Get cards with flexible filtering options."""
     try:
-        # Complex case: Aspect filtering (uses raw SQL for better performance)
+        # Initialize params dictionary and conditions list
+        params = {}
+        conditions = []
+        
         if aspect:
-            # Split aspect into a list if it's comma-separated
+            # Split aspect into list if comma-separated
             aspect_list = aspect.split(',') if ',' in aspect else [aspect]
             
-            # Build the SQL query with proper parameters
-            base_sql = """
+            # Build dynamic IN clause with explicit parameter placeholders
+            aspect_placeholders = []
+            
+            for i, asp in enumerate(aspect_list):
+                param_name = f"aspect_{i}"
+                params[param_name] = asp
+                aspect_placeholders.append(f":{param_name}")
+            
+            # Join the placeholders with commas
+            aspect_in_clause = ", ".join(aspect_placeholders)
+            
+            # Build the base SQL query
+            base_sql = f"""
                 SELECT c.* FROM cards c
                 JOIN card_aspects ca ON c.id = ca.card_id
-                WHERE ca.aspect_name IN :aspects
+                WHERE ca.aspect_name IN ({aspect_in_clause})
             """
-            
-            # Add additional filtering
-            conditions = []
-            params = {"aspects": tuple(aspect_list), "limit": limit, "offset": (page - 1) * limit}
-            
-            if search:
-                conditions.append("c.name LIKE :search")
-                params["search"] = f"%{search}%"
-            
-            if type:
+        else:
+            # For non-aspect filtering, start with a simpler query
+            base_sql = """
+                SELECT c.* FROM cards c
+                WHERE 1=1
+            """
+        
+        # Add search filter
+        if search:
+            conditions.append("c.name LIKE :search")
+            params["search"] = f"%{search}%"
+        
+        # Add type filter
+        if type:
+            # Handle multiple types (comma-separated)
+            if ',' in type:
+                type_list = type.split(',')
+                type_conditions = []
+                
+                for i, t in enumerate(type_list):
+                    param_name = f"type_{i}"
+                    params[param_name] = t.strip()
+                    type_conditions.append(f"c.type = :{param_name}")
+                
+                if type_conditions:
+                    conditions.append(f"({' OR '.join(type_conditions)})")
+            else:
                 conditions.append("c.type = :type")
                 params["type"] = type
+        
+        # Add not_type filter
+        if not_type:
+            not_type_list = not_type.split(',')
+            for i, nt in enumerate(not_type_list):
+                param_name = f"not_type_{i}"
+                conditions.append(f"c.type != :{param_name}")
+                params[param_name] = nt.strip()
+        
+        # Add cost filters
+        if costMin is not None:
+            conditions.append("c.energy_cost >= :cost_min")
+            params["cost_min"] = costMin
+
+        if costMax is not None:
+            conditions.append("c.energy_cost <= :cost_max")
+            params["cost_max"] = costMax
+        
+        # Add keyword filter
+        if keyword:
+            keyword_list = keyword.split(',')
+            keyword_conditions = []
             
-            # Add not_type filter
-            if not_type:
-                not_type_list = not_type.split(',')
-                for i, nt in enumerate(not_type_list):
-                    param_name = f"not_type_{i}"
-                    conditions.append(f"c.type != :{param_name}")
-                    params[param_name] = nt.strip()
+            for i, kw in enumerate(keyword_list):
+                param_name = f"keyword_{i}"
+                params[param_name] = kw.strip()
+                keyword_conditions.append(f"c.id IN (SELECT card_id FROM card_keywords WHERE keyword = :{param_name})")
             
-            # Add cost filters
-            if costMin is not None:
-                conditions.append("(c.energy_cost >= :cost_min OR c.cost >= :cost_min)")
-                params["cost_min"] = costMin
+            if keyword_conditions:
+                conditions.append(f"({' OR '.join(keyword_conditions)})")
+        
+        # Add set filter
+        if set:
+            set_list = set.split(',')
+            set_conditions = []
             
-            if costMax is not None:
-                conditions.append("(c.energy_cost <= :cost_max OR c.cost <= :cost_max)")
-                params["cost_max"] = costMax
+            for i, s in enumerate(set_list):
+                param_name = f"set_{i}"
+                params[param_name] = s.strip()
+                set_conditions.append(f"(c.set_code = :{param_name} OR c.set_name = :{param_name})")
             
-            # Add keyword filter
-            if keyword:
-                keyword_list = keyword.split(',')
-                keyword_conditions = []
-                for i, kw in enumerate(keyword_list):
-                    param_name = f"keyword_{i}"
-                    keyword_conditions.append(f"c.id IN (SELECT card_id FROM card_keywords WHERE keyword = :{param_name})")
-                    params[param_name] = kw.strip()
-                
-                if keyword_conditions:
-                    conditions.append(f"({' OR '.join(keyword_conditions)})")
-            
-            # Add set filter
-            if set:
-                set_list = set.split(',')
-                set_conditions = []
-                for i, s in enumerate(set_list):
-                    param_name = f"set_{i}"
-                    set_conditions.append(f"(c.set_code = :{param_name} OR c.set_name = :{param_name})")
-                    params[param_name] = s.strip()
-                
-                if set_conditions:
-                    conditions.append(f"({' OR '.join(set_conditions)})")
-                
-            # Add WHERE conditions if any
-            if conditions:
-                base_sql += " AND " + " AND ".join(conditions)
-                
-            # Add sorting
-            if sort:
-                # Simple sort handling - could be expanded
-                if sort == "name":
-                    base_sql += " ORDER BY c.name ASC"
-                elif sort == "cost":
-                    base_sql += " ORDER BY COALESCE(c.energy_cost, c.cost) ASC"
-            else:
-                # Default sort
+            if set_conditions:
+                conditions.append(f"({' OR '.join(set_conditions)})")
+        
+        # Add WHERE conditions if any
+        if conditions:
+            base_sql += " AND " + " AND ".join(conditions)
+        
+        # Add sorting
+        if sort:
+            # Simple sort handling - could be expanded
+            if sort == "name":
                 base_sql += " ORDER BY c.name ASC"
-                
-            # Add pagination
-            base_sql += " LIMIT :limit OFFSET :offset"
-            
-            # Execute query
-            sql = text(base_sql)
-            result = db.execute(sql, params)
-            
-            
-            # Process results
-            columns = result.keys()
-            cards = []
-            for row in result:
-                # Convert row to dictionary
-                card = {}
-                for idx, col in enumerate(columns):
-                    card[col] = row[idx]
-                    
-                # Add relationship data
-                cards.append(enrich_card_with_relationships(db, card))
-                
-            # Get total count for pagination
-            count_sql = """
-                SELECT COUNT(*) FROM cards c
-                JOIN card_aspects ca ON c.id = ca.card_id
-                WHERE ca.aspect_name = :aspect
-            """
-            
-            # Add additional filtering for count query
-            if conditions:
-                count_sql += " AND " + " AND ".join(conditions)
-                
-            # Execute count query
-            count_params = {k: v for k, v in params.items() if k not in ["limit", "offset"]}
-            count_result = db.execute(text(count_sql), count_params)
-            total = count_result.scalar()
-            
-        # Simple case: Use ORM for basic filtering
+            elif sort == "cost":
+                base_sql += " ORDER BY COALESCE(c.energy_cost, c.cost) ASC"
         else:
-            # Start with base query
-            query = db.query(Card)
+            # Default sort
+            base_sql += " ORDER BY c.name ASC"
+        
+        # Count query for pagination
+        count_sql = base_sql.replace("SELECT c.*", "SELECT COUNT(*)")
+        count_sql = count_sql.split(" ORDER BY")[0]  # Remove ORDER BY for count
+        
+        # Execute count query
+        count_result = db.execute(text(count_sql), params)
+        total = count_result.scalar() or 0
+        
+        # Add pagination to base query
+        base_sql += " LIMIT :limit OFFSET :offset"
+        params["limit"] = limit
+        params["offset"] = (page - 1) * limit
+        
+        # Execute main query
+        logger.debug(f"Executing SQL: {base_sql}")
+        logger.debug(f"With params: {params}")
+        
+        result = db.execute(text(base_sql), params)
+        
+        # Process results
+        columns = result.keys()
+        cards = []
+        
+        for row in result:
+            # Convert row to dictionary
+            card = {}
+            for idx, col in enumerate(columns):
+                if isinstance(row, tuple):
+                    card[col] = row[idx]
+                else:
+                    # For SQLAlchemy Row objects
+                    card[col] = row._mapping[col]
             
-            # Apply filters
-            if search:
-                # Search in name with case-insensitive match
-                query = query.filter(Card.name.ilike(f"%{search}%"))
-                
-            if type:
-                query = query.filter(Card.type == type)
-            
-            # Handle not_type filter - ADDED CODE HERE
-            if not_type:
-                not_type_list = not_type.split(',')
-                for nt in not_type_list:
-                    query = query.filter(Card.type != nt.strip())
-                
-            # Add sorting
-            if sort:
-                if sort == "name":
-                    query = query.order_by(Card.name)
-                elif sort == "cost":
-                    query = query.order_by(Card.energy_cost)  # Fixed: energy_cost not cost
-            else:
-                # Default sort
-                query = query.order_by(Card.name)
-                
-            # Get total count before pagination
-            total = query.count()
-            
-            # Apply pagination
-            cards = query.offset((page - 1) * limit).limit(limit).all()
-            
-            # Convert to dictionaries with relationships
-            cards = [card_to_dict(card) for card in cards]
-            
+            # Add relationship data
+            cards.append(enrich_card_with_relationships(db, card))
+        
         # Return results with pagination info
         return {
             "data": cards,
-            "meta":{
-            "total": total,
-            "page": page,
-            "limit": limit,
-            "pages": math.ceil(total / limit) if limit > 0 else 1
+            "meta": {
+                "total": total,
+                "page": page,
+                "limit": limit,
+                "pages": math.ceil(total / limit) if limit > 0 else 1
             }
         }
     except Exception as e:

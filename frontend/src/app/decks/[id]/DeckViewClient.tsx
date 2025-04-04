@@ -18,36 +18,54 @@ export function DeckViewClient({ deckId }: { deckId: string }) {
   // Use effect to load the deck data
   useEffect(() => {
     if (!deckId) {
-      setError('Invalid deck ID');
-      setLoading(false);
-      return;
+        console.error('[DEBUG] No deck ID provided');
+        setError('Invalid deck ID');
+        setLoading(false);
+        return;
     }
     
-    console.log("Loading deck with ID:", deckId);
-    
     const loadDeck = async () => {
-      try {
-        setLoading(true);
-        const deckData = await fetchDeckById(deckId);
-        console.log("Received deck data:", deckData);
-        
-        if (deckData) {
-          setDeck(deckData);
-        } else {
-          setError('Deck not found');
+        try {
+            setLoading(true);
+            setError(null);
+            
+            console.log('[DEBUG] Loading deck with ID:', deckId);
+            
+            const response = await fetch(`/api/me/decks/${deckId}`, {
+                credentials: 'include', // Ensure cookies are sent
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            console.log('[DEBUG] Fetch response status:', response.status);
+            console.log('[DEBUG] Fetch response headers:', 
+              Object.fromEntries(response.headers.entries())
+            );
+           
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('[DEBUG] Error response text:', errorText);
+                throw new Error(`Failed to load deck: ${response.status} - ${errorText}`);
+            }
+            
+            const deck = await response.json();
+            console.log('[DEBUG] Received deck data:', JSON.stringify(deck, null, 2));
+            
+            setDeck(deck);
+        } catch (err) {
+            console.error('[DEBUG] Full error in loadDeck:', err);
+            setError(err instanceof Error ? err.message : 'Failed to load deck data');
+        } finally {
+            setLoading(false);
         }
-      } catch (err) {
-        console.error('Error loading deck:', err);
-        setError('Failed to load deck data');
-      } finally {
-        setLoading(false);
-      }
     };
 
     loadDeck();
   }, [deckId]);
 
   const handleEditDeck = () => {
+    console.log('[DEBUG] Editing deck:', deckId);
     router.push(`/deck-builder?deckId=${deckId}`);
   };
 
@@ -91,11 +109,12 @@ export function DeckViewClient({ deckId }: { deckId: string }) {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
           <h1 className="text-3xl md:text-4xl font-bold">{deck.name}</h1>
           <div className="flex gap-3">
-            <Button variant="outline" onClick={handleEditDeck}>
+            <Button 
+              variant="outline" 
+              onClick={handleEditDeck}
+              className="bg-gray-800 hover:bg-gray-700 text-white border border-gray-700"
+            >
               Edit Deck
-            </Button>
-            <Button asChild>
-              <Link href="/profile">Back to Profile</Link>
             </Button>
           </div>
         </div>

@@ -3,13 +3,20 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { fetchCards, fetchAspects, fetchTypes, fetchKeywords, fetchSets, ApiCard } from '@/lib/api';
+import { fetchCards, fetchAspects, fetchTypes, fetchKeywords, fetchSets, ApiCard, fetchUserCollection } from '@/lib/api';
 import { CardGrid } from '@/components/CardGrid';
 import { CardFilters } from '@/components/CardFilters';
 import { CardDetailDialog } from '@/components/CardDetailDialog';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Search, Filter, Loader } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+
+interface Aspect {
+  aspect_name: string;
+  aspect_color?: string;
+}
+
 
 export default function CardBrowser() {
   // State
@@ -23,7 +30,90 @@ export default function CardBrowser() {
   const [types, setTypes] = useState<string[]>([]);
   const [keywords, setKeywords] = useState<string[]>([]);
   const [sets, setSets] = useState<string[]>([]);
+ 
+  const [userCollection, setUserCollection] = useState<Set<string>>(new Set()); // Add this state
+  const { isAuthenticated } = useAuth(); // Add authentication check
+ 
+// Force authentication check when component mounts
+useEffect(() => {
+  const checkAuthOnLoad = async () => {
+    const token = localStorage.getItem('auth_token');
+    if (token) {
+      console.log('Found token in storage, verifying...');
+      try {
+        // Use the auth token to revalidate auth state
+        const response = await fetch('/api/auth/me', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          },
+          credentials: 'include'
+        });
+        
+        if (response.ok) {
+          console.log('Token is valid, authenticated');
+          // Auth context will be updated by its own effect
+        } else {
+          console.warn('Stored token invalid, logging out');
+          localStorage.removeItem('auth_token');
+        }
+      } catch (e) {
+        console.error('Error checking auth on page load:', e);
+      }
+    }
+  };
   
+  checkAuthOnLoad();
+}, []);
+
+  // Add this effect to fetch user collection
+
+  useEffect(() => {
+    const loadUserCollection = async () => {
+      try {
+        // Always try to load from localStorage first for immediate display
+        const storedCollection = localStorage.getItem('user_collection');
+        if (storedCollection) {
+          try {
+            const parsed = JSON.parse(storedCollection);
+            if (Array.isArray(parsed)) {
+              setUserCollection(new Set(parsed));
+              console.log(`Loaded ${parsed.length} cards from local storage`);
+            }
+          } catch (e) {
+            console.error('Error parsing stored collection:', e);
+          }
+        }
+        
+        // Then if authenticated, fetch fresh data
+        if (isAuthenticated) {
+          console.log('Loading user collection from API...');
+          try {
+            const collection = await fetchUserCollection();
+            
+            if (collection && Array.isArray(collection)) {
+              const collectionIds = collection.map(item => item.card.id);
+              console.log(`Fetched ${collectionIds.length} cards from API`);
+              
+              // Save to localStorage for persistence
+              localStorage.setItem('user_collection', JSON.stringify(collectionIds));
+              
+              // Update state
+              setUserCollection(new Set(collectionIds));
+            }
+          } catch (err) {
+            console.error('Error fetching collection from API:', err);
+            // Already loaded from localStorage above
+          }
+        }
+      } catch (err) {
+        console.error('Error in collection loading:', err);
+      }
+    };
+    
+    loadUserCollection();
+  }, [isAuthenticated]);
+  
+
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -42,9 +132,11 @@ export default function CardBrowser() {
   });
 
   // Fetch filter options on mount
+
   useEffect(() => {
     const loadFilterOptions = async () => {
       try {
+        console.log("Fetching filter options...");
         const [aspectsData, typesData, keywordsData, setsData] = await Promise.all([
           fetchAspects(),
           fetchTypes(),
@@ -52,18 +144,51 @@ export default function CardBrowser() {
           fetchSets()
         ]);
         
-      // Extract aspect names for the filter options
-      setAspects(aspectsData.map(aspect => aspect.aspect_name));
-      setTypes(typesData);
-      setKeywords(keywordsData);
-      setSets(setsData);
-    } catch (err) {
-      console.error('Error loading filter options:', err);
-    }
-  };
+        // Extract aspect names for the filter options
+        if (Array.isArray(aspectsData)) {
+          if (typeof aspectsData[0] === 'string') {
+            setAspects(aspectsData.map(aspect => aspect.aspect_name));
+          } else {
+            // Create a safe, properly typed copy of the array
+            const aspectNames: string[] = [];
+            
+            // Safely extract aspect names with type checking
+            for (const aspect of aspectsData) {
+              if (aspect && typeof aspect === 'object' && 'aspect_name' in aspect) {
+                aspectNames.push(aspect.aspect_name);
+              }
+            }
+            
+            // Now we have a string[] that TypeScript can accept
+            setAspects(aspectNames);
+          }
+          console.log(`Loaded ${aspectsData.length} aspects`);
+        } else {
+          console.error("Aspects data is not an array:", aspectsData);
+        }
+        
+        // Set other filter data with type checks
+        if (Array.isArray(typesData)) {
+          setTypes(typesData);
+          console.log(`Loaded ${typesData.length} types`);
+        }
+        
+        if (Array.isArray(keywordsData)) {
+          setKeywords(keywordsData);
+          console.log(`Loaded ${keywordsData.length} keywords`);
+        }
+        
+        if (Array.isArray(setsData)) {
+          setSets(setsData);
+          console.log(`Loaded ${setsData.length} sets`);
+        }
+      } catch (err) {
+        console.error('Error loading filter options:', err);
+      }
+    };
 
-  loadFilterOptions();
-}, []);
+    loadFilterOptions();
+  }, []);
 
   // Fetch cards when filters or page changes
   useEffect(() => {
@@ -194,6 +319,7 @@ export default function CardBrowser() {
               types={types}
               keywords={keywords}
               sets={sets}
+              onClose={() => setShowFilters(false)}
             />
           </div>
           
@@ -249,10 +375,11 @@ export default function CardBrowser() {
               </div>
             ) : (
               <>
-                <CardGrid
-                  cards={cards}
-                  onCardClick={handleCardClick}
-                />
+                      <CardGrid
+                        cards={cards}
+                        onCardClick={handleCardClick}
+                        isInCollection={(cardId) => userCollection.has(cardId)}
+                      />
                 
                 {/* Pagination/Load More */}
                 {currentPage < totalPages && (

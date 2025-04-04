@@ -31,11 +31,14 @@ export async function POST(request: NextRequest) {
     }
     
     // Create a response
-    const authResponse = NextResponse.json(responseData);
+    const authResponse = NextResponse.json({
+      success: true,
+      access_token: responseData.access_token,
+      token_type: responseData.token_type
+    });
     
-    // Set HTTP-only cookie with the token (for better security)
-    const cookieStore = await cookies();
-    cookieStore.set({
+    // Set HTTP-only cookie with the token
+    authResponse.cookies.set({
       name: 'auth_token',
       value: responseData.access_token,
       httpOnly: true,

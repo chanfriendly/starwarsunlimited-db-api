@@ -203,29 +203,74 @@ export default function DeckBuilder() {
     // Effect for Loading Existing Deck (Keep as is)
     useEffect(() => {
         if (!deckIdParam) return;
+        
         const loadExistingDeck = async () => {
-             try {
-                 setLoadingDeck(true);
-                 setError(null); // Clear previous errors
-                 const deck = await fetchDeckById(deckIdParam);
-                 if (!deck) { setError('Deck not found'); return; }
-                 resetDeck();
-                 setDeckName(deck.name);
-                 // Ensure leaders/base/cards are valid before adding
-                 if (Array.isArray(deck.leaders)) deck.leaders.forEach(addLeader);
-                 if (deck.base) setBaseContext(deck.base);
-                 if (Array.isArray(deck.cards)) deck.cards.forEach(item => addCard(item.card));
-                 contextSetCurrentStage('cards'); // Go to final stage after loading
-             } catch (err: any) {
-                 console.error('Error loading deck:', err);
-                 setError(`Failed to load deck: ${err.message || 'Unknown error'}`);
-             } finally {
-                 setLoadingDeck(false);
-             }
-        };
+            try {
+              console.log('[DEBUG] Starting loadExistingDeck');
+              console.log('[DEBUG] Current deckIdParam:', deckIdParam);
+              
+              setLoadingDeck(true);
+              setError(null);
+              
+              console.log('[DEBUG] Fetching deck from API');
+              const response = await fetch(`/api/me/decks/${deckIdParam}`);
+              
+              console.log('[DEBUG] Response status:', response.status);
+              
+              if (!response.ok) {
+                const errorText = await response.text();
+                console.error('[DEBUG] Error response text:', errorText);
+                throw new Error(`Failed to load deck: ${response.status} - ${errorText}`);
+              }
+              
+              const deck = await response.json();
+              console.log('[DEBUG] Loaded deck data:', deck);
+            
+            // Reset the deck builder state
+            resetDeck();
+            
+            // Set the deck name
+            setDeckName(deck.name || "Untitled Deck");
+            
+            // Add leaders
+            if (Array.isArray(deck.leaders)) {
+              console.log("Adding leaders:", deck.leaders);
+              for (const leader of deck.leaders) {
+                // Make sure we have a valid leader object
+                if (leader && typeof leader === 'object' && leader.id) {
+                  addLeader(leader);
+                }
+              }
+            }
+            
+            // Add base
+            if (deck.base && typeof deck.base === 'object' && deck.base.id) {
+              console.log("Adding base:", deck.base);
+              setBaseContext(deck.base);
+            }
+            
+            // Add cards
+            if (Array.isArray(deck.cards)) {
+              console.log("Adding cards:", deck.cards);
+              for (const item of deck.cards) {
+                if (item.card && typeof item.card === 'object' && item.card.id) {
+                  // In Twin Suns format, quantity should always be 1
+                  addCard(item.card);
+                }
+              }
+            }
+            
+            // Move to the cards stage after everything is loaded
+            } catch (err) {
+                console.error('[DEBUG] Full error in loadExistingDeck:', err);
+                setError(`Failed to load deck: ${err instanceof Error ? err.message : 'Unknown error'}`);
+            } finally {
+                setLoadingDeck(false);
+            }
+            };
+        
         loadExistingDeck();
-     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [deckIdParam]); // Only run when deckIdParam changes (add context functions if needed, but avoid loops)
+      }, [deckIdParam, resetDeck, addLeader, setBaseContext, addCard, setDeckName, contextSetCurrentStage]);// Only run when deckIdParam changes (add context functions if needed, but avoid loops)
 
     // --- Client-Side Filtering (Memoized) ---
     const displayedCards = useMemo(() => {
