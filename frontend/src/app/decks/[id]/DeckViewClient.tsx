@@ -15,6 +15,28 @@ export function DeckViewClient({ deckId }: { deckId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // At the beginning of the DeckViewClient component body
+  React.useEffect(() => {
+    // Check for too many renders (potential loop detection)
+    const renderCount = parseInt(sessionStorage.getItem('deckViewRenderCount') || '0') + 1;
+    sessionStorage.setItem('deckViewRenderCount', renderCount.toString());
+    
+    // If we've rendered this component too many times in a short period, reset
+    if (renderCount > 10) {
+      console.error('[DEBUG] Detected potential render loop - resetting state');
+      sessionStorage.removeItem('deckViewRenderCount');
+      sessionStorage.removeItem('editingDeck');
+      sessionStorage.removeItem('lastEditAttempt');
+    }
+    
+    // Reset render count after 5 seconds of stability
+    const timer = setTimeout(() => {
+      sessionStorage.setItem('deckViewRenderCount', '0');
+    }, 5000);
+    
+    return () => clearTimeout(timer);
+  }, []);
+
   // Use effect to load the deck data
   useEffect(() => {
     if (!deckId) {
@@ -25,48 +47,74 @@ export function DeckViewClient({ deckId }: { deckId: string }) {
     }
     
     const loadDeck = async () => {
-        try {
-            setLoading(true);
-            setError(null);
-            
-            console.log('[DEBUG] Loading deck with ID:', deckId);
-            
-            const response = await fetch(`/api/me/decks/${deckId}`, {
-                credentials: 'include', // Ensure cookies are sent
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-            
-            console.log('[DEBUG] Fetch response status:', response.status);
-            console.log('[DEBUG] Fetch response headers:', 
-              Object.fromEntries(response.headers.entries())
-            );
-           
-            if (!response.ok) {
-                const errorText = await response.text();
-                console.error('[DEBUG] Error response text:', errorText);
-                throw new Error(`Failed to load deck: ${response.status} - ${errorText}`);
-            }
-            
-            const deck = await response.json();
-            console.log('[DEBUG] Received deck data:', JSON.stringify(deck, null, 2));
-            
-            setDeck(deck);
-        } catch (err) {
-            console.error('[DEBUG] Full error in loadDeck:', err);
-            setError(err instanceof Error ? err.message : 'Failed to load deck data');
-        } finally {
-            setLoading(false);
-        }
-    };
+      try {
+        setLoading(true);
+        setError(null);
+        
+        console.log('[DEBUG] Loading deck with ID:', deckId);
+        
+        // Check if we have an auth token
+        const authToken = localStorage.getItem('auth_token');
+        console.log('[DEBUG] Auth token exists:', !!authToken);
+        
+        // Use the new endpoint with query parameter instead of path parameter
+        const response = await fetch(`/api/me/get-deck?id=${encodeURIComponent(deckId)}`, {
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+          
+          console.log('[DEBUG] Fetch response status:', response.status);
+          
+          if (!response.ok) {
+              const errorText = await response.text();
+              console.error('[DEBUG] Error response text:', errorText);
+              throw new Error(`Failed to load deck: ${response.status} - ${errorText}`);
+          }
+          
+          const deck = await response.json();
+          console.log('[DEBUG] Received deck data:', JSON.stringify(deck, null, 2));
+          
+          setDeck(deck);
+      } catch (err) {
+          console.error('[DEBUG] Full error in loadDeck:', err);
+          setError(err instanceof Error ? err.message : 'Failed to load deck data');
+      } finally {
+          setLoading(false);
+      }
+  };
 
     loadDeck();
   }, [deckId]);
 
   const handleEditDeck = () => {
     console.log('[DEBUG] Editing deck:', deckId);
-    router.push(`/deck-builder?deckId=${deckId}`);
+    
+    // CIRCUIT BREAKER: Check if we've already tried to edit this deck recently
+    const lastEditAttempt = sessionStorage.getItem('lastEditAttempt');
+    const now = Date.now();
+    
+    if (lastEditAttempt) {
+      const timeSinceLastAttempt = now - parseInt(lastEditAttempt);
+      
+      // If we tried to edit within the last 5 seconds, prevent another attempt
+      if (timeSinceLastAttempt < 5000) {
+        console.log('[DEBUG] Preventing rapid edit attempts - cooling down');
+        alert('Please wait a moment before editing again.');
+        return false;
+      }
+    }
+    
+    // Record this attempt
+    sessionStorage.setItem('lastEditAttempt', now.toString());
+    sessionStorage.setItem('editingDeck', deckId);
+    
+    // DIRECT APPROACH: Instead of using React router, use direct URL change 
+    // with a timestamp parameter to prevent caching issues
+    window.location.href = `/deck-builder?deckId=${deckId}&t=${Date.now()}`;
+    
+    return false;
   };
 
   // Add debugging logs to see what's happening
@@ -115,6 +163,9 @@ export function DeckViewClient({ deckId }: { deckId: string }) {
               className="bg-gray-800 hover:bg-gray-700 text-white border border-gray-700"
             >
               Edit Deck
+            </Button>
+            <Button asChild className="bg-gray-600 hover:bg-gray-500">
+              <Link href="/profile">Back to Profile</Link>
             </Button>
           </div>
         </div>

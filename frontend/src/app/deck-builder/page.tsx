@@ -16,6 +16,9 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { debounce } from 'lodash-es'; // Make sure lodash-es is installed
 
+
+
+
 // Constants
 const SEARCH_DEBOUNCE_MS = 400;
 const CARDS_PER_PAGE = 50;
@@ -27,6 +30,24 @@ export default function DeckBuilder() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const deckIdParam = searchParams.get('deckId');
+
+      // Emergency circuit breaker - detect potential loops
+    useEffect(() => {
+        const visitCount = parseInt(sessionStorage.getItem('deckBuilderVisits') || '0') + 1;
+        sessionStorage.setItem('deckBuilderVisits', visitCount.toString());
+        
+        // If we've hit this component too many times in a short period
+        if (visitCount > 5) {
+        console.error('Detected potential loop - resetting state');
+        sessionStorage.removeItem('deckBuilderVisits');
+        sessionStorage.removeItem('editingDeck');
+        // Force clear the URL parameter
+        if (deckIdParam) {
+            window.location.href = '/deck-builder';
+            return;
+        }
+        }
+    }, [deckIdParam]); // Missing closing parenthesis for useEffect
 
     // --- Refs ---
     const loadingRef = useRef(false); // Ref to prevent concurrent fetches
@@ -48,6 +69,34 @@ export default function DeckBuilder() {
     const [currentPage, setCurrentPage] = useState(1);
     const [totalPages, setTotalPages] = useState(1);
     const [hasMoreCards, setHasMoreCards] = useState(true);
+
+
+    useEffect(() => {
+        // Emergency circuit breaker - detect potential loops
+        const visitCount = parseInt(sessionStorage.getItem('deckBuilderVisits') || '0') + 1;
+        sessionStorage.setItem('deckBuilderVisits', visitCount.toString());
+        
+        // If we've hit this component too many times in a short period
+        if (visitCount > 5) {
+        console.error('[DEBUG] Detected potential loop - resetting state');
+        sessionStorage.removeItem('deckBuilderVisits');
+        sessionStorage.removeItem('editingDeck');
+        sessionStorage.removeItem('lastEditAttempt');
+        
+        // Force clear the URL parameter to break the cycle
+        if (deckIdParam) {
+            router.replace('/deck-builder');
+            return;
+        }
+        }
+        
+        // Reset count after 5 seconds of stability
+        const timer = setTimeout(() => {
+        sessionStorage.setItem('deckBuilderVisits', '0');
+        }, 5000);
+        
+        return () => clearTimeout(timer);
+    }, []);
 
     // --- Deck Builder Context Hook ---
     const {
@@ -201,42 +250,86 @@ export default function DeckBuilder() {
 
 
     // Effect for Loading Existing Deck (Keep as is)
-    useEffect(() => {
-        if (!deckIdParam) return;
-        
-        const loadExistingDeck = async () => {
+    // In your deck-builder page.tsx
+useEffect(() => {
+    if (!deckIdParam) return;
+    
+    // Check if we're recovering from a previous error
+    const editingDeckId = sessionStorage.getItem('editingDeck');
+    if (editingDeckId) {
+      console.log('[DEBUG] Detected previous deck edit attempt:', editingDeckId);
+      // Clear the flag to prevent issues on refresh
+      sessionStorage.removeItem('editingDeck');
+    }
+  
+    const loadExistingDeck = async () => {
+        try {
+          console.log('[DEBUG] Starting loadExistingDeck');
+          console.log('[DEBUG] Current deckIdParam:', deckIdParam);
+          
+          setLoadingDeck(true);
+          setError(null);
+          
+          // Add retry logic with backoff
+          let attempts = 0;
+          const maxAttempts = 3;
+          let deckData = null;
+          
+          while (attempts < maxAttempts && !deckData) {
             try {
-              console.log('[DEBUG] Starting loadExistingDeck');
-              console.log('[DEBUG] Current deckIdParam:', deckIdParam);
+              console.log(`[DEBUG] Fetch attempt ${attempts + 1} for deck: ${deckIdParam}`);
               
-              setLoadingDeck(true);
-              setError(null);
+              // Use AbortController for timeout
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
               
-              console.log('[DEBUG] Fetching deck from API');
-              const response = await fetch(`/api/me/decks/${deckIdParam}`);
+              // Use the new endpoint with query parameter instead of path parameter
+              const response = await fetch(`/api/me/get-deck?id=${encodeURIComponent(deckIdParam)}`, {
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                signal: controller.signal
+              });
               
+              clearTimeout(timeoutId);
               console.log('[DEBUG] Response status:', response.status);
               
-              if (!response.ok) {
+              if (response.ok) {
+                deckData = await response.json();
+                console.log('[DEBUG] Successfully loaded deck data');
+                break;
+              } else {
                 const errorText = await response.text();
-                console.error('[DEBUG] Error response text:', errorText);
-                throw new Error(`Failed to load deck: ${response.status} - ${errorText}`);
+                console.error('[DEBUG] Error response:', errorText);
+                
+                // If last attempt, throw error
+                if (attempts === maxAttempts - 1) {
+                  throw new Error(`Failed to load deck: ${response.status} - ${errorText}`);
+                }
               }
+            } catch (fetchError) {
+              console.error('[DEBUG] Fetch error:', fetchError);
               
-              const deck = await response.json();
-              console.log('[DEBUG] Loaded deck data:', deck);
+              // If last attempt, rethrow
+              if (attempts === maxAttempts - 1) throw fetchError;
+            }
             
+            // Increment attempts and wait before retry (exponential backoff)
+            attempts++;
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
+          }
+          
+          // If we got the data, process it
+          if (deckData) {
             // Reset the deck builder state
             resetDeck();
             
             // Set the deck name
-            setDeckName(deck.name || "Untitled Deck");
+            setDeckName(deckData.name || "Untitled Deck");
             
             // Add leaders
-            if (Array.isArray(deck.leaders)) {
-              console.log("Adding leaders:", deck.leaders);
-              for (const leader of deck.leaders) {
-                // Make sure we have a valid leader object
+            if (Array.isArray(deckData.leaders)) {
+              console.log("Adding leaders:", deckData.leaders.length);
+              for (const leader of deckData.leaders) {
                 if (leader && typeof leader === 'object' && leader.id) {
                   addLeader(leader);
                 }
@@ -244,33 +337,34 @@ export default function DeckBuilder() {
             }
             
             // Add base
-            if (deck.base && typeof deck.base === 'object' && deck.base.id) {
-              console.log("Adding base:", deck.base);
-              setBaseContext(deck.base);
+            if (deckData.base && typeof deckData.base === 'object' && deckData.base.id) {
+              console.log("Adding base:", deckData.base.name);
+              setBaseContext(deckData.base);
             }
             
             // Add cards
-            if (Array.isArray(deck.cards)) {
-              console.log("Adding cards:", deck.cards);
-              for (const item of deck.cards) {
+            if (Array.isArray(deckData.cards)) {
+              console.log("Adding cards:", deckData.cards.length);
+              for (const item of deckData.cards) {
                 if (item.card && typeof item.card === 'object' && item.card.id) {
-                  // In Twin Suns format, quantity should always be 1
                   addCard(item.card);
                 }
               }
             }
             
-            // Move to the cards stage after everything is loaded
-            } catch (err) {
-                console.error('[DEBUG] Full error in loadExistingDeck:', err);
-                setError(`Failed to load deck: ${err instanceof Error ? err.message : 'Unknown error'}`);
-            } finally {
-                setLoadingDeck(false);
-            }
-            };
-        
-        loadExistingDeck();
-      }, [deckIdParam, resetDeck, addLeader, setBaseContext, addCard, setDeckName, contextSetCurrentStage]);// Only run when deckIdParam changes (add context functions if needed, but avoid loops)
+            // Set stage to cards
+            contextSetCurrentStage('cards');
+          }
+        } catch (err) {
+          console.error('[DEBUG] Final error in loadExistingDeck:', err);
+          setError(`Failed to load deck: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        } finally {
+          setLoadingDeck(false);
+        }
+      };
+    
+    loadExistingDeck();
+  }, [deckIdParam, resetDeck, addLeader, setBaseContext, addCard, setDeckName, contextSetCurrentStage]);// Only run when deckIdParam changes (add context functions if needed, but avoid loops)
 
     // --- Client-Side Filtering (Memoized) ---
     const displayedCards = useMemo(() => {
