@@ -30,6 +30,9 @@ interface DeckCardItem {
     quantity: number;
 }
 
+// Add this flag outside the component to prevent excessive API calls
+let isLoadingDeckData = false;
+
 // Constants
 const SEARCH_DEBOUNCE_MS = 400;
 const CARDS_PER_PAGE = 50;
@@ -205,7 +208,7 @@ export default function DeckBuilder() {
                         console.log('[DeckBuilder] Calling fetchWithAuth for deck ID:', deckIdParam);
                         // fetchWithAuth returns parsed data (SavedDeck/LoadedDeckData) or throws error
                         const fetchedData = await fetchWithAuth(
-                            `/api/me/decks/${encodeURIComponent(deckIdParam)}`
+                            `/api/me/get-deck?id=${encodeURIComponent(deckIdParam)}`
                         );
                         // *** END USE fetchWithAuth ***
 

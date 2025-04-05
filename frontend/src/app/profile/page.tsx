@@ -309,16 +309,19 @@ const UserProfilePage = () => {
           
           try {
             // Use the Next.js API routes (which will forward the cookies)
-            const decksResponse = await fetchWithAuth(`/api/me/decks`);
+            const fetchedDecks = await fetchWithAuth(`/api/me/decks`);
             
-            if (decksResponse.ok) {
-              decksData = await decksResponse.json();
+            // Directly use the returned data (it's already JSON)
+            if (Array.isArray(fetchedDecks)) {
+              decksData = fetchedDecks;
               console.log("[Profile] Fetched decks:", decksData.length);
-            } else if (decksResponse.status === 401) {
-              console.warn('[Profile] Not authenticated for decks');
-              setError('Authentication required');
+            } else if (fetchedDecks && typeof fetchedDecks === 'object' && fetchedDecks.detail) {
+              // Handle error object response
+              console.warn('[Profile] API error:', fetchedDecks.detail);
+              setError(fetchedDecks.detail);
             } else {
-              console.warn('[Profile] Failed to fetch decks:', decksResponse.status);
+              console.warn('[Profile] Unexpected response format:', fetchedDecks);
+              setError('Unexpected response format from server');
             }
           } catch (deckError) {
             console.error('[Profile] Error fetching decks:', deckError);

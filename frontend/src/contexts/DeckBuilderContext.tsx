@@ -1,6 +1,8 @@
+// DeckBuilderContext.tsx - Updated version
+
 'use client';
 
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useCallback } from 'react';
 import { Card } from '@/lib/api';
 
 type DeckBuildingStage = 'leaders' | 'base' | 'cards';
@@ -39,17 +41,25 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
   const [deckCards, setDeckCards] = useState<DeckItem[]>([]);
   const [deckName, setDeckNameState] = useState('New Deck');
 
-  // Function to directly set the current stage
-  const setCurrentStage = (stage: DeckBuildingStage) => {
+  // Modified: Use useCallback to memoize functions and prevent recreation on every render
+  const setCurrentStage = useCallback((stage: DeckBuildingStage) => {
     console.log(`Setting stage from ${currentStage} to ${stage}`);
-    // If going back to leaders stage, reset base
+    
+    // Important: don't update state if it's the same value to prevent unnecessary re-renders
+    if (stage === currentStage) return;
+    
+    // IMPORTANT CHANGE: Batch state updates to prevent multiple renders
     if (stage === 'leaders' && currentStage !== 'leaders') {
+      // Using React 18's automatic batching to combine these updates
       setBaseState(null);
+      setCurrentStageState(stage);
+    } else {
+      setCurrentStageState(stage);
     }
-    setCurrentStageState(stage);
-  };
+  }, [currentStage]);
 
-  const addLeader = (leader: Card) => {
+  // Modified: Don't auto-progress stages to prevent cascading state updates
+  const addLeader = useCallback((leader: Card) => {
     // Check if this leader is already in the deck
     if (leaders.some(l => l.id === leader.id)) {
       console.log(`Leader ${leader.name} is already in the deck`);
@@ -57,36 +67,38 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
     }
     
     if (leaders.length < 2) {
-      setLeaders([...leaders, leader]);
+      setLeaders(prev => [...prev, leader]);
       
-      // Auto-progress if we've selected 2 leaders
-      if (leaders.length === 1) {
-        setCurrentStageState('base');
-      }
+      // REMOVED auto-progression to prevent cascading state updates
+      // The progression should now be handled explicitly by the UI
     }
-  };
+  }, [leaders]);
 
-  const removeLeader = (leaderId: string) => {
-    setLeaders(leaders.filter(leader => leader.id !== leaderId));
-    // If we remove a leader, go back to the leaders stage
+  const removeLeader = useCallback((leaderId: string) => {
+    setLeaders(prev => prev.filter(leader => leader.id !== leaderId));
+    
+    // MODIFIED: Only change stage if needed to prevent unnecessary re-renders
     if (currentStage !== 'leaders') {
+      // IMPORTANT: Batch state updates to prevent multiple renders
       setCurrentStageState('leaders');
-      // Also reset base if we're going back to selecting leaders
       setBaseState(null);
     }
-  };
+  }, [currentStage]);
 
-  const setBase = (newBase: Card | null) => {
+  // Modified: Don't auto-progress to prevent cascading state updates
+  const setBase = useCallback((newBase: Card | null) => {
     console.log("Setting base:", newBase?.name);
+    
+    // Important: don't update state if it's the same value
+    if (newBase === base) return;
+    
     setBaseState(newBase);
-    // Auto-progress if we've selected a base
-    if (newBase && currentStage === 'base') {
-      setCurrentStageState('cards');
-    }
-  };
+    
+    // REMOVED auto-progression to prevent cascading state updates
+    // The progression should now be handled explicitly by the UI
+  }, [base]);
 
-  // Check if a card is already in the deck (leaders, base, or regular cards)
-  const isCardInDeck = (cardId: string): boolean => {
+  const isCardInDeck = useCallback((cardId: string): boolean => {
     // Check if it's a leader
     if (leaders.some(leader => leader.id === cardId)) {
       return true;
@@ -99,10 +111,9 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
     
     // Check if it's a regular card
     return deckCards.some(item => item.card.id === cardId);
-  };
+  }, [leaders, base, deckCards]);
 
-  // Modified to enforce Twin Suns format rule (no duplicates)
-  const addCard = (card: Card) => {
+  const addCard = useCallback((card: Card) => {
     // First check if the card is already in the deck (leaders, base, or regular cards)
     if (isCardInDeck(card.id)) {
       console.log(`Card ${card.name} is already in the deck and cannot be added again in Twin Suns format`);
@@ -110,39 +121,34 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
     }
     
     // In Twin Suns format, we always add with quantity 1
-    setDeckCards([...deckCards, { card, quantity: 1 }]);
-  };
+    setDeckCards(prev => [...prev, { card, quantity: 1 }]);
+  }, [isCardInDeck]);
 
-  const removeCard = (cardId: string) => {
-    setDeckCards(deckCards.filter(item => item.card.id !== cardId));
-  };
+  const removeCard = useCallback((cardId: string) => {
+    setDeckCards(prev => prev.filter(item => item.card.id !== cardId));
+  }, []);
 
-  // This function is mostly for compatibility with non-Twin Suns formats
-  // In Twin Suns, we generally won't use this as quantities should always be 1
-  const updateCardQuantity = (cardId: string, quantity: number) => {
-    // In Twin Suns format, quantity should always be 1 for regular cards
+  const updateCardQuantity = useCallback((cardId: string, quantity: number) => {
     const maxQuantity = 1;
     const actualQuantity = Math.min(quantity, maxQuantity);
     
     if (actualQuantity === 0) {
-      // If quantity is set to 0, remove the card
       removeCard(cardId);
       return;
     }
     
-    setDeckCards(
-      deckCards.map(item => 
+    setDeckCards(prev => 
+      prev.map(item => 
         item.card.id === cardId ? { ...item, quantity: actualQuantity } : item
       )
     );
-  };
+  }, [removeCard]);
 
-  // Update the setDeckName function to properly update state
-  const setDeckName = (name: string) => {
+  const setDeckName = useCallback((name: string) => {
     setDeckNameState(name);
-  };
+  }, []);
 
-  const progressStage = () => {
+  const progressStage = useCallback(() => {
     console.log("Current stage:", currentStage);
     console.log("Leaders:", leaders.length);
     console.log("Base:", base?.name);
@@ -156,23 +162,24 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
     } else {
       console.log("Cannot progress: conditions not met");
     }
-  };
+  }, [currentStage, leaders.length, base]);
 
-  const resetDeck = () => {
+  const resetDeck = useCallback(() => {
+    // Batch all state updates to prevent multiple renders
     setLeaders([]);
     setBaseState(null);
     setDeckCards([]);
     setDeckNameState('New Deck');
     setCurrentStageState('leaders');
-  };
+  }, []);
 
-  // Function to check if a card is compatible with the current deck aspects
-  const isCardInAspect = (card: Card): boolean => {
-    if (leaders.length < 2 || !base) return true; // If deck isn't complete, all cards are "in aspect"
+  const isCardInAspect = useCallback((card: Card): boolean => {
+    if (leaders.length < 2 || !base) return true;
     
     // Get all aspects from leaders and base
     const deckAspects: Record<string, number> = {};
     
+    // Rest of the function remains the same...
     // Count occurrences of each aspect in the deck
     leaders.forEach(leader => {
       leader.aspects?.forEach(aspect => {
@@ -236,30 +243,36 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
     
     // If we get here, the card has secondary aspects but none match the deck
     return false;
-  };
+  }, [leaders, base]);
+
+  // Memoize context value to prevent unnecessary renders of consumers
+  const contextValue = React.useMemo(() => ({
+    currentStage,
+    leaders,
+    base,
+    deckCards,
+    deckName,
+    addLeader,
+    removeLeader,
+    setBase,
+    addCard,
+    removeCard,
+    isCardInDeck,
+    updateCardQuantity,
+    setDeckName,
+    progressStage,
+    resetDeck,
+    isCardInAspect,
+    setCurrentStage,
+  }), [
+    currentStage, leaders, base, deckCards, deckName,
+    addLeader, removeLeader, setBase, addCard, removeCard,
+    isCardInDeck, updateCardQuantity, setDeckName,
+    progressStage, resetDeck, isCardInAspect, setCurrentStage
+  ]);
 
   return (
-    <DeckBuilderContext.Provider
-      value={{
-        currentStage,
-        leaders,
-        base,
-        deckCards,
-        deckName,
-        addLeader,
-        removeLeader,
-        setBase,
-        addCard,
-        removeCard,
-        isCardInDeck,
-        updateCardQuantity,
-        setDeckName,
-        progressStage,
-        resetDeck,
-        isCardInAspect,
-        setCurrentStage,
-      }}
-    >
+    <DeckBuilderContext.Provider value={contextValue}>
       {children}
     </DeckBuilderContext.Provider>
   );
