@@ -30,9 +30,6 @@ interface DeckCardItem {
     quantity: number;
 }
 
-// Add this flag outside the component to prevent excessive API calls
-let isLoadingDeckData = false;
-
 // Constants
 const SEARCH_DEBOUNCE_MS = 400;
 const CARDS_PER_PAGE = 50;
@@ -64,11 +61,13 @@ export default function DeckBuilder() {
     const [currentPage, setCurrentPage] = useState(1); // Card browser pagination
     const [totalPages, setTotalPages] = useState(1);
     const [hasMoreCards, setHasMoreCards] = useState(true);
+    const [deckLoaded, setDeckLoaded] = useState(false); // Add this new state variable
 
     // --- Refs ---
     const loadingRef = useRef(false); // Prevent concurrent card loads
     const observerRef = useRef<IntersectionObserver | null>(null); // Infinite scroll
     const lastCardElementRef = useRef<HTMLDivElement | null>(null); // Trigger element
+    const cardLoadingStageRef = useRef<string | null>(null);
 
     // --- Deck Builder Context ---
     const {
@@ -149,16 +148,54 @@ export default function DeckBuilder() {
         }
     }, [currentPage, hasMoreCards, isLoadingMore, searchQuery, loadCards]);
 
-    // --- Effect for Initial Card Load / Stage Change (When NOT Editing) ---
+    // --- Effect to reset deckLoaded when component unmounts or deckIdParam changes ---
     useEffect(() => {
-        if (!deckIdParam && !isPotentialLoop) {
-             console.log("Effect: Stage changed to", currentStage, "(Not editing/no loop)");
-             setSearchQuery(''); setCurrentPage(1); setHasMoreCards(true); setCards([]); setError(null);
-             loadCards(1, false, ''); // Load initial cards for the stage
-        } else if (deckIdParam) { console.log("Effect: Stage Change - Deferred to loadExistingDeck effect."); }
-        else if (isPotentialLoop) { console.warn("Effect: Stage Change - Halted due to potential loop detection."); }
-     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [currentStage, deckIdParam, isPotentialLoop]);
+        return () => {
+            setDeckLoaded(false);
+        };
+    }, [deckIdParam]);
+
+    // --- Modified Effect for Card Loading (both new decks and editing) ---
+    useEffect(() => {
+        // Skip if already loaded cards for this stage (prevents infinite loops)
+        if (cardLoadingStageRef.current === currentStage) {
+          return;
+        }
+        
+        // Conditions for when to load cards
+        const shouldLoadCards = 
+          // New deck case
+          (!deckIdParam && !isPotentialLoop) || 
+          // Editing case - wait for deck to finish loading
+          (deckIdParam && deckLoaded && !isPotentialLoop);
+        
+        if (shouldLoadCards) {
+          console.log(`Effect: Loading browse cards for stage: ${currentStage} (editing: ${!!deckIdParam}, deck loaded: ${deckLoaded})`);
+          
+          // Mark this stage as loaded to prevent re-execution
+          cardLoadingStageRef.current = currentStage;
+          
+          // Reset card browser state
+          setSearchQuery('');
+          setCurrentPage(1);
+          setHasMoreCards(true);
+          setCards([]);
+          setError(null);
+          
+          // Load the cards
+          loadCards(1, false, '');
+        }
+      }, [currentStage, deckIdParam, deckLoaded, isPotentialLoop, loadCards]);
+      
+      // Add this effect to reset the stage ref when currentStage changes
+      useEffect(() => {
+        // Reset the ref when stage changes
+        return () => {
+          if (cardLoadingStageRef.current !== currentStage) {
+            cardLoadingStageRef.current = null;
+          }
+        };
+      }, [currentStage]);
 
     // --- Effect for Infinite Scroll ---
     useEffect(() => {
@@ -240,6 +277,7 @@ export default function DeckBuilder() {
                     deckData.cards.forEach((item: DeckCardItem) => { if (item?.card?.id) addCard(item.card); else console.error("[DEBUG] Invalid card format:", item); });
                     contextSetCurrentStage('cards'); // Set stage last
                     console.log("[DEBUG] loadExistingDeck: Context updated and stage set to 'cards'");
+                    setDeckLoaded(true); // Set deck as loaded to trigger card browser loading
                     setTimeout(() => { console.log('[DEBUG] loadExistingDeck: Context state AFTER (delayed):', { name: deckName, leaders: leaders.length, base: !!base, cards: deckCards.length, stage: currentStage }); }, 100);
                 } else {
                     throw new Error("Failed to fetch valid deck data after multiple attempts.");
@@ -249,6 +287,7 @@ export default function DeckBuilder() {
                  if (err instanceof Error && err.message?.includes('(401)')) { setError('Unauthorized loading deck. Please log in again.'); }
                  else { setError(`Failed to load deck: ${err instanceof Error ? err.message : 'Unknown error'}`); }
                 sessionStorage.removeItem('processedDeckId'); // Allow retry if load failed
+                setDeckLoaded(false); // Reset the loaded flag on error
             } finally {
                 setLoadingDeck(false);
             }
