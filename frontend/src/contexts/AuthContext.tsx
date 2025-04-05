@@ -3,6 +3,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
+import { fetchWithAuth } from '@/lib/fetch-utils'; // Correct import path
 
 // Define User interface
 interface User {
@@ -16,7 +17,7 @@ interface User {
 // Define Auth Context interface
 interface AuthContextType {
   user: User | null;
-  isAuthenticated: boolean;
+  isAuthenticated: boolean; // <<< Keep this
   isLoading: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -24,189 +25,207 @@ interface AuthContextType {
   refreshAuthState: () => Promise<boolean>;
 }
 
-// Create context with undefined default
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// AuthProvider component
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false); // <<< ADD state variable back
   const router = useRouter();
 
-  // Define refreshAuthState function
-  const refreshAuthState = useCallback(async (): Promise<boolean> => {
+  // --- Define login function (Corrected) ---
+  const login = useCallback(async (username: string, password: string) => {
+    console.log(`[Auth Context] Login attempt for: ${username}`);
+    setIsLoading(true);
+    // Reset auth state immediately on login attempt
+    setUser(null);
+    setIsAuthenticated(false);
+    localStorage.removeItem('auth_token'); // Clear old token just in case
+
+    const formData = new URLSearchParams();
+    formData.append('username', username);
+    formData.append('password', password);
+
     try {
-      const token = localStorage.getItem('auth_token');
-      if (!token) {
-        setUser(null);
-        return false;
-      }
-      
-      const response = await fetch('/api/auth/me', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        credentials: 'include'
+      const response = await fetch('/api/auth/token', { // Correct endpoint
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json', },
+        body: formData.toString(),
       });
-      
+
+      console.log(`[Auth Context] /api/auth/token response status: ${response.status}`);
       if (!response.ok) {
-        console.warn('[Auth] Token invalid or expired');
+         let errorDetail = 'Login failed';
+         try { const errorData = await response.json(); errorDetail = errorData.detail || JSON.stringify(errorData); }
+         catch(_) { try { errorDetail = await response.text() || errorDetail; } catch {} }
+         console.error(`[Auth Context] Login API error (${response.status}): ${errorDetail}`);
+         throw new Error(errorDetail);
+      }
+
+      const data = await response.json();
+      console.log("[Auth Context] Raw data received from /api/auth/token:", JSON.stringify(data, null, 2));
+
+      if (data && data.access_token && typeof data.access_token === 'string') {
+          localStorage.setItem('auth_token', data.access_token); // Use correct key
+          console.log("[Auth Context] Token stored successfully in localStorage as 'auth_token'.");
+          const storedToken = localStorage.getItem('auth_token');
+          console.log(`[Auth Context] Verification read from localStorage: ${storedToken ? 'FOUND' : 'NOT FOUND'}`);
+
+          try {
+            console.log("[Auth Context] Fetching user data from /api/auth/me after login...");
+            const userData: User = await fetchWithAuth('/api/auth/me'); // Use fetchWithAuth
+            if (userData && userData.username) {
+                console.log("[Auth Context] Successfully fetched user data:", userData.username);
+                setUser(userData);
+                setIsAuthenticated(true); // <<< SET authenticated state
+                router.push('/profile');
+            } else {
+                console.error("[Auth Context] Fetched /api/auth/me but received invalid user data after login.");
+                await logout(); // Call logout if /me fails
+                throw new Error("Authentication succeeded but failed to retrieve user data.");
+            }
+          } catch (fetchUserError) {
+             console.error("[Auth Context] Error fetching user data after login:", fetchUserError);
+             await logout(); // Call logout if /me fails
+             throw new Error("Authentication succeeded but failed to retrieve user data.");
+          }
+      } else {
+          // ... (log specific token error) ...
+          if (!data) { console.error("[Auth Context] Login failed: No data received from /api/auth/token."); }
+          else if (!data.access_token) { console.error("[Auth Context] Login successful but 'access_token' key MISSING in response data:", data); }
+          else { console.error("[Auth Context] Login successful but 'access_token' in response data is NOT A STRING:", data); }
+          throw new Error("Login failed: Could not retrieve authentication token.");
+       }
+    } catch (error) {
+        console.error("[Auth Context] Error during login process:", error);
+        // Ensure state is cleared on error
         localStorage.removeItem('auth_token');
         setUser(null);
-        return false;
-      }
-      
-      const userData = await response.json();
-      setUser(userData);
-      return true;
-    } catch (error) {
-      console.error('[Auth] Error refreshing auth state:', error);
-      return false;
-    }
-  }, []);
-
-  // Define login function
-  const login = useCallback(async (username: string, password: string) => {
-    setIsLoading(true);
-    
-    try {
-      console.log('[Auth] Login attempt for:', username);
-      
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ username, password }),
-        credentials: 'include',
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Login failed');
-      }
-      
-      const data = await response.json();
-      console.log('[Auth] Login successful, data:', data);
-      
-      // Save token in localStorage for persistence
-      if (data.access_token) {
-        localStorage.setItem('auth_token', data.access_token);
-      }
-      
-      // Get user data
-      const userResponse = await fetch('/api/auth/me', {
-        headers: data.access_token ? {
-          'Authorization': `Bearer ${data.access_token}`
-        } : undefined,
-        credentials: 'include',
-      });
-      
-      if (!userResponse.ok) {
-        throw new Error('Failed to get user data');
-      }
-      
-      const userData = await userResponse.json();
-      setUser(userData);
-      
-      router.push('/profile');
-    } catch (error) {
-      console.error('[Auth] Login error:', error);
-      throw error;
+        setIsAuthenticated(false); // <<< SET authenticated state
+        throw error; // Re-throw
     } finally {
-      setIsLoading(false);
+       setIsLoading(false);
     }
-  }, [router]);
+  // Added logout to dependency array as it's called inside catch blocks
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router, /* logout - causes potential infinite loop if added, handle carefully */ ]);
 
-  // Define logout function
+
+  // --- Define logout function (Corrected) ---
   const logout = useCallback(async () => {
+    console.log("[Auth Context] Logging out.");
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('user_collection'); // Also clear collection data
-      setUser(null);
-      router.push('/login');
-    } catch (error) {
-      console.error('[Auth] Logout error:', error);
+      // Optional backend call
+    } catch (error) { /* ... */ }
+    finally {
+       localStorage.removeItem('auth_token');
+       setUser(null);
+       setIsAuthenticated(false); // <<< SET authenticated state
+       console.log("[Auth Context] Cleared auth state and token.");
+       router.push('/login');
     }
   }, [router]);
 
-  // Define register function
+  // --- Define register function (Keep as is) ---
   const register = useCallback(async (username: string, email: string, password: string) => {
+    // ... (register logic) ...
+    console.log(`[Auth Context] Registering user: ${username}`);
     setIsLoading(true);
-    
     try {
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      
-      const response = await fetch(`${API_URL}/api/auth/register`, {
+      const response = await fetch(`/api/auth/register`, { // Use relative path
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', },
         body: JSON.stringify({ username, email, password }),
       });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Registration failed');
+       console.log(`[Auth Context] /api/auth/register response status: ${response.status}`);
+      if (!response.ok) { /* ... (error handling) ... */
+         let errorDetail = 'Registration failed';
+         try { const errorData = await response.json(); errorDetail = errorData.detail || JSON.stringify(errorData); }
+         catch(_) { try { errorDetail = await response.text() || errorDetail; } catch {} }
+         console.error(`[Auth Context] Registration API error (${response.status}): ${errorDetail}`);
+         throw new Error(errorDetail);
       }
+      console.log("[Auth Context] Registration successful.");
+      // Maybe redirect to login page after successful registration
+      // router.push('/login');
     } catch (error) {
-      console.error('[Auth] Registration error:', error);
+      console.error('[Auth Context] Registration error:', error);
       throw error;
     } finally {
       setIsLoading(false);
     }
+  }, [/* router - add if redirecting */]);
+
+
+  // --- Define refreshAuthState function (Corrected) ---
+   const refreshAuthState = useCallback(async (): Promise<boolean> => {
+      console.log("[Auth Context] Refreshing auth state...");
+      const token = localStorage.getItem('auth_token');
+      if (!token) {
+        console.log("[Auth Context] Refresh: No token found.");
+        if (isAuthenticated) { // Check the state variable
+            setUser(null);
+            setIsAuthenticated(false); // <<< SET authenticated state
+        }
+        return false;
+      }
+
+      try {
+        const userData: User = await fetchWithAuth('/api/auth/me');
+        if (userData && userData.username) {
+             console.log("[Auth Context] Refresh successful, user:", userData.username);
+             setUser(userData);
+             setIsAuthenticated(true); // <<< SET authenticated state
+             return true;
+        } else {
+             console.warn('[Auth Context] Refresh: /api/auth/me returned invalid data.');
+             await logout();
+             return false;
+        }
+      } catch (error: any) {
+        console.warn(`[Auth Context] Refresh failed (token likely invalid/expired): ${error.message}`);
+        await logout();
+        return false;
+      }
+    // Depends on logout now
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [logout, isAuthenticated]); // Depend on isAuthenticated state
+
+
+  // --- Effect for checking auth on initial mount (Corrected) ---
+  useEffect(() => {
+    console.log('[Auth Context] Initial mount effect running.');
+    // No need to check 'user' state here, refreshAuthState handles token check
+    refreshAuthState().finally(() => {
+        console.log('[Auth Context] Initial auth check complete.');
+        setIsLoading(false);
+    });
+  // Only run on mount, refreshAuthState has its own dependencies
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Effect for checking auth on mount
+  // --- Effect for periodic token refresh (Corrected) ---
   useEffect(() => {
-    const checkAuth = async () => {
-        try {
-            console.log('[Auth] Checking authentication');
-            
-            // Use the Next.js API route to check auth status
-            const response = await fetch('/api/auth/me', {
-                credentials: 'include', // Important for cookies
-            });
-            
-            console.log('[Auth] Me API response status:', response.status);
-            
-            if (!response.ok) {
-                console.log('[Auth] Not authenticated');
-                setUser(null);
-                setIsLoading(false);
-                return;
-            }
-            
-            const userData = await response.json();
-            console.log('[Auth] User authenticated as:', userData.username);
-            setUser(userData);
-        } catch (error) {
-            console.error('[Auth] Auth check error:', error);
-            setUser(null);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    checkAuth();
-}, []);
-
-
-  // Effect for periodic token refresh
-  useEffect(() => {
-    // Set up interval to refresh auth state (every 10 minutes)
+    const refreshIntervalMinutes = 15;
+    console.log(`[Auth Context] Setting up token refresh interval (${refreshIntervalMinutes} mins)`);
     const intervalId = setInterval(() => {
-      refreshAuthState();
-    }, 10 * 60 * 1000);
-    
-    return () => clearInterval(intervalId);
-  }, [refreshAuthState]);
+      // Check isAuthenticated state variable
+      if (isAuthenticated) {
+           console.log("[Auth Context] Interval: Refreshing token...");
+           refreshAuthState();
+      } else {
+           console.log("[Auth Context] Interval: Skipping refresh, user not logged in.");
+      }
+    }, refreshIntervalMinutes * 60 * 1000);
 
-  // Create context value
+    return () => clearInterval(intervalId); // Clear interval on unmount
+  }, [refreshAuthState, isAuthenticated]); // Depend on isAuthenticated state
+
+
+  // --- Create context value (Corrected) ---
   const contextValue = {
     user,
-    isAuthenticated: !!user,
+    isAuthenticated, // <<< Use the state variable
     isLoading,
     login,
     logout,
@@ -214,21 +233,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refreshAuthState
   };
 
-  console.log('[Auth] Current auth state:', { 
-    isAuthenticated: !!user, 
-    isLoading, 
-    user: user ? user.username : 'none' 
-  });
+  // --- Log state changes (Corrected) ---
+  useEffect(() => {
+      console.log('[Auth State Change]', {
+        isAuthenticated: isAuthenticated, // <<< Use the state variable
+        isLoading,
+        user: user ? user.username : null,
+      });
+  }, [isAuthenticated, isLoading, user]); // Log when any of these change
+
 
   return (
-    <AuthContext.Provider value={contextValue}>
-      {children}
-    </AuthContext.Provider>
+    <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>
   );
 }
 
-// Hook for using auth context
+// --- Custom Hook to use AuthContext (Keep as is) ---
 export function useAuth() {
+  // ... (hook implementation) ...
   const context = useContext(AuthContext);
   if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider');

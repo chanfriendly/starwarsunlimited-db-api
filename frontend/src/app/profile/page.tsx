@@ -33,6 +33,7 @@ import {
 } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
+import { fetchWithAuth } from '@/lib/fetch-utils';
 
 // Update CollectionItem interface to include in_collection property
 interface CollectionItem {
@@ -308,7 +309,7 @@ const UserProfilePage = () => {
           
           try {
             // Use the Next.js API routes (which will forward the cookies)
-            const decksResponse = await fetch(`/api/me/decks`);
+            const decksResponse = await fetchWithAuth(`/api/me/decks`);
             
             if (decksResponse.ok) {
               decksData = await decksResponse.json();
@@ -659,7 +660,7 @@ const UserProfilePage = () => {
 const handleAddToCollection = async (cardId: string, quantity: number = 1, reloadData: () => Promise<void>) => {
   try {
     // Use the Next.js API route instead of direct backend call
-    const response = await fetch('/api/me/collection', {
+    const response = await fetchWithAuth('/api/me/collection', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

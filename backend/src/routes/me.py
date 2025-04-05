@@ -469,133 +469,8 @@ async def delete_user_deck(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete deck"
         )
-    
-@router.get("/decks/{deck_id}")
-async def get_user_deck(
-    deck_id: str,
-    current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_app_db)]
-):
-    """Get a specific deck for the logged-in user"""
-    try:
-        # Query the deck
-        deck = db.query(Deck).filter(
-            Deck.id == deck_id,
-            Deck.user_id == current_user.id
-        ).first()
-        
-        if not deck:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Deck not found"
-            )
-        
-        # Get all deck cards
-        deck_cards = db.query(DeckCard).filter(DeckCard.deck_id == deck_id).all()
-        
-        # Split into leaders, base, and regular cards
-        leaders_ids = []
-        base_id = None
-        card_items = []
-        
-        for deck_card in deck_cards:
-            if deck_card.is_leader:
-                leaders_ids.append(deck_card.card_id)
-            elif deck_card.is_base:
-                base_id = deck_card.card_id
-            else:
-                card_items.append({
-                    "card_id": deck_card.card_id,
-                    "quantity": deck_card.quantity
-                })
-        
-        # Get card details from card database
-        # Get a card_db session properly
-        card_db_gen = get_card_db()
-        card_db = next(card_db_gen)
-        
-        try:
-            # Get leaders
-            leaders = []
-            for leader_id in leaders_ids:
-                # Use raw SQL with parameters to prevent SQL injection
-                leader_query = text("SELECT * FROM cards WHERE id = :leader_id")
-                result_proxy = card_db.execute(leader_query, {"leader_id": leader_id})
-                
-                # Process result properly
-                if result_proxy.returns_rows:
-                    leader_result = result_proxy.fetchone()
-                    if leader_result:
-                        # Create dictionary from row
-                        leader_dict = {key: leader_result._mapping[key] for key in leader_result._mapping.keys()}
-                        
-                        # Add relationships
-                        enriched_leader = enrich_card_with_relationships(card_db, leader_dict)
-                        leaders.append(enriched_leader)
-            
-            # Get base
-            base = None
-            if base_id:
-                base_query = text("SELECT * FROM cards WHERE id = :base_id")
-                result_proxy = card_db.execute(base_query, {"base_id": base_id})
-                
-                # Process result properly
-                if result_proxy.returns_rows:
-                    base_result = result_proxy.fetchone()
-                    if base_result:
-                        # Convert row to dictionary
-                        base_dict = {key: base_result._mapping[key] for key in base_result._mapping.keys()}
-                        
-                        # Add relationships
-                        base = enrich_card_with_relationships(card_db, base_dict)
-            
-            # Get cards
-            cards = []
-            for item in card_items:
-                card_query = text("SELECT * FROM cards WHERE id = :card_id")
-                result_proxy = card_db.execute(card_query, {"card_id": item["card_id"]})
-                
-                # Process result properly
-                if result_proxy.returns_rows:
-                    card_result = result_proxy.fetchone()
-                    if card_result:
-                        # Convert row to dictionary
-                        card_dict = {key: card_result._mapping[key] for key in card_result._mapping.keys()}
-                        
-                        # Add relationships
-                        enriched_card = enrich_card_with_relationships(card_db, card_dict)
-                        
-                        cards.append({
-                            "card": enriched_card,
-                            "quantity": item["quantity"]
-                        })
-        finally:
-            # Always close the database session
-            card_db.close()
-        
-        # Create deck response
-        return {
-            "id": deck.id,
-            "name": deck.name,
-            "description": deck.description,
-            "user_id": deck.user_id,
-            "created_at": deck.created_at,
-            "updated_at": deck.updated_at,
-            "leaders": leaders,
-            "base": base,
-            "cards": cards
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching deck {deck_id}: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch deck"
-        )
 
-@router.post("/collection")
+@router.post("/collection", status_code=status.HTTP_200_OK)
 async def update_collection_item(
     request: Request,
     current_user: Annotated[User, Depends(get_current_user)],
@@ -608,12 +483,8 @@ async def update_collection_item(
         card_id = item_data.get('card_id')
         count = item_data.get('count', 0)
         
-        # Add more logging for debugging
-        logger.info(f"Received collection update request: card_id={card_id}, count={count}")
-        
         # Validate data
         if not card_id:
-            logger.warning("Missing card_id in request")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Missing card_id"
@@ -627,7 +498,6 @@ async def update_collection_item(
                 UserCollection.card_id == card_id
             ).delete()
             db.commit()
-            logger.info(f"Removed card {card_id} from collection for user {current_user.username}")
             
             return {"success": True, "message": "Card removed from collection"}
         else:
@@ -641,7 +511,6 @@ async def update_collection_item(
                 # Update count
                 existing_item.count = count
                 db.commit()
-                logger.info(f"Updated card {card_id} quantity to {count} for user {current_user.username}")
             else:
                 # Create new collection item
                 new_item = UserCollection(
@@ -651,11 +520,35 @@ async def update_collection_item(
                 )
                 db.add(new_item)
                 db.commit()
-                logger.info(f"Added card {card_id} with quantity {count} to user {current_user.username}'s collection")
             
-            # Return simplified success response
+            # Get card details for response
+            card_db_gen = get_card_db()
+            card_db = next(card_db_gen)
+            
+            try:
+                card_query = text("SELECT * FROM cards WHERE id = :card_id")
+                card_proxy = card_db.execute(card_query, {"card_id": card_id})
+                
+                if card_proxy.returns_rows:
+                    card_row = card_proxy.fetchone()
+                    if card_row:
+                        # Convert to dictionary
+                        card_dict = {key: card_row._mapping[key] for key in card_row._mapping.keys()}
+                        
+                        # Add relationships
+                        card_with_relations = enrich_card_with_relationships(card_db, card_dict)
+                        
+                        # Return complete info
+                        return {
+                            "card": card_with_relations,
+                            "count": count,
+                            "in_collection": True
+                        }
+            finally:
+                card_db.close()
+            
+            # Fallback response
             return {"success": True, "card_id": card_id, "count": count}
-            
     except HTTPException:
         raise
     except Exception as e:
@@ -663,7 +556,7 @@ async def update_collection_item(
         logger.error(f"Error updating collection: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update collection: {str(e)}"
+            detail="Failed to update collection"
         )
     
 @router.get("/collection")
