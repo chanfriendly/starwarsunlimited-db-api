@@ -1,12 +1,14 @@
 # Web Framework
 fastapi==0.109.0
 uvicorn==0.27.0
-pydantic==2.5.3
+pydantic==1.10.21  # Using this version as it appears in your environment
 python-multipart==0.0.6
+starlette==0.35.1
 
 # Database
 SQLAlchemy==2.0.25
 aiosqlite==0.19.0
+alembic==1.15.2  # For database migrations
 
 # Authentication
 python-jose[cryptography]==3.3.0
@@ -15,12 +17,11 @@ bcrypt==4.1.2
 
 # Vector Database & AI
 qdrant-client==1.13.2
-sentence-transformers>=2.2.2
-numpy>=1.24.0
-torch>=2.0.0
-transformers>=4.30.0
+sentence-transformers==3.4.1
+numpy==2.2.3
+torch==2.6.0
+transformers==4.49.0
 
 # Utilities
 requests==2.31.0
 python-dotenv==1.0.0
-pytest==7.4.3

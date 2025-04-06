@@ -1,0 +1,38 @@
+version: '3.8'
+services:
+  frontend:
+    image: node:18-alpine
+    platform: linux/amd64  # Explicitly set the platform
+    working_dir: /app
+    command: sh -c "cd /app && npm ci && npm run dev"
+    volumes:
+      - ${FRONTEND_PATH:-./frontend}:/app
+    ports:
+      - "4000:3000"
+    environment:
+      - NODE_ENV=development  # Using dev mode to bypass build process
+      - NEXT_TELEMETRY_DISABLED=1
+      - NEXT_PUBLIC_ALLOWED_ORIGINS=192.168.1.124
+
+    restart: unless-stopped
+    networks:
+      - twinsuns_network
+
+  backend:
+    image: python:3.10-slim
+    platform: linux/amd64  # Explicitly set the platform
+    working_dir: /app
+    command: sh -c "cd /app && pip install -r requirements.txt && uvicorn src.api.main:app --host 0.0.0.0 --port 8000"
+    volumes:
+      - ${BACKEND_PATH:-./backend}:/app
+      - ${DATABASE_PATH:-./databases}/card_db:/data/.swu/card_db
+      - ${DATABASE_PATH:-./databases}/app_db:/data/.swu/app_db
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    networks:
+      - twinsuns_network
+
+networks:
+  twinsuns_network:
+    driver: bridge

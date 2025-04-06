@@ -80,7 +80,7 @@ We've completed the core functionality of the application and are preparing for 
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/chanfriendly/starwarsunlimited-twin-suns.git
+   git clone https://github.com/chanfriendly/starwarsunlimited-db-api.git
    cd starwarsunlimited-twin-suns
 
 ### Environment Setup
