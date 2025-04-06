@@ -80,7 +80,7 @@ We've completed the core functionality of the application and are preparing for 
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/starwarsunlimited-twin-suns.git
+   git clone https://github.com/chanfriendly/starwarsunlimited-twin-suns.git
    cd starwarsunlimited-twin-suns
 
 ### Environment Setup
@@ -89,7 +89,7 @@ We've completed the core functionality of the application and are preparing for 
    ```
   JWT_SECRET=your_secret_key_here
   ACCESS_TOKEN_EXPIRE_MINUTES=10080
-  
+
 2. Create necessary directories:
    ```bash
    mkdir -p /mnt/tank/apps/twinsuns/databases
