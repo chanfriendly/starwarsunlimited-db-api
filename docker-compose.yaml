@@ -2,33 +2,42 @@ version: '3.8'
 services:
   frontend:
     image: node:18-alpine
-    platform: linux/amd64  # Explicitly set the platform
+    platform: linux/amd64
     working_dir: /app
-    command: sh -c "cd /app && npm ci && npm run dev"
+    command: sh -c "npm ci && npm run dev"
     volumes:
       - ${FRONTEND_PATH:-./frontend}:/app
     ports:
       - "4000:3000"
     environment:
-      - NODE_ENV=development  # Using dev mode to bypass build process
+      - NODE_ENV=development
       - NEXT_TELEMETRY_DISABLED=1
-      - NEXT_PUBLIC_ALLOWED_ORIGINS=192.168.1.124
-
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
     restart: unless-stopped
     networks:
       - twinsuns_network
+    depends_on:
+      - backend
 
   backend:
     image: python:3.10-slim
-    platform: linux/amd64  # Explicitly set the platform
+    platform: linux/amd64
     working_dir: /app
-    command: sh -c "cd /app && pip install -r requirements.txt && uvicorn src.api.main:app --host 0.0.0.0 --port 8000"
+    command: sh -c "pip install -r requirements.txt && uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload"
     volumes:
       - ${BACKEND_PATH:-./backend}:/app
-      - ${DATABASE_PATH:-./databases}/card_db:/data/.swu/card_db
-      - ${DATABASE_PATH:-./databases}/app_db:/data/.swu/app_db
+      # Mount database directory to /data/.swu to match the backend code expectations
+      - ${DATABASE_PATH:-./databases}:/data
     ports:
       - "8000:8000"
+    environment:
+      # Set the database paths to match the mounted volumes
+      - DB_DIR=/data/.swu
+      - DATABASE_URL=sqlite:////data/.swu/swu_app.db
+      - CARD_DATABASE_URL=sqlite:////data/.swu/swu_cards.db
+      - JWT_SECRET=${JWT_SECRET:-development_secret_change_in_production}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=10080
+      - CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:4000,http://localhost:8000
     restart: unless-stopped
     networks:
       - twinsuns_network

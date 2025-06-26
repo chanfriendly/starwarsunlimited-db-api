@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.get("/")
-async def get_types(db: Session = Depends(get_app_db)):
+async def get_types(db: Session = Depends(get_card_db)):
     """Get all distinct card types from the database."""
     try:
         # Query for unique types

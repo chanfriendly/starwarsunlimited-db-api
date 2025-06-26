@@ -1,19 +1,97 @@
+// frontend/next.config.ts - Simplified version that works across platforms
+
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* other existing config options here */
+  // Enable standalone output for Docker deployment
+  output: 'standalone',
+  
+  // Basic configuration
+  typescript: {
+    // Ignore build errors during development
+    ignoreBuildErrors: false,
+  },
+  
+  eslint: {
+    // Don't run ESLint during builds
+    ignoreDuringBuilds: false,
+  },
 
-  // Add the rewrites function for proxying
+  // API proxy configuration for development and production
   async rewrites() {
     return [
       {
-        // Source path: Match any request starting with /api/
         source: '/api/:path*',
-        // Destination URL: Forward to your FastAPI backend running on port 8000
-        // Ensure the port (8000) matches where your backend is actually running.
-        destination: 'http://localhost:8000/api/:path*',
+        destination: process.env.NEXT_PUBLIC_API_URL 
+          ? `${process.env.NEXT_PUBLIC_API_URL}/api/:path*`
+          : 'http://localhost:8000/api/:path*',
       },
-      // You can add other rewrite rules here if needed
+    ];
+  },
+
+  // Image configuration
+  images: {
+    domains: ['cdn.jsdelivr.net', 'placehold.co'],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'cdn.jsdelivr.net',
+        pathname: '/gh/JimJafar/SWU-images@main/cards/**',
+      },
+    ],
+  },
+
+  // Experimental features
+  experimental: {
+    // Optimize package imports
+    optimizePackageImports: ['lucide-react'],
+  },
+
+  // Webpack optimizations
+  webpack: (config, { isServer, dev }) => {
+    // Optimize for client-side performance
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        net: false,
+        tls: false,
+      };
+    }
+
+    // Add source maps in development
+    if (dev) {
+      config.devtool = 'eval-source-map';
+    }
+
+    return config;
+  },
+
+  // Environment variables validation
+  env: {
+    CUSTOM_KEY: process.env.CUSTOM_KEY,
+  },
+
+  // Headers for security and performance
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff',
+          },
+          {
+            key: 'X-Frame-Options',
+            value: 'DENY',
+          },
+          {
+            key: 'X-XSS-Protection',
+            value: '1; mode=block',
+          },
+        ],
+      },
     ];
   },
 };

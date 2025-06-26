@@ -1,8 +1,8 @@
-// DeckBuilderContext.tsx - Updated version
+// frontend/src/contexts/DeckBuilderContext.tsx - Optimized version
 
 'use client';
 
-import React, { createContext, useContext, useState, ReactNode, useCallback } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useCallback, useMemo } from 'react';
 import { Card } from '@/lib/api';
 
 type DeckBuildingStage = 'leaders' | 'base' | 'cards';
@@ -30,97 +30,149 @@ interface DeckBuilderContextType {
   resetDeck: () => void;
   isCardInAspect: (card: Card) => boolean;
   setCurrentStage: (stage: DeckBuildingStage) => void;
+  // Computed values
+  totalCards: number;
+  isValidDeck: boolean;
+  deckAspects: string[];
 }
 
 const DeckBuilderContext = createContext<DeckBuilderContextType | undefined>(undefined);
 
 export function DeckBuilderProvider({ children }: { children: ReactNode }) {
+  // Core state
   const [currentStage, setCurrentStageState] = useState<DeckBuildingStage>('leaders');
   const [leaders, setLeaders] = useState<Card[]>([]);
   const [base, setBaseState] = useState<Card | null>(null);
   const [deckCards, setDeckCards] = useState<DeckItem[]>([]);
   const [deckName, setDeckNameState] = useState('New Deck');
 
-  // Modified: Use useCallback to memoize functions and prevent recreation on every render
-  const setCurrentStage = useCallback((stage: DeckBuildingStage) => {
-    console.log(`Setting stage from ${currentStage} to ${stage}`);
+  // Memoized computed values to prevent recalculation
+  const totalCards = useMemo(() => 
+    deckCards.reduce((sum, item) => sum + item.quantity, 0), 
+    [deckCards]
+  );
+
+  const isValidDeck = useMemo(() => 
+    leaders.length === 2 && base !== null && totalCards >= 10,
+    [leaders.length, base, totalCards]
+  );
+
+  // Memoized deck aspects for performance
+  const deckAspects = useMemo(() => {
+    const aspects = new Set<string>();
     
-    // Important: don't update state if it's the same value to prevent unnecessary re-renders
+    leaders.forEach(leader => {
+      leader.aspects?.forEach(aspect => {
+        aspects.add(aspect.aspect_name);
+      });
+    });
+    
+    if (base) {
+      base.aspects?.forEach(aspect => {
+        aspects.add(aspect.aspect_name);
+      });
+    }
+    
+    return Array.from(aspects);
+  }, [leaders, base]);
+
+  // Optimized aspect compatibility check
+  const isCardInAspect = useCallback((card: Card): boolean => {
+    if (leaders.length < 2 || !base) return true;
+    
+    // Create aspect count maps for better performance
+    const deckAspectCounts: Record<string, number> = {};
+    
+    // Count deck aspects
+    [...leaders, base].forEach(deckCard => {
+      deckCard.aspects?.forEach(aspect => {
+        const name = aspect.aspect_name;
+        deckAspectCounts[name] = (deckAspectCounts[name] || 0) + 1;
+      });
+    });
+    
+    // Get card aspects
+    const cardAspectCounts: Record<string, number> = {};
+    card.aspects?.forEach(aspect => {
+      const name = aspect.aspect_name;
+      cardAspectCounts[name] = (cardAspectCounts[name] || 0) + 1;
+    });
+    
+    // Check Heroism/Villainy compatibility
+    const hasHeroism = deckAspectCounts['Heroism'] > 0;
+    const hasVillainy = deckAspectCounts['Villainy'] > 0;
+    
+    if (hasHeroism && cardAspectCounts['Villainy'] > 0) return false;
+    if (hasVillainy && cardAspectCounts['Heroism'] > 0) return false;
+    
+    // Check secondary aspects
+    const secondaryAspects = ['Command', 'Vigilance', 'Cunning', 'Aggression', 'Force'];
+    const deckSecondaryAspects = secondaryAspects.filter(aspect => deckAspectCounts[aspect] > 0);
+    
+    if (deckSecondaryAspects.length === 0) return true;
+    
+    const cardSecondaryAspects = secondaryAspects.filter(aspect => cardAspectCounts[aspect] > 0);
+    
+    if (cardSecondaryAspects.length === 0) return true;
+    
+    return cardSecondaryAspects.some(aspect => deckAspectCounts[aspect] > 0);
+  }, [leaders, base]);
+
+  // Optimized deck checking function
+  const isCardInDeck = useCallback((cardId: string): boolean => {
+    return leaders.some(leader => leader.id === cardId) ||
+           (base?.id === cardId) ||
+           deckCards.some(item => item.card.id === cardId);
+  }, [leaders, base, deckCards]);
+
+  // Stage management with batched updates
+  const setCurrentStage = useCallback((stage: DeckBuildingStage) => {
     if (stage === currentStage) return;
     
-    // IMPORTANT CHANGE: Batch state updates to prevent multiple renders
-    if (stage === 'leaders' && currentStage !== 'leaders') {
-      // Using React 18's automatic batching to combine these updates
+    // Use React 18's automatic batching
+    setCurrentStageState(stage);
+    
+    // Reset subsequent stages when going backward
+    if (stage === 'leaders') {
       setBaseState(null);
-      setCurrentStageState(stage);
-    } else {
-      setCurrentStageState(stage);
+      setDeckCards([]);
+    } else if (stage === 'base') {
+      setDeckCards([]);
     }
   }, [currentStage]);
 
-  // Modified: Don't auto-progress stages to prevent cascading state updates
+  // Leader management
   const addLeader = useCallback((leader: Card) => {
-    // Check if this leader is already in the deck
-    if (leaders.some(l => l.id === leader.id)) {
-      console.log(`Leader ${leader.name} is already in the deck`);
+    if (leaders.some(l => l.id === leader.id) || leaders.length >= 2) {
       return;
     }
-    
-    if (leaders.length < 2) {
-      setLeaders(prev => [...prev, leader]);
-      
-      // REMOVED auto-progression to prevent cascading state updates
-      // The progression should now be handled explicitly by the UI
-    }
+    setLeaders(prev => [...prev, leader]);
   }, [leaders]);
 
   const removeLeader = useCallback((leaderId: string) => {
     setLeaders(prev => prev.filter(leader => leader.id !== leaderId));
     
-    // MODIFIED: Only change stage if needed to prevent unnecessary re-renders
+    // Reset subsequent stages if needed
     if (currentStage !== 'leaders') {
-      // IMPORTANT: Batch state updates to prevent multiple renders
       setCurrentStageState('leaders');
       setBaseState(null);
+      setDeckCards([]);
     }
   }, [currentStage]);
 
-  // Modified: Don't auto-progress to prevent cascading state updates
+  // Base management
   const setBase = useCallback((newBase: Card | null) => {
-    console.log("Setting base:", newBase?.name);
-    
-    // Important: don't update state if it's the same value
     if (newBase === base) return;
-    
     setBaseState(newBase);
-    
-    // REMOVED auto-progression to prevent cascading state updates
-    // The progression should now be handled explicitly by the UI
   }, [base]);
 
-  const isCardInDeck = useCallback((cardId: string): boolean => {
-    // Check if it's a leader
-    if (leaders.some(leader => leader.id === cardId)) {
-      return true;
-    }
-    
-    // Check if it's the base
-    if (base && base.id === cardId) {
-      return true;
-    }
-    
-    // Check if it's a regular card
-    return deckCards.some(item => item.card.id === cardId);
-  }, [leaders, base, deckCards]);
-
+  // Card management with optimized updates
   const addCard = useCallback((card: Card) => {
-    // First check if the card is already in the deck (leaders, base, or regular cards)
     if (isCardInDeck(card.id)) {
-      console.log(`Card ${card.name} is already in the deck and cannot be added again in Twin Suns format`);
+      console.log(`Card ${card.name} is already in the deck`);
       return;
     }
     
-    // In Twin Suns format, we always add with quantity 1
     setDeckCards(prev => [...prev, { card, quantity: 1 }]);
   }, [isCardInDeck]);
 
@@ -129,43 +181,35 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateCardQuantity = useCallback((cardId: string, quantity: number) => {
-    const maxQuantity = 1;
-    const actualQuantity = Math.min(quantity, maxQuantity);
+    const clampedQuantity = Math.max(0, Math.min(quantity, 1)); // Twin Suns format
     
-    if (actualQuantity === 0) {
+    if (clampedQuantity === 0) {
       removeCard(cardId);
       return;
     }
     
     setDeckCards(prev => 
       prev.map(item => 
-        item.card.id === cardId ? { ...item, quantity: actualQuantity } : item
+        item.card.id === cardId ? { ...item, quantity: clampedQuantity } : item
       )
     );
   }, [removeCard]);
 
+  // Utility functions
   const setDeckName = useCallback((name: string) => {
     setDeckNameState(name);
   }, []);
 
   const progressStage = useCallback(() => {
-    console.log("Current stage:", currentStage);
-    console.log("Leaders:", leaders.length);
-    console.log("Base:", base?.name);
-    
     if (currentStage === 'leaders' && leaders.length === 2) {
-      console.log("Progressing from leaders to base");
       setCurrentStageState('base');
     } else if (currentStage === 'base' && base) {
-      console.log("Progressing from base to cards");
       setCurrentStageState('cards');
-    } else {
-      console.log("Cannot progress: conditions not met");
     }
   }, [currentStage, leaders.length, base]);
 
   const resetDeck = useCallback(() => {
-    // Batch all state updates to prevent multiple renders
+    // Batch all resets together
     setLeaders([]);
     setBaseState(null);
     setDeckCards([]);
@@ -173,80 +217,8 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
     setCurrentStageState('leaders');
   }, []);
 
-  const isCardInAspect = useCallback((card: Card): boolean => {
-    if (leaders.length < 2 || !base) return true;
-    
-    // Get all aspects from leaders and base
-    const deckAspects: Record<string, number> = {};
-    
-    // Rest of the function remains the same...
-    // Count occurrences of each aspect in the deck
-    leaders.forEach(leader => {
-      leader.aspects?.forEach(aspect => {
-        const name = aspect.aspect_name;
-        deckAspects[name] = (deckAspects[name] || 0) + 1;
-      });
-    });
-    
-    // Add base aspects
-    base.aspects?.forEach(aspect => {
-      const name = aspect.aspect_name;
-      deckAspects[name] = (deckAspects[name] || 0) + 1;
-    });
-    
-    // Check if the deck has Heroism or Villainy
-    const hasHeroism = deckAspects['Heroism'] > 0;
-    const hasVillainy = deckAspects['Villainy'] > 0;
-    
-    // Get card aspects
-    const cardAspects: Record<string, number> = {};
-    card.aspects?.forEach(aspect => {
-      const name = aspect.aspect_name;
-      cardAspects[name] = (cardAspects[name] || 0) + 1;
-    });
-    
-    // First check Heroism/Villainy compatibility
-    if (hasHeroism && cardAspects['Villainy'] > 0) {
-      return false;
-    }
-    
-    if (hasVillainy && cardAspects['Heroism'] > 0) {
-      return false;
-    }
-    
-    // For other aspects, a card is compatible if it has AT LEAST ONE 
-    // of the secondary aspects in the deck, OR has no secondary aspects at all
-    
-    // Get the secondary aspects from the deck
-    const secondaryAspects = ['Command', 'Vigilance', 'Cunning', 'Aggression', 'Force'];
-    const deckSecondaryAspects = secondaryAspects.filter(aspect => deckAspects[aspect] > 0);
-    
-    // If deck has no secondary aspects, all cards pass this check
-    if (deckSecondaryAspects.length === 0) {
-      return true;
-    }
-    
-    // Get secondary aspects from the card
-    const cardSecondaryAspects = secondaryAspects.filter(aspect => cardAspects[aspect] > 0);
-    
-    // If card has no secondary aspects, it's compatible
-    if (cardSecondaryAspects.length === 0) {
-      return true;
-    }
-    
-    // Check if any of the card's secondary aspects are in the deck
-    for (const aspect of cardSecondaryAspects) {
-      if (deckAspects[aspect] > 0) {
-        return true;
-      }
-    }
-    
-    // If we get here, the card has secondary aspects but none match the deck
-    return false;
-  }, [leaders, base]);
-
-  // Memoize context value to prevent unnecessary renders of consumers
-  const contextValue = React.useMemo(() => ({
+  // Memoize the context value to prevent unnecessary re-renders
+  const contextValue = useMemo(() => ({
     currentStage,
     leaders,
     base,
@@ -264,11 +236,16 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
     resetDeck,
     isCardInAspect,
     setCurrentStage,
+    // Computed values
+    totalCards,
+    isValidDeck,
+    deckAspects,
   }), [
     currentStage, leaders, base, deckCards, deckName,
     addLeader, removeLeader, setBase, addCard, removeCard,
     isCardInDeck, updateCardQuantity, setDeckName,
-    progressStage, resetDeck, isCardInAspect, setCurrentStage
+    progressStage, resetDeck, isCardInAspect, setCurrentStage,
+    totalCards, isValidDeck, deckAspects
   ]);
 
   return (

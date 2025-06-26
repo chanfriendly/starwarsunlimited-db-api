@@ -1,38 +1,103 @@
+// frontend/src/components/CardGrid.tsx - Improved with mobile tap-to-add
+
 'use client';
-import React from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { Card } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { Plus, Check, Eye } from 'lucide-react';
 
 interface CardGridProps {
   cards: Card[];
-  onCardClick: (card: Card) => void;
+  onCardClickAction: (card: Card) => void; // Changed from onCardClick
   selectedCardId?: string;
   isCompatible?: (card: Card) => boolean;
   isInDeck?: (cardId: string) => boolean;
-  onDoubleClick?: (card: Card) => void;
+  onDoubleClickAction?: (card: Card) => void; // Changed from onDoubleClick
   currentStage?: 'leaders' | 'base' | 'cards';
   hideCardsInDeck?: boolean;
-  isInCollection?: (cardId: string) => boolean; 
+  isInCollection?: (cardId: string) => boolean;
+  onAddToCollectionAction?: (cardId: string) => Promise<void>; // Changed from onAddToCollection
 }
 
 export function CardGrid({ 
   cards, 
-  onCardClick, 
+  onCardClickAction: onCardClick, // Rename for internal use
   selectedCardId, 
   isCompatible,
   isInDeck,
-  onDoubleClick,
+  onDoubleClickAction: onDoubleClick, // Rename for internal use
   currentStage = 'cards',
   hideCardsInDeck = false,
-  isInCollection
+  isInCollection,
+  onAddToCollectionAction: onAddToCollection // Rename for internal use
 }: CardGridProps) {
   
-  // Handle double click to directly add card to deck
-  const handleDoubleClick = (card: Card) => {
-    if (onDoubleClick) {
+  const [isMobile, setIsMobile] = useState(false);
+  const [addingToCollection, setAddingToCollection] = useState<Set<string>>(new Set());
+  const [recentlyAdded, setRecentlyAdded] = useState<Set<string>>(new Set());
+
+  // Detect if device is mobile
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768 || 'ontouchstart' in window);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Handle card interaction - different behavior for mobile vs desktop
+  const handleCardInteraction = useCallback(async (card: Card, event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (isMobile) {
+      // On mobile, single tap adds to collection/deck or shows details
+      if (onAddToCollection && !isInCollection?.(card.id)) {
+        // Add to collection on mobile
+        try {
+          setAddingToCollection(prev => new Set([...prev, card.id]));
+          await onAddToCollection(card.id);
+          setRecentlyAdded(prev => new Set([...prev, card.id]));
+          
+          // Clear the "recently added" status after 2 seconds
+          setTimeout(() => {
+            setRecentlyAdded(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(card.id);
+              return newSet;
+            });
+          }, 2000);
+        } catch (error) {
+          console.error('Error adding to collection:', error);
+        } finally {
+          setAddingToCollection(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(card.id);
+            return newSet;
+          });
+        }
+      } else if (onDoubleClick && currentStage !== 'cards') {
+        // For deck building stages, add to deck
+        onDoubleClick(card);
+      } else {
+        // Otherwise show card details
+        onCardClick(card);
+      }
+    } else {
+      // On desktop, click shows details
+      onCardClick(card);
+    }
+  }, [isMobile, onAddToCollection, isInCollection, onDoubleClick, currentStage, onCardClick]);
+
+  // Handle double click for desktop
+  const handleDoubleClick = useCallback((card: Card) => {
+    if (!isMobile && onDoubleClick) {
       onDoubleClick(card);
     }
-  };
+  }, [isMobile, onDoubleClick]);
 
   // Filter out cards that should be hidden
   const visibleCards = hideCardsInDeck && isInDeck 
@@ -45,38 +110,83 @@ export function CardGrid({
         const isSelected = card.id === selectedCardId;
         const compatible = isCompatible ? isCompatible(card) : true;
         const inDeck = isInDeck ? isInDeck(card.id) : false;
-        const owned = isInCollection ? isInCollection(card.id) : false; // Check if card is owned
+        const owned = isInCollection ? isInCollection(card.id) : false;
+        const isAdding = addingToCollection.has(card.id);
+        const wasRecentlyAdded = recentlyAdded.has(card.id);
         
         return (
           <div
             key={`${card.id}-${index}`}
             className={cn(
               "relative cursor-pointer overflow-hidden rounded-lg transition-all duration-200",
-              "border-2 flex-shrink-0", 
+              "border-2 flex-shrink-0 group", 
               isSelected ? "border-purple-500" : "border-gray-800",
               !compatible && "opacity-60",
               inDeck && "opacity-50",
-              "hover:scale-105 group" // Added group for the tooltip
+              isMobile ? "active:scale-95" : "hover:scale-105"
             )}
-            onClick={() => onCardClick(card)}
+            onClick={(e) => handleCardInteraction(card, e)}
             onDoubleClick={() => handleDoubleClick(card)}
           >
-            {/* Add owned indicator */}
+            {/* Collection Status Indicators */}
             {owned && (
               <div className="absolute top-1 right-1 z-20 bg-green-600 text-white text-xs font-bold py-0.5 px-2 rounded shadow-md">
                 Owned
               </div>
             )}
-           
-            {/* Add double-click tooltip */}
-            <div className="absolute inset-0 bg-black/70 flex items-center justify-center opacity-0 group-hover:opacity-80 transition-opacity z-10">
-              <div className="text-white text-sm font-medium px-2 py-1 rounded">
-                Double-click to {currentStage === 'leaders' ? 'select leader' : currentStage === 'base' ? 'select base' : 'add to deck'}
+
+            {wasRecentlyAdded && (
+              <div className="absolute top-1 left-1 z-20 bg-green-500 text-white text-xs font-bold py-0.5 px-2 rounded shadow-md flex items-center gap-1">
+                <Check className="w-3 h-3" />
+                Added!
               </div>
-            </div>
+            )}
+
+            {/* Mobile Action Overlay */}
+            {isMobile && (
+              <div className="absolute inset-0 bg-black/0 group-active:bg-black/30 flex items-center justify-center opacity-0 group-active:opacity-100 transition-all z-10">
+                <div className="bg-white/90 text-gray-900 text-sm font-medium px-3 py-2 rounded-full flex items-center gap-2">
+                  {onAddToCollection && !owned ? (
+                    <>
+                      {isAdding ? (
+                        <div className="animate-spin w-4 h-4 border-2 border-gray-900 border-t-transparent rounded-full" />
+                      ) : (
+                        <Plus className="w-4 h-4" />
+                      )}
+                      {isAdding ? 'Adding...' : 'Add to Collection'}
+                    </>
+                  ) : currentStage !== 'cards' && onDoubleClick ? (
+                    <>
+                      <Plus className="w-4 h-4" />
+                      Add to Deck
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="w-4 h-4" />
+                      View Details
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Desktop Hover Tooltip */}
+            {!isMobile && (
+              <div className="absolute inset-0 bg-black/70 flex items-center justify-center opacity-0 group-hover:opacity-80 transition-opacity z-10">
+                <div className="text-white text-sm font-medium px-2 py-1 rounded text-center">
+                  {onDoubleClick ? (
+                    <>
+                      Click to view details<br />
+                      Double-click to {currentStage === 'leaders' ? 'select leader' : currentStage === 'base' ? 'select base' : 'add to deck'}
+                    </>
+                  ) : (
+                    'Click to view details'
+                  )}
+                </div>
+              </div>
+            )}
             
             <div className="aspect-[7/10] w-full h-auto relative">
-              {/* This is the missing image rendering code */}
               {card.image_uri || card.image_url ? (
                 <img
                   src={card.image_uri || card.image_url || ''}
@@ -116,7 +226,7 @@ export function CardGrid({
               {/* Action hint overlay for leaders and bases */}
               {(currentStage === 'leaders' || currentStage === 'base') && (
                 <div className="absolute top-1 left-1 bg-purple-500/90 text-white text-xs py-0.5 px-1 rounded-full">
-                  Click to Select
+                  {isMobile ? 'Tap' : 'Click'} to Select
                 </div>
               )}
               

@@ -1,8 +1,8 @@
-// frontend/src/app/cards/page.tsx - Update the component with pagination support
+// frontend/src/app/cards/page.tsx - Improved version with better error handling
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { fetchCards, fetchAspects, fetchTypes, fetchKeywords, fetchSets, ApiCard, fetchUserCollection } from '@/lib/api';
 import { CardGrid } from '@/components/CardGrid';
 import { CardFilters } from '@/components/CardFilters';
@@ -11,12 +11,12 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Search, Filter, Loader } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { debounce } from 'lodash-es';
 
 interface Aspect {
   aspect_name: string;
   aspect_color?: string;
 }
-
 
 export default function CardBrowser() {
   // State
@@ -30,89 +30,8 @@ export default function CardBrowser() {
   const [types, setTypes] = useState<string[]>([]);
   const [keywords, setKeywords] = useState<string[]>([]);
   const [sets, setSets] = useState<string[]>([]);
- 
-  const [userCollection, setUserCollection] = useState<Set<string>>(new Set()); // Add this state
-  const { isAuthenticated } = useAuth(); // Add authentication check
- 
-// Force authentication check when component mounts
-useEffect(() => {
-  const checkAuthOnLoad = async () => {
-    const token = localStorage.getItem('auth_token');
-    if (token) {
-      console.log('Found token in storage, verifying...');
-      try {
-        // Use the auth token to revalidate auth state
-        const response = await fetch('/api/auth/me', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          },
-          credentials: 'include'
-        });
-        
-        if (response.ok) {
-          console.log('Token is valid, authenticated');
-          // Auth context will be updated by its own effect
-        } else {
-          console.warn('Stored token invalid, logging out');
-          localStorage.removeItem('auth_token');
-        }
-      } catch (e) {
-        console.error('Error checking auth on page load:', e);
-      }
-    }
-  };
-  
-  checkAuthOnLoad();
-}, []);
-
-  // Add this effect to fetch user collection
-
-  useEffect(() => {
-    const loadUserCollection = async () => {
-      try {
-        // Always try to load from localStorage first for immediate display
-        const storedCollection = localStorage.getItem('user_collection');
-        if (storedCollection) {
-          try {
-            const parsed = JSON.parse(storedCollection);
-            if (Array.isArray(parsed)) {
-              setUserCollection(new Set(parsed));
-              console.log(`Loaded ${parsed.length} cards from local storage`);
-            }
-          } catch (e) {
-            console.error('Error parsing stored collection:', e);
-          }
-        }
-        
-        // Then if authenticated, fetch fresh data
-        if (isAuthenticated) {
-          console.log('Loading user collection from API...');
-          try {
-            const collection = await fetchUserCollection();
-            
-            if (collection && Array.isArray(collection)) {
-              const collectionIds = collection.map(item => item.card.id);
-              console.log(`Fetched ${collectionIds.length} cards from API`);
-              
-              // Save to localStorage for persistence
-              localStorage.setItem('user_collection', JSON.stringify(collectionIds));
-              
-              // Update state
-              setUserCollection(new Set(collectionIds));
-            }
-          } catch (err) {
-            console.error('Error fetching collection from API:', err);
-            // Already loaded from localStorage above
-          }
-        }
-      } catch (err) {
-        console.error('Error in collection loading:', err);
-      }
-    };
-    
-    loadUserCollection();
-  }, [isAuthenticated]);
-  
+  const [userCollection, setUserCollection] = useState<Set<string>>(new Set());
+  const { isAuthenticated } = useAuth();
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -131,12 +50,83 @@ useEffect(() => {
     sets: [] as string[],
   });
 
-  // Fetch filter options on mount
+  // Refs for cleanup and preventing race conditions
+  const searchAbortController = useRef<AbortController | null>(null);
+  const isUnmounted = useRef(false);
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      isUnmounted.current = true;
+      if (searchAbortController.current) {
+        searchAbortController.current.abort();
+      }
+    };
+  }, []);
+
+  // Auth check
+  useEffect(() => {
+    const checkAuthOnLoad = async () => {
+      const token = localStorage.getItem('auth_token');
+      if (token) {
+        try {
+          const response = await fetch('/api/auth/me', {
+            headers: { 'Authorization': `Bearer ${token}` },
+            credentials: 'include'
+          });
+          
+          if (!response.ok) {
+            localStorage.removeItem('auth_token');
+          }
+        } catch (e) {
+          console.error('Error checking auth on page load:', e);
+        }
+      }
+    };
+    
+    checkAuthOnLoad();
+  }, []);
+
+  // Load user collection
+  useEffect(() => {
+    const loadUserCollection = async () => {
+      try {
+        const storedCollection = localStorage.getItem('user_collection');
+        if (storedCollection) {
+          try {
+            const parsed = JSON.parse(storedCollection);
+            if (Array.isArray(parsed)) {
+              setUserCollection(new Set(parsed));
+            }
+          } catch (e) {
+            console.error('Error parsing stored collection:', e);
+          }
+        }
+        
+        if (isAuthenticated) {
+          try {
+            const collection = await fetchUserCollection();
+            if (collection && Array.isArray(collection)) {
+              const collectionIds = collection.map(item => item.card.id);
+              localStorage.setItem('user_collection', JSON.stringify(collectionIds));
+              setUserCollection(new Set(collectionIds));
+            }
+          } catch (err) {
+            console.error('Error fetching collection from API:', err);
+          }
+        }
+      } catch (err) {
+        console.error('Error in collection loading:', err);
+      }
+    };
+    
+    loadUserCollection();
+  }, [isAuthenticated]);
+
+  // Load filter options
   useEffect(() => {
     const loadFilterOptions = async () => {
       try {
-        console.log("Fetching filter options...");
         const [aspectsData, typesData, keywordsData, setsData] = await Promise.all([
           fetchAspects(),
           fetchTypes(),
@@ -144,44 +134,25 @@ useEffect(() => {
           fetchSets()
         ]);
         
-        // Extract aspect names for the filter options
         if (Array.isArray(aspectsData)) {
-          if (typeof aspectsData[0] === 'string') {
-            setAspects(aspectsData.map(aspect => aspect.aspect_name));
+          if (aspectsData.length === 0) {
+            setAspects([]);
+          } else if (typeof aspectsData[0] === 'string') {
+            setAspects(aspectsData as unknown as string[]);
           } else {
-            // Create a safe, properly typed copy of the array
             const aspectNames: string[] = [];
-            
-            // Safely extract aspect names with type checking
             for (const aspect of aspectsData) {
               if (aspect && typeof aspect === 'object' && 'aspect_name' in aspect) {
-                aspectNames.push(aspect.aspect_name);
+                aspectNames.push((aspect as any).aspect_name);
               }
             }
-            
-            // Now we have a string[] that TypeScript can accept
             setAspects(aspectNames);
           }
-          console.log(`Loaded ${aspectsData.length} aspects`);
-        } else {
-          console.error("Aspects data is not an array:", aspectsData);
         }
         
-        // Set other filter data with type checks
-        if (Array.isArray(typesData)) {
-          setTypes(typesData);
-          console.log(`Loaded ${typesData.length} types`);
-        }
-        
-        if (Array.isArray(keywordsData)) {
-          setKeywords(keywordsData);
-          console.log(`Loaded ${keywordsData.length} keywords`);
-        }
-        
-        if (Array.isArray(setsData)) {
-          setSets(setsData);
-          console.log(`Loaded ${setsData.length} sets`);
-        }
+        if (Array.isArray(typesData)) setTypes(typesData);
+        if (Array.isArray(keywordsData)) setKeywords(keywordsData);
+        if (Array.isArray(setsData)) setSets(setsData);
       } catch (err) {
         console.error('Error loading filter options:', err);
       }
@@ -190,73 +161,112 @@ useEffect(() => {
     loadFilterOptions();
   }, []);
 
-  // Fetch cards when filters or page changes
-  useEffect(() => {
-    const loadCards = async () => {
-      try {
-        if (currentPage === 1) {
-          setLoading(true);
-        } else {
-          setIsLoadingMore(true);
-        }
-        
-        // Prepare filter parameters for the API
-        const params = {
-          limit: '24',  // Show 24 cards per page for better grid layout
-          page: currentPage.toString(),
-          search: filters.search,
-          type: filters.types.length > 0 ? filters.types.join(',') : undefined,
-          aspect: filters.aspects.length > 0 ? filters.aspects.join(',') : undefined,
-          costMin: filters.costMin.toString(),
-          costMax: filters.costMax.toString(),
-          keyword: filters.keywords.length > 0 ? filters.keywords.join(',') : undefined,
-          set: filters.sets.length > 0 ? filters.sets.join(',') : undefined
-        };
-        
-        const response = await fetchCards({ 
-            ...params,
-            structured: true // Request structured response with pagination
-          });        
-        // If it's page 1, replace the cards
-        // If it's past page 1, append the new cards
-        if (currentPage === 1) {
-          setCards(response.data);
-        } else {
-          setCards(prevCards => [...prevCards, ...response.data]);
-        }
-        
-        // Update pagination information
-        setTotalPages(response.meta.pages);
-        setTotalCards(response.meta.total);
-        
-      } catch (err) {
-        console.error('Error loading cards:', err);
+  // Improved card loading with better error handling
+  const loadCards = useCallback(async (page = 1, append = false, searchFilters = filters) => {
+    // Abort previous request if it exists
+    if (searchAbortController.current) {
+      searchAbortController.current.abort();
+    }
+
+    // Create new abort controller
+    const controller = new AbortController();
+    searchAbortController.current = controller;
+
+    try {
+      if (page === 1 && !append) {
+        setLoading(true);
+        setError(null);
+      } else if (append) {
+        setIsLoadingMore(true);
+      }
+      
+      // Prepare filter parameters with better sanitization
+      const params = {
+        limit: '24',
+        page: page.toString(),
+        search: searchFilters.search.trim() || undefined,
+        type: searchFilters.types.length > 0 ? searchFilters.types.join(',') : undefined,
+        aspect: searchFilters.aspects.length > 0 ? searchFilters.aspects.join(',') : undefined,
+        costMin: searchFilters.costMin.toString(),
+        costMax: searchFilters.costMax.toString(),
+        keyword: searchFilters.keywords.length > 0 ? searchFilters.keywords.join(',') : undefined,
+        set: searchFilters.sets.length > 0 ? searchFilters.sets.join(',') : undefined
+      };
+      
+      const response = await fetchCards({ 
+        ...params,
+        structured: true
+      });
+
+      // Check if component is still mounted and request wasn't aborted
+      if (isUnmounted.current || controller.signal.aborted) {
+        return;
+      }
+      
+      if (page === 1 || !append) {
+        setCards(response.data);
+      } else {
+        setCards(prevCards => [...prevCards, ...response.data]);
+      }
+      
+      setTotalPages(response.meta.pages);
+      setTotalCards(response.meta.total);
+      setCurrentPage(page);
+      
+    } catch (err: any) {
+      // Don't show error if request was aborted (normal behavior)
+      if (err.name === 'AbortError' || controller.signal.aborted) {
+        return;
+      }
+      
+      console.error('Error loading cards:', err);
+      if (!isUnmounted.current) {
         setError('Failed to load cards. Please try again later.');
-      } finally {
+      }
+    } finally {
+      if (!isUnmounted.current) {
         setLoading(false);
         setIsLoadingMore(false);
       }
+    }
+  }, [filters]);
+
+  // Improved debounced search with cleanup
+  const debouncedLoadCards = useMemo(
+    () => debounce((newFilters: typeof filters) => {
+      setCurrentPage(1);
+      loadCards(1, false, newFilters);
+    }, 400),
+    [loadCards]
+  );
+
+  // Cleanup debounced function
+  useEffect(() => {
+    return () => {
+      debouncedLoadCards.cancel();
     };
+  }, [debouncedLoadCards]);
 
-    loadCards();
-  }, [currentPage, filters]);
+  // Load cards when filters change
+  useEffect(() => {
+    debouncedLoadCards(filters);
+  }, [filters, debouncedLoadCards]);
 
-  // Handle card selection
-  const handleCardClick = (card: ApiCard) => {
+  // Card selection handlers
+  const handleCardClick = useCallback((card: ApiCard) => {
     setSelectedCard(card);
     setShowDetail(true);
-  };
+  }, []);
 
-  // Handle updating filters
-  const handleFilterChange = (newFilters: any) => {
-    setFilters({ ...filters, ...newFilters });
-    setCurrentPage(1); // Reset to first page when filters change
-  };
+  const handleFilterChange = useCallback((newFilters: any) => {
+    setFilters(prevFilters => ({ ...prevFilters, ...newFilters }));
+  }, []);
   
-  // Load more cards
-  const handleLoadMore = () => {
-    setCurrentPage(prev => prev + 1);
-  };
+  const handleLoadMore = useCallback(() => {
+    if (currentPage < totalPages && !isLoadingMore) {
+      loadCards(currentPage + 1, true, filters);
+    }
+  }, [currentPage, totalPages, isLoadingMore, loadCards, filters]);
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -278,7 +288,6 @@ useEffect(() => {
       <section className="py-4 px-4 bg-gray-950">
         <div className="max-w-7xl mx-auto">
           <div className="flex flex-col md:flex-row gap-4 items-center">
-            {/* Search Box */}
             <div className="relative flex-grow">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
               <input
@@ -290,7 +299,6 @@ useEffect(() => {
               />
             </div>
             
-            {/* Filter Toggle Button (Mobile) */}
             <Button 
               className="md:hidden w-full flex items-center justify-center space-x-2 bg-purple-600"
               onClick={() => setShowFilters(!showFilters)}
@@ -299,7 +307,6 @@ useEffect(() => {
               <span>Filters</span>
             </Button>
             
-            {/* Card Count */}
             <div className="text-gray-300 text-sm">
               {loading && currentPage === 1 ? 'Loading...' : `${totalCards} cards found`}
             </div>
@@ -310,7 +317,7 @@ useEffect(() => {
       {/* Main Content */}
       <section className="py-6 px-4">
         <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-6">
-          {/* Filters Sidebar (Desktop) */}
+          {/* Filters Sidebar */}
           <div className="hidden md:block">
             <CardFilters
               filters={filters}
@@ -323,7 +330,7 @@ useEffect(() => {
             />
           </div>
           
-          {/* Mobile Filters (Dialog) */}
+          {/* Mobile Filters Dialog */}
           <Dialog open={showFilters} onOpenChange={setShowFilters}>
             <DialogContent className="bg-gray-900 text-white border border-gray-800 sm:max-w-md">
               <CardFilters
@@ -348,7 +355,10 @@ useEffect(() => {
               <div className="bg-red-900/20 border border-red-800 rounded-lg p-6 text-center">
                 <p className="text-red-400 mb-3">{error}</p>
                 <Button 
-                  onClick={() => window.location.reload()} 
+                  onClick={() => {
+                    setError(null);
+                    loadCards(1, false, filters);
+                  }} 
                   variant="outline" 
                   className="border-red-700 hover:bg-red-800/30"
                 >
@@ -375,13 +385,13 @@ useEffect(() => {
               </div>
             ) : (
               <>
-                      <CardGrid
-                        cards={cards}
-                        onCardClick={handleCardClick}
-                        isInCollection={(cardId) => userCollection.has(cardId)}
-                      />
-                
-                {/* Pagination/Load More */}
+                <CardGrid
+                  cards={cards}
+                  onCardClickAction={handleCardClick}
+                  isInCollection={(cardId) => userCollection.has(cardId)}
+                />
+        
+                {/* Load More Button */}
                 {currentPage < totalPages && (
                   <div className="flex justify-center mt-8">
                     <Button
