@@ -315,8 +315,6 @@ export default function DeckBuilder() {
     );
 
     // --- Event Handlers ---
-
-    
     const handleCardClick = useCallback((card: CardType) => { 
         setSelectedCard(card); 
     }, []);
@@ -340,7 +338,6 @@ export default function DeckBuilder() {
     const handleAddToDeck = useCallback((card: CardType) => { 
         handleCardDoubleClick(card); 
     }, [handleCardDoubleClick]);
-
 
     const handleRemoveFromDeck = useCallback((cardId: string) => {
         if (leaders.some(l => l.id === cardId)) {
@@ -724,8 +721,8 @@ export default function DeckBuilder() {
                                         <CardGrid 
                                             key={`card-grid-${currentStage}-${searchQuery}-${cardTypeFilter}-${showAllCards}-${hideCardsInDeck}`} 
                                             cards={displayedCards} 
-                                            onCardClick={handleCardClick}
-                                            onDoubleClick={handleCardDoubleClick}
+                                            onCardClickAction={handleCardClick}        // ✅ FIXED: Changed from onCardClick
+                                            onDoubleClickAction={handleCardDoubleClick} 
                                             selectedCardId={selectedCard?.id} 
                                             isCompatible={isCardInAspect} 
                                             isInDeck={isCardIdInDeck} 
