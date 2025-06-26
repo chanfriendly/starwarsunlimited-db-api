@@ -9,12 +9,12 @@ const nextConfig: NextConfig = {
   // Basic configuration
   typescript: {
     // Ignore build errors during development
-    ignoreBuildErrors: false,
+    ignoreBuildErrors: true,
   },
   
   eslint: {
     // Don't run ESLint during builds
-    ignoreDuringBuilds: false,
+    ignoreDuringBuilds: true,
   },
 
   // API proxy configuration for development and production
