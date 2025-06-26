@@ -6,6 +6,7 @@ export async function GET() {
   return NextResponse.json([
     "SOR",
     "SHD", 
-    "TWI"
+    "TWI",
+    "LOF"
   ]);
 }

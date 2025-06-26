@@ -1,0 +1,36 @@
+version: '3.8'
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: ghcr.io/christianglass/starwarsunlimited-db-api-frontend
+    ports:
+      - "3000:3000"
+    networks:
+      - twinsuns_network
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: ghcr.io/christianglass/starwarsunlimited-db-api-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ${DATABASE_PATH:-./databases}:/data
+    environment:
+      - DB_DIR=/data/.swu
+      - DATABASE_URL=sqlite:////data/.swu/swu_app.db
+      - CARD_DATABASE_URL=sqlite:////data/.swu/swu_cards.db
+      - JWT_SECRET=${JWT_SECRET:?err}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=10080
+      - CORS_ALLOWED_ORIGINS=http://localhost:3000
+    networks:
+      - twinsuns_network
+    restart: unless-stopped
+
+networks:
+  twinsuns_network:
+    driver: bridge
