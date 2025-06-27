@@ -16,42 +16,43 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 def group_cards_by_identity(cards):
-    """Group cards by a composite key of name, subtitle, type, and traits."""
+    """
+    Group cards by a composite key of name, subtitle, type, and traits.
+    
+    Cards with the same name, subtitle, type, and traits are considered variants 
+    of the same card (e.g., different set reprints) and will be grouped together 
+    with the first card as primary and others as alternate_arts.
+    
+    Args:
+        cards: List of card dictionaries from database
+        
+    Returns:
+        List of cards with alternate_arts populated for variants
+    """
     logger.info(f"Starting card grouping for {len(cards)} cards.")
     grouped = {}
+    
     for card in cards:
         # Ensure traits are a sorted tuple for consistent hashing
         traits = tuple(sorted(card.get('traits', [])))
         
-        # Create a composite key
+        # Create a composite key that uniquely identifies the card
         grouping_key = (
             card.get('name'),
             card.get('subtitle'),
             card.get('type'),
             traits
         )
-        
-        # Log the exact data being used for grouping for each card
-        logger.info(
-            f"Processing Card ID: {card.get('id')}, "
-            f"Name: {card.get('name')}, "
-            f"Subtitle: {card.get('subtitle')}, "
-            f"Type: {card.get('type')}, "
-            f"Traits: {traits}, "
-            f"--> Grouping Key: {grouping_key}"
-        )
 
         if grouping_key not in grouped:
-            # This is the first time we see this key. This card becomes the primary.
-            # Initialize its alternate_arts list.
+            # First time seeing this card - make it the primary
             card['alternate_arts'] = []
             grouped[grouping_key] = card
-            logger.info(f"Created new group for key: {grouping_key} with primary card ID: {card.get('id')}")
         else:
-            # This key already exists. The current card is an alternate art of the primary.
+            # This is a variant of an existing card
             primary_card = grouped[grouping_key]
             
-            # Create a dictionary for the alternate art with specific fields
+            # Create alternate art info with relevant fields
             alternate_art_info = {
                 "id": card.get('id'),
                 "image_uri": card.get('image_uri'),
@@ -63,15 +64,13 @@ def group_cards_by_identity(cards):
                 "artist": card.get('artist'),
             }
             
-            # Add the alternate art info to the primary card's list
+            # Add to primary card's alternate arts
             primary_card['alternate_arts'].append(alternate_art_info)
-            logger.info(f"Added variant ID {card.get('id')} to group with key: {grouping_key}")
 
-    # The values of the dictionary are the fully formed primary cards with their variants
     final_list = list(grouped.values())
     logger.info(f"Finished grouping. Result contains {len(final_list)} unique cards.")
+    
     return final_list
-
 
 @router.get("/")
 async def get_cards(

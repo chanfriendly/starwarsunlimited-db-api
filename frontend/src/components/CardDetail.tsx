@@ -1,20 +1,34 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Card, GroupedCard, AlternateArt } from '@/lib/api';
+import React, { useState, useEffect, useMemo } from 'react';
+import { ApiCard } from '@/lib/api';
 import { Button } from '@/components/ui/button';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+
+// Define the alternate art structure based on backend grouping
+interface AlternateArt {
+  id: string;
+  image_uri: string;
+  set_name: string;
+  set_code: string;
+  card_number: string;
+  rarity: string;
+  artist: string;
+}
+
+// Extend ApiCard to include the alternate_arts that gets added by backend grouping
+interface GroupedApiCard extends ApiCard {
+  alternate_arts?: AlternateArt[];
+}
 
 interface CardDetailProps {
-  card: GroupedCard | null;
-  onAddToDeck?: (card: GroupedCard) => void;
+  card: GroupedApiCard | null;
+  onAddToDeck?: (card: GroupedApiCard) => void;
   onRemoveFromDeck?: (cardId: string) => void;
   isInDeck?: boolean;
   isCompatible?: boolean;
   currentStage?: 'leaders' | 'base' | 'cards';
 }
-
-const MemoizedCardDetail = React.memo(CardDetail);
-
 
 export function CardDetail({
   card,
@@ -25,17 +39,68 @@ export function CardDetail({
   currentStage = 'cards',
 }: CardDetailProps) {
   const [showBackSide, setShowBackSide] = useState(false);
-  const [selectedArtId, setSelectedArtId] = useState<string | undefined>(card?.id);
+  const [selectedArtIndex, setSelectedArtIndex] = useState(0);
 
+  // Reset art selection when card changes
   useEffect(() => {
-    setSelectedArtId(card?.id);
+    setSelectedArtIndex(0);
+    setShowBackSide(false);
+  }, [card?.id]);
+
+  // Create array of all available art variants (main card + alternates)
+  const allArtVariants = useMemo(() => {
+    if (!card) return [];
+    
+    const variants = [
+      // Main card as first variant
+      {
+        id: card.id,
+        image_uri: card.image_uri,
+        set_name: card.set_name,
+        set_code: card.set_code,
+        card_number: card.card_number,
+        rarity: card.rarity,
+        artist: card.artist,
+        isMainCard: true,
+      },
+      // Add alternate arts
+      ...(card.alternate_arts || []).map(art => ({
+        ...art,
+        isMainCard: false,
+      }))
+    ];
+    
+    return variants;
   }, [card]);
 
+  // Get currently displayed card data (main card properties + selected art's image)
   const displayCard = useMemo(() => {
-    if (!card) return null;
-    if (selectedArtId === card.id) return card;
-    return card.alternate_arts?.find(art => art.id === selectedArtId) || card;
-  }, [card, selectedArtId]);
+    if (!card || allArtVariants.length === 0) return null;
+    
+    const selectedArt = allArtVariants[selectedArtIndex];
+    
+    return {
+      ...card, // Use main card's data for everything except image
+      image_uri: selectedArt.image_uri, // Override with selected art's image
+      set_name: selectedArt.set_name,
+      set_code: selectedArt.set_code,
+      artist: selectedArt.artist,
+      rarity: selectedArt.rarity,
+    };
+  }, [card, allArtVariants, selectedArtIndex]);
+
+  // Navigation functions
+  const navigateToPreviousArt = () => {
+    setSelectedArtIndex(prev => 
+      prev === 0 ? allArtVariants.length - 1 : prev - 1
+    );
+  };
+
+  const navigateToNextArt = () => {
+    setSelectedArtIndex(prev => 
+      prev === allArtVariants.length - 1 ? 0 : prev + 1
+    );
+  };
 
   // Only allow flipping for cards with a back side (mainly Leaders)
   const canFlip = displayCard?.image_back_uri !== undefined && displayCard?.image_back_uri !== null;
@@ -68,6 +133,7 @@ export function CardDetail({
   }
 
   const currentImage = showBackSide && displayCard.image_back_uri ? displayCard.image_back_uri : displayCard.image_uri;
+  const hasMultipleArts = allArtVariants.length > 1;
 
   // Function to get the appropriate button text based on the card's stage and status
   const getButtonText = () => {
@@ -86,32 +152,18 @@ export function CardDetail({
     return `Add as ${currentStage === 'leaders' ? 'Leader' : currentStage === 'base' ? 'Base' : 'Card'}`;
   };
 
-  // Get the button disabled state
   const isButtonDisabled = () => {
-    if (isInDeck) {
-      return false; // Can always remove
-    }
-
-    // Can't add incompatible cards
-    if (!isCompatible) {
-      return true;
-    }
-
-    // Can't add non-base cards as base
-    if (currentStage === 'base' && displayCard.type !== 'Base') {
-      return true;
-    }
-
-    return false;
+    return !isCompatible || (currentStage === 'base' && displayCard.type !== 'Base');
   };
 
   return (
-    <div className="h-full overflow-auto p-4">
-      <div className="flex flex-col items-center mb-6">
-        {/* Card image with controlled size */}
-        <div 
-          className={`max-w-xs w-full mx-auto mb-4 relative ${
-            onAddToDeck && onRemoveFromDeck ? 'cursor-pointer' : ''
+    <div className="flex flex-col items-center p-6 h-full overflow-y-auto">
+      {/* Card Image Section */}
+      <div className="relative mb-4">
+        <div
+          className={`relative ${
+            onAddToDeck && onRemoveFromDeck && !isButtonDisabled() 
+              ? 'cursor-pointer' : ''
           }`}
           onClick={() => {
             if (onAddToDeck && onRemoveFromDeck && displayCard) {
@@ -140,8 +192,12 @@ export function CardDetail({
           {/* Flip button for cards with back side */}
           {canFlip && (
             <button 
-              className="absolute top-2 right-2 p-2 bg-purple-500 rounded-full text-white"
-              onClick={() => setShowBackSide(!showBackSide)}
+              className="absolute top-2 right-2 p-2 bg-purple-500 rounded-full text-white hover:bg-purple-600 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowBackSide(!showBackSide);
+              }}
+              title={showBackSide ? "Show front side" : "Show back side"}
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -149,119 +205,177 @@ export function CardDetail({
             </button>
           )}
 
-          {/* Alternate Art Selector */}
-          {card && card.alternate_arts && card.alternate_arts.length > 0 && (
-            <div className="absolute top-2 left-2 z-10">
-              <select
-                className="bg-gray-900 text-white text-xs rounded-full px-1 py-0.5"
-                value={selectedArtId}
-                onChange={(e) => setSelectedArtId(e.target.value)}
-              >
-                <option value={card.id}>Main Art</option>
-                {card.alternate_arts.map(art => (
-                  <option key={art.id} value={art.id}>
-                    Alt Art ({art.set_code || art.set_name})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-        
-        <h2 className="text-xl font-bold mb-1">{displayCard.name}</h2>
-        {displayCard.subtitle && (
-          <p className="text-gray-400 mb-2">{displayCard.subtitle}</p>
-        )}
-        
-        <div className="flex flex-wrap gap-2 mb-4 justify-center">
-          {displayCard.aspects?.map((aspect) => (
-            <div 
-              key={aspect.aspect_name}
-              className="px-2 py-1 text-xs rounded-full"
-              style={{
-                backgroundColor: `${aspect.aspect_color}30`,
-                color: aspect.aspect_color,
-                border: `1px solid ${aspect.aspect_color}`
-              }}
-            >
-              {aspect.aspect_name}
-            </div>
-          ))}
-        </div>
-        
-        <div className="grid grid-cols-3 gap-4 mb-4 bg-gray-800/50 p-3 rounded-lg w-full max-w-xs">
-          {displayCard.energy_cost !== undefined && (
-            <div className="text-center">
-              <p className="text-xs text-gray-400">Cost</p>
-              <p className="text-lg font-bold text-amber-400">{displayCard.energy_cost}</p>
-            </div>
-          )}
-          {displayCard.attack !== undefined && (
-            <div className="text-center">
-              <p className="text-xs text-gray-400">Attack</p>
-              <p className="text-lg font-bold text-red-400">{displayCard.attack}</p>
-            </div>
-          )}
-          {displayCard.health !== undefined && (
-            <div className="text-center">
-              <p className="text-xs text-gray-400">Health</p>
-              <p className="text-lg font-bold text-green-400">{displayCard.health}</p>
-            </div>
-          )}
-        </div>
-        
-        {displayCard.text && (
-          <div className="mb-4 w-full max-w-xs">
-            <h3 className="text-sm font-medium mb-1">Card Text</h3>
-            <p className="text-sm text-gray-300 whitespace-pre-line">{displayCard.text}</p>
-          </div>
-        )}
-        
-        {displayCard.keywords && displayCard.keywords.length > 0 && (
-          <div className="mb-4 w-full max-w-xs">
-            <h3 className="text-sm font-medium mb-1">Keywords</h3>
-            <div className="flex flex-wrap gap-2">
-              {displayCard.keywords.map((keyword) => (
-                <span 
-                  key={keyword}
-                  className="text-xs px-2 py-1 bg-purple-900/30 border border-purple-700 text-purple-300 rounded-full"
+          {/* Art Navigation Controls */}
+          {hasMultipleArts && (
+            <>
+              {/* Art counter and info */}
+              <div className="absolute top-2 left-2 bg-black/80 text-white text-xs px-2 py-1 rounded-lg flex items-center gap-2">
+                <span>{selectedArtIndex + 1} / {allArtVariants.length}</span>
+                {allArtVariants[selectedArtIndex].set_code && (
+                  <span className="text-gray-300">
+                    ({allArtVariants[selectedArtIndex].set_code})
+                  </span>
+                )}
+              </div>
+
+              {/* Navigation arrows */}
+              <div className="absolute inset-y-0 left-0 right-0 flex items-center justify-between px-2 pointer-events-none">
+                <button
+                  className="p-2 bg-black/70 rounded-full text-white hover:bg-black/90 transition-colors pointer-events-auto"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigateToPreviousArt();
+                  }}
+                  title="Previous art variant"
                 >
-                  {keyword}
-                </span>
-              ))}
-            </div>
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                
+                <button
+                  className="p-2 bg-black/70 rounded-full text-white hover:bg-black/90 transition-colors pointer-events-auto"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigateToNextArt();
+                  }}
+                  title="Next art variant"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Art variant indicator dots */}
+              <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex space-x-1">
+                {allArtVariants.map((_, index) => (
+                  <button
+                    key={index}
+                    className={`w-2 h-2 rounded-full transition-colors ${
+                      index === selectedArtIndex 
+                        ? 'bg-white' 
+                        : 'bg-white/50 hover:bg-white/70'
+                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedArtIndex(index);
+                    }}
+                    title={`Art variant ${index + 1}`}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+        
+      {/* Card Information */}
+      <h2 className="text-xl font-bold mb-1">{displayCard.name}</h2>
+      {displayCard.subtitle && (
+        <p className="text-gray-400 mb-2">{displayCard.subtitle}</p>
+      )}
+      
+      {/* Aspects */}
+      <div className="flex flex-wrap gap-2 mb-4 justify-center">
+        {displayCard.aspects?.map((aspect: any) => (
+          <div 
+            key={aspect.aspect_name}
+            className="px-2 py-1 text-xs rounded-full"
+            style={{
+              backgroundColor: `${aspect.aspect_color}30`,
+              color: aspect.aspect_color,
+              border: `1px solid ${aspect.aspect_color}`
+            }}
+          >
+            {aspect.aspect_name}
+          </div>
+        ))}
+      </div>
+      
+      {/* Stats */}
+      <div className="grid grid-cols-3 gap-4 mb-4 bg-gray-800/50 p-3 rounded-lg w-full max-w-xs">
+        {displayCard.energy_cost !== undefined && (
+          <div className="text-center">
+            <p className="text-xs text-gray-400">Cost</p>
+            <p className="text-lg font-bold text-amber-400">{displayCard.energy_cost}</p>
           </div>
         )}
-        
-        {onAddToDeck && onRemoveFromDeck && (
-          <div className="mt-4 w-full max-w-xs">
-            {isInDeck ? (
-              <Button 
-                onClick={() => onRemoveFromDeck(displayCard.id)}
-                variant="destructive"
-                className="w-full"
-              >
-                {getButtonText()}
-              </Button>
-            ) : (
-              <Button 
-                onClick={() => onAddToDeck(displayCard)}
-                className={`w-full ${!isCompatible ? 'bg-gray-700' : 'bg-gradient-to-r from-purple-500 to-pink-500'}`}
-                disabled={isButtonDisabled()}
-              >
-                {getButtonText()}
-              </Button>
-            )}
-            
-            {/* Special warning for already-in-deck in Twin Suns format */}
-            {currentStage === 'cards' && isInDeck && (
-              <p className="text-xs text-amber-400 mt-2 text-center">
-                In Twin Suns format, each card can only appear once in a deck.
-              </p>
-            )}
+        {displayCard.attack !== undefined && (
+          <div className="text-center">
+            <p className="text-xs text-gray-400">Attack</p>
+            <p className="text-lg font-bold text-red-400">{displayCard.attack}</p>
+          </div>
+        )}
+        {displayCard.health !== undefined && (
+          <div className="text-center">
+            <p className="text-xs text-gray-400">Health</p>
+            <p className="text-lg font-bold text-green-400">{displayCard.health}</p>
           </div>
         )}
       </div>
+      
+      {/* Card Text */}
+      {displayCard.text && (
+        <div className="mb-4 w-full max-w-xs">
+          <h3 className="text-sm font-medium mb-1">Card Text</h3>
+          <p className="text-sm text-gray-300 whitespace-pre-line">{displayCard.text}</p>
+        </div>
+      )}
+      
+      {/* Keywords */}
+      {displayCard.keywords && displayCard.keywords.length > 0 && (
+        <div className="mb-4 w-full max-w-xs">
+          <h3 className="text-sm font-medium mb-1">Keywords</h3>
+          <div className="flex flex-wrap gap-2">
+            {displayCard.keywords.map((keyword: any) => (
+              <span 
+                key={keyword}
+                className="text-xs px-2 py-1 bg-purple-900/30 border border-purple-700 text-purple-300 rounded-full"
+              >
+                {keyword}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Current Art Information */}
+      {hasMultipleArts && (
+        <div className="mb-4 w-full max-w-xs">
+          <h3 className="text-sm font-medium mb-1">Current Art</h3>
+          <div className="text-xs text-gray-400 space-y-1">
+            <p><span className="text-gray-300">Set:</span> {displayCard.set_name}</p>
+            {displayCard.artist && (
+              <p><span className="text-gray-300">Artist:</span> {displayCard.artist}</p>
+            )}
+            <p><span className="text-gray-300">Rarity:</span> {displayCard.rarity}</p>
+          </div>
+        </div>
+      )}
+      
+      {/* Action Button */}
+      {onAddToDeck && onRemoveFromDeck && (
+        <div className="mt-4 w-full max-w-xs">
+          <Button
+            onClick={() => {
+              if (isInDeck) {
+                onRemoveFromDeck(displayCard.id);
+              } else if (!isButtonDisabled()) {
+                onAddToDeck(displayCard);
+              }
+            }}
+            disabled={isButtonDisabled()}
+            className={`w-full ${
+              isInDeck
+                ? 'bg-red-600 hover:bg-red-700 text-white'
+                : isButtonDisabled()
+                ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                : 'bg-purple-600 hover:bg-purple-700 text-white'
+            }`}
+          >
+            {getButtonText()}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
+
+export default React.memo(CardDetail);

@@ -6,6 +6,7 @@ import { fetchCards, fetchAspects, fetchTypes, fetchKeywords, fetchSets, ApiCard
 import { CardGrid } from '@/components/CardGrid';
 import { CardFilters } from '@/components/CardFilters';
 import { CardDetailDialog } from '@/components/CardDetailDialog';
+import { CardSearch } from '@/components/CardSearch';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -30,6 +31,17 @@ interface KeywordResponse {
 interface SetResponse {
   set_name: string;
   set_code: string;
+}
+
+// Card filters interface that matches CardSearch component
+interface CardFilters {
+  search: string;
+  types: string[];
+  aspects: string[];
+  keywords: string[];
+  costMin: string;
+  costMax: string;
+  sets: string[];
 }
 
 // Sort options for the dropdown
@@ -73,15 +85,15 @@ export default function CardBrowser() {
   // Sort state
   const [sortBy, setSortBy] = useState('name_asc');
   
-  // Filter state - using simple strings for costs
-  const [filters, setFilters] = useState({
+  // Single filters state - matches CardSearch interface
+  const [filters, setFilters] = useState<CardFilters>({
     search: '',
-    types: [] as string[],
-    aspects: [] as string[],
-    keywords: [] as string[],
+    types: [],
+    aspects: [],
+    keywords: [],
     costMin: '',
     costMax: '',
-    sets: [] as string[],
+    sets: [],
   });
 
   // Refs for cleanup and preventing race conditions
@@ -179,14 +191,6 @@ export default function CardBrowser() {
     }
   }, [filterOptionsLoaded]);
 
-  // Reload cards when sort changes
-  // useEffect(() => {
-  //   if (filterOptionsLoaded) {
-  //     console.log('[Cards] Sort changed, reloading cards...');
-  //     loadCards(1, false, filters, sortBy);
-  //   }
-  // }, [sortBy]);
-
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -198,7 +202,7 @@ export default function CardBrowser() {
   }, []);
 
   // Improved card loading with sorting support
-  const loadCards = useCallback(async (page = 1, append = false, searchFilters, sortOrder) => {
+  const loadCards = useCallback(async (page = 1, append = false, searchFilters: CardFilters, sortOrder: string) => {
     // Don't start loading if filter options aren't ready yet
     if (!filterOptionsLoaded) {
       console.log('[Cards] Waiting for filter options before loading cards...');
@@ -280,16 +284,33 @@ export default function CardBrowser() {
 
   // Debounced search handling
   const debouncedSearch = useMemo(
-    () => debounce((newFilters) => {
+    () => debounce((newFilters: CardFilters) => {
       console.log('[Cards] Debounced search triggered:', newFilters);
       loadCards(1, false, newFilters, sortBy);
     }, 500),
     [loadCards, sortBy]
   );
 
-  // Handle filter changes
-  const handleFilterChange = useCallback((newFilters: typeof filters) => {
-    console.log('[Cards] Filter change received:', newFilters);
+  // Handle search change from CardSearch component (no longer needed as separate handler)
+  // const handleSearchChange = useCallback((searchTerm: string) => {
+  //   console.log('[Cards] Search term changed:', searchTerm);
+  //   const newFilters = { ...filters, search: searchTerm };
+  //   setFilters(newFilters);
+  //   setCurrentPage(1);
+  //   debouncedSearch(newFilters);
+  // }, [filters, debouncedSearch]);
+
+  // Handle filter changes from CardSearch component
+  const handleFiltersChange = useCallback((newFilters: CardFilters) => {
+    console.log('[Cards] Filters changed:', newFilters);
+    setFilters(newFilters);
+    setCurrentPage(1);
+    debouncedSearch(newFilters);
+  }, [debouncedSearch]);
+
+  // Handle filter changes from sidebar (CardFilters component)
+  const handleSidebarFilterChange = useCallback((newFilters: Partial<CardFilters>) => {
+    console.log('[Cards] Sidebar filter change received:', newFilters);
     
     const mergedFilters = { ...filters, ...newFilters };
     console.log('[Cards] Merged filters:', mergedFilters);
@@ -373,7 +394,7 @@ export default function CardBrowser() {
         <div className="hidden xl:block w-80 flex-shrink-0 h-screen sticky top-0 overflow-y-auto">
           <CardFilters
             filters={filters}
-            onFiltersChangeAction={handleFilterChange}
+            onFiltersChangeAction={handleSidebarFilterChange}
             aspects={aspects}
             types={types}
             keywords={keywords}
@@ -387,7 +408,7 @@ export default function CardBrowser() {
             <div className="absolute inset-y-0 left-0 w-80 bg-gray-900 shadow-xl">
               <CardFilters
                 filters={filters}
-                onFiltersChangeAction={handleFilterChange}
+                onFiltersChangeAction={handleSidebarFilterChange}
                 aspects={aspects}
                 types={types}
                 keywords={keywords}
@@ -443,6 +464,20 @@ export default function CardBrowser() {
                   </Select>
                 </div>
               </div>
+            </div>
+
+            {/* CARD SEARCH COMPONENT */}
+            <div className="mb-6">
+              <CardSearch
+                searchTerm={filters.search}
+                filters={filters}
+                onFiltersChange={handleFiltersChange}
+                availableAspects={aspects}
+                availableTypes={types}
+                availableKeywords={keywords}
+                availableSets={sets}
+                isLoading={loading}
+              />
             </div>
 
             {/* CARDS GRID */}

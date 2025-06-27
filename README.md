@@ -8,9 +8,20 @@ Star Wars Unlimited Deck Builder is a comprehensive web application designed for
 
 ### 🎴 Card Management
 - **Real Card Database**: **1,398+ official Star Wars Unlimited cards** with live data from the official API
-- **Advanced Search & Filtering**: Multi-parameter search with aspects, types, keywords, costs, and sets
+- **Powerful Search Engine**: Multi-parameter search with debounced real-time filtering
+- **Advanced Filtering**: Filter by aspects, types, keywords, costs, sets with visual filter badges
+- **Smart Card Grouping**: Properly groups cards by name + subtitle + type while preserving art variants
 - **Card Details**: Comprehensive view of card information, including aspects, abilities, and high-quality card art
+- **Art Variant Navigation**: Navigate through multiple art variants using intuitive arrow controls
 - **Collection Tracking**: Users can mark cards they own and manage their collection with quantity tracking
+
+### 🔍 Enhanced Search & Browsing
+- **Real-time Search**: Instant search across card names, text, and abilities with 300ms debounce
+- **Collapsible Advanced Filters**: Toggleable filter panel with multi-select dropdowns
+- **Cost Range Filtering**: Min/max cost inputs for precise filtering
+- **Active Filter Display**: Visual badges showing applied filters with one-click removal
+- **Sort Options**: Multiple sort options including name, cost, type, set, and rarity
+- **Responsive Design**: Works seamlessly on desktop and mobile devices
 
 ### 🎯 Deck Building (Twin Suns Format)
 - **Twin Suns Format Support**: Interface specifically optimized for the format's unique requirements
@@ -25,6 +36,8 @@ Star Wars Unlimited Deck Builder is a comprehensive web application designed for
 - **Responsive Grid Layout**: Adaptive card grids that work seamlessly across all screen sizes
 - **Real-time Visual Feedback**: Loading states, success indicators, and error handling
 - **Progressive Enhancement**: Works on slower connections with intelligent caching
+- **Art Variant Controls**: Navigate card art variants with arrows and dot indicators
+- **Card Detail Modal**: Enhanced card detail view with arrow navigation through art variants
 
 ### 🔐 Authentication & User Management
 - **Secure Authentication**: JWT-based authentication with bcrypt password hashing
@@ -40,6 +53,7 @@ Star Wars Unlimited Deck Builder is a comprehensive web application designed for
 - **State Management**: React Context with optimized re-render patterns
 - **API Handling**: Built-in proxy configuration with automatic redirects
 - **Build**: Standalone output for Docker deployment
+- **Search**: Debounced search with intelligent caching and state management
 
 ### Backend (FastAPI)
 - **Framework**: FastAPI with automatic OpenAPI documentation
@@ -47,12 +61,14 @@ Star Wars Unlimited Deck Builder is a comprehensive web application designed for
 - **Database**: Dual SQLite setup (cards + application data)
 - **Authentication**: JWT tokens with configurable expiration
 - **API Design**: RESTful endpoints with comprehensive error handling
+- **Card Grouping**: Smart backend grouping by name + subtitle + type + aspects + keywords
 
 ### Database Architecture
 - **Card Database** (`swu_cards.db`): Static card data with relationships, aspects, keywords
 - **Application Database** (`swu_app.db`): User accounts, decks, collections, preferences
 - **Data Sync**: Automated updates from official Star Wars Unlimited API
 - **Backup Strategy**: Automated database backups with versioning
+- **Indexing**: Optimized database indices for fast search and filtering
 
 ### Deployment
 - **Containerization**: Docker with multi-stage builds
@@ -160,65 +176,16 @@ docker-compose -f docker-compose.prod.yaml up -d
 ```
 
 Your application is now running in production mode.
-```bash
-# Frontend only
-cd frontend
-npm run docker:build
-npm run docker:run
-
-# Full stack
-docker-compose -f docker-compose.yml up -d
-```
-
-## 📋 Recent Updates & Fixes
-
-### ✅ Issues Resolved
-
-1. **Search & Type Safety**
-   - Fixed TypeScript errors in CardBrowser with proper type handling
-   - Enhanced aspect filtering with null-safe operations
-   - Improved error boundaries for robust user experience
-
-2. **Mobile Experience**
-   - **Single-tap functionality**: Add cards to collection/deck with one touch
-   - **Visual feedback**: Loading spinners, success confirmations, and error states
-   - **Touch optimization**: Proper mobile gesture handling and responsive design
-
-3. **Component Architecture**
-   - **Props standardization**: Renamed function props with "Action" suffix for clarity
-   - **Type safety**: Strict TypeScript interfaces prevent runtime errors
-   - **Performance**: Memoized components and optimized re-render patterns
-
-4. **Database & API**
-   - **Real data integration**: Connected to actual Star Wars Unlimited card database
-   - **Query optimization**: Efficient database queries with proper indexing
-   - **API stability**: Robust error handling and retry logic
-
-5. **Development Experience**
-   - **One-command setup**: `./dev.sh` starts everything automatically
-   - **Environment management**: Simplified configuration with sensible defaults
-   - **Hot reloading**: Both frontend and backend support live code changes
-
-### 🔧 Breaking Changes
-If updating from older versions:
-
-**CardGrid Component Props:**
-```typescript
-// Old (deprecated)
-<CardGrid onCardClick={handler} onDoubleClick={handler} />
-
-// New (current)
-<CardGrid onCardClickAction={handler} onDoubleClickAction={handler} />
-```
 
 ## 🎯 API Endpoints
 
 ### Card Management
-- `GET /api/cards` - Browse and search cards with filtering
+- `GET /api/cards` - Browse and search cards with advanced filtering and sorting
 - `GET /api/cards/{id}` - Get individual card details
 - `GET /api/aspects` - Get all available aspects
 - `GET /api/types` - Get all card types
 - `GET /api/sets` - Get all available sets
+- `GET /api/keywords` - Get all available keywords
 
 ### Deck Management
 - `GET /api/me/decks` - Get user's decks
@@ -248,46 +215,59 @@ If updating from older versions:
 - **Security Headers**: Proper HTTP security headers set
 - **Environment Isolation**: Sensitive data in environment variables only
 
-## 🚀 Deployment Guide
+## 📋 Recent Updates & Fixes
 
-### Local Development
-```bash
-./dev.sh  # Starts everything locally
+### ✅ Version 2.1.0 - Enhanced Search & Navigation
+
+1. **Powerful Search Engine**
+   - **Real-time search**: Instant search across card names, text, and abilities
+   - **Advanced filtering**: Multi-parameter filtering with visual feedback
+   - **Debounced API calls**: Optimized performance with 300ms debounce
+   - **Filter badges**: Visual representation of active filters with one-click removal
+
+2. **Improved Card Grouping**
+   - **Fixed frontend grouping**: Removed incorrect name-only grouping
+   - **Backend grouping respected**: Cards grouped correctly by name + subtitle + type
+   - **Art variant handling**: Proper display of multiple art variants for same cards
+   - **Enhanced debugging**: Comprehensive logging for troubleshooting grouping issues
+
+3. **Enhanced Card Detail Experience**
+   - **Arrow navigation**: Navigate through art variants using intuitive left/right arrows
+   - **Dot indicators**: Visual indicators showing current art variant position
+   - **Art information**: Display set, artist, and rarity for current art variant
+   - **Responsive design**: Optimized for both desktop and mobile interactions
+
+4. **Component Architecture Improvements**
+   - **TypeScript fixes**: Resolved all type safety issues and export conflicts
+   - **Prop standardization**: Consistent "Action" suffix for function props
+   - **Performance optimizations**: Memoized components and optimized re-renders
+   - **Error handling**: Improved error boundaries and loading states
+
+5. **Search & Filter Features**
+   - **Cost range filtering**: Min/max cost inputs for precise control
+   - **Multi-select filters**: Dropdown selections for types, aspects, keywords, sets
+   - **Sort options**: Multiple sorting options including name, cost, type, set, rarity
+   - **Responsive filters**: Collapsible filter panel optimized for mobile
+
+### 🔧 Breaking Changes
+If updating from older versions:
+
+**CardGrid Component Props:**
+```typescript
+// Old (deprecated)
+<CardGrid onCardClick={handler} onDoubleClick={handler} />
+
+// New (current)
+<CardGrid onCardClickAction={handler} onDoubleClickAction={handler} />
 ```
 
-### Production Server
-```bash
-./deploy.sh  # Builds and deploys optimized version
-```
+**CardSearch Component Props:**
+```typescript
+// Old (deprecated)
+<CardSearch onFiltersChange={handler} />
 
-### Docker Production
-```bash
-# Using docker-compose
-docker-compose -f docker-compose.yml up -d
-
-# Manual container management
-docker build -t swu-frontend ./frontend
-docker build -t swu-backend ./backend
-docker run -d -p 3000:3000 swu-frontend
-docker run -d -p 8000:8000 swu-backend
-```
-
-### Environment Variables
-
-**Frontend (.env.local):**
-```bash
-NEXT_PUBLIC_API_URL=http://localhost:8000
-NODE_ENV=development
-```
-
-**Backend (.env):**
-```bash
-JWT_SECRET=your_secure_secret_here
-ACCESS_TOKEN_EXPIRE_MINUTES=10080
-DB_DIR=~/.swu
-DATABASE_URL=sqlite:///~/.swu/swu_app.db
-CARD_DATABASE_URL=sqlite:///~/.swu/swu_cards.db
-CORS_ALLOWED_ORIGINS=http://localhost:3000
+// New (current)
+<CardSearch onFiltersChangeAction={handler} />
 ```
 
 ## 🔮 AI Integration Roadmap
@@ -296,11 +276,13 @@ CORS_ALLOWED_ORIGINS=http://localhost:3000
 - ✅ **Real card database** with 1,398+ cards
 - ✅ **Relationship mapping** (aspects, keywords, traits)
 - ✅ **User behavior tracking** (deck building patterns)
+- ✅ **Advanced search infrastructure** for semantic queries
 
 ### Phase 2: Basic AI Features (In Development)
 - 🚧 **Card recommendations** based on selected leaders
 - 🚧 **Aspect synergy analysis** using card relationships
 - 🚧 **Deck completion suggestions** with format validation
+- 🚧 **Search relevance ranking** using ML algorithms
 
 ### Phase 3: Advanced AI (Planned)
 - 📋 **AlphaGo Zero-style learning** from game simulations
@@ -333,7 +315,8 @@ CORS_ALLOWED_ORIGINS=http://localhost:3000
 
 ### Metrics
 - **Initial Load**: < 3 seconds on 3G
-- **Card Search**: < 200ms response time
+- **Search Response**: < 200ms with debouncing
+- **Card Filtering**: < 100ms client-side processing
 - **Database Size**: ~1.4MB (highly optimized)
 - **Bundle Size**: < 500KB gzipped
 
@@ -342,6 +325,7 @@ CORS_ALLOWED_ORIGINS=http://localhost:3000
 - **Code Splitting**: Dynamic imports for large components
 - **Database Indexing**: Optimized queries for fast search
 - **Caching Strategy**: Intelligent browser and API caching
+- **Debounced Search**: Optimized API calls with smart caching
 
 ## 🤝 Contributing
 
