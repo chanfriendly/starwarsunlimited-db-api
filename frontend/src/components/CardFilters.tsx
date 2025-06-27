@@ -1,4 +1,4 @@
-// frontend/src/components/CardFilters.tsx
+// Fixed frontend/src/components/CardFilters.tsx
 'use client';
 
 import React from 'react';
@@ -19,7 +19,7 @@ interface CardFiltersProps {
     costMax: number;
     sets: string[];
   };
-  onFilterChange: (filters: any) => void;
+  onFiltersChangeAction: (filters: any) => void; // Fixed Server Action naming
   aspects: string[];
   types: string[];
   keywords: string[];
@@ -29,41 +29,48 @@ interface CardFiltersProps {
 
 export function CardFilters({ 
   filters, 
-  onFilterChange, 
+  onFiltersChangeAction, // Fixed naming
   aspects, 
   types, 
   keywords, 
   sets,
   onClose
 }: CardFiltersProps) {
-  console.log("CardFilters - Initial filters prop:", filters);
+  console.log("CardFilters - Current filters:", filters);
+  
   // Toggle a filter value in array
   const toggleArrayFilter = (filterName: string, value: string) => {
     const currentValues = filters[filterName as keyof typeof filters] as string[];
     const newValues = currentValues.includes(value)
       ? currentValues.filter(v => v !== value)
       : [...currentValues, value];
-    onFilterChange({ [filterName]: newValues });
+    
+    // Update the specific filter while preserving all other filters
+    onFiltersChangeAction({ 
+      ...filters,
+      [filterName]: newValues 
+    });
   };
 
-  // Handle cost slider change
-  const handleCostChange = (value: number[]) => {
+  // FIXED: Handle cost slider change - preserve existing filters
+    const handleCostChange = (value: number[]) => {
     console.log("handleCostChange - received value:", value);
     const [newCostMin, newCostMax] = value;
-    console.log("handleCostChange - newCostMin:", newCostMin, "newCostMax:", newCostMax);
-    onFilterChange({ 
+    console.log("handleCostChange - newCostMin:", newCostMin, "newCostMax:", newCostMax);    
+    // IMPORTANT: Merge with existing filters instead of replacing them
+    const updatedFilters = {
+      ...filters, // Preserve all existing filters
       costMin: Math.min(newCostMin, newCostMax), 
       costMax: Math.max(newCostMin, newCostMax) 
-    });
-    console.log("handleCostChange - calling onFilterChange with:", { 
-      costMin: Math.min(newCostMin, newCostMax), 
-      costMax: Math.max(newCostMin, newCostMax) 
-    });
+    };
+    
+    console.log("handleCostChange - calling onFiltersChangeAction with:", updatedFilters);
+    onFiltersChangeAction(updatedFilters);
   };
 
   // Reset all filters
   const resetFilters = () => {
-    onFilterChange({
+    onFiltersChangeAction({
       search: '',
       types: [],
       aspects: [],
@@ -129,7 +136,7 @@ export function CardFilters({
           </div>
         </div>
 
-        {/* Energy Cost */}
+        {/* FIXED: Energy Cost - proper range handling */}
         <div className="mb-6">
           <h3 className="text-white font-medium mb-2">Resource Cost</h3>
           <div className="px-2">
@@ -141,10 +148,13 @@ export function CardFilters({
               onValueChange={handleCostChange}
               className="my-6"
             />
-            {console.log("CardFilters - Slider value prop:", [filters.costMin, filters.costMax])}
             <div className="flex justify-between text-sm text-gray-300">
-                <span>{filters.costMin}</span>
-                <span>{filters.costMax === 10 ? '10+' : filters.costMax}</span>
+              <span>{filters.costMin}</span>
+              <span>{filters.costMax === 10 ? '10+' : filters.costMax}</span>
+            </div>
+            {/* Debug info - remove in production */}
+            <div className="text-xs text-gray-500 mt-1">
+              Range: {filters.costMin} - {filters.costMax}
             </div>
           </div>
         </div>

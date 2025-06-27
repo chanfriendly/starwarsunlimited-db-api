@@ -150,15 +150,15 @@ async def get_cards(
                 conditions.append(f"c.type != :{param_name}")
                 params[param_name] = nt.strip()
         
-        # Add cost filters
+         # Add cost filters - FIXED: Only use energy_cost column
         if costMin is not None:
             conditions.append("c.energy_cost >= :cost_min")
-            params["cost_min"] = costMin
+            params["cost_min"] = int(costMin)
 
         if costMax is not None:
             conditions.append("c.energy_cost <= :cost_max")
-            params["cost_max"] = costMax
-        
+            params["cost_max"] = int(costMax)
+
         # Add keyword filter
         if keyword:
             keyword_list = keyword.split(',')
@@ -195,7 +195,7 @@ async def get_cards(
             if sort == "name":
                 base_sql += " ORDER BY c.name ASC"
             elif sort == "cost":
-                base_sql += " ORDER BY COALESCE(c.energy_cost, c.cost) ASC"
+                base_sql += " ORDER BY c.energy_cost ASC"
         else:
             # Default sort
             base_sql += " ORDER BY c.name ASC"

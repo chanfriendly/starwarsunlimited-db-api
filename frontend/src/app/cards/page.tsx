@@ -1,5 +1,4 @@
-// frontend/src/app/cards/page.tsx - Improved version with better error handling
-
+// Fixed frontend/src/app/cards/page.tsx 
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
@@ -26,12 +25,17 @@ export default function CardBrowser() {
   const [error, setError] = useState<string | null>(null);
   const [showDetail, setShowDetail] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+  const [filterOptionsLoaded, setFilterOptionsLoaded] = useState(false); // FIXED: Only declare once
+
+  // Filter options state
   const [aspects, setAspects] = useState<string[]>([]);
   const [types, setTypes] = useState<string[]>([]);
   const [keywords, setKeywords] = useState<string[]>([]);
   const [sets, setSets] = useState<string[]>([]);
+  // REMOVED: Duplicate filterOptionsLoaded declaration
+  
   const [userCollection, setUserCollection] = useState<Set<string>>(new Set());
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -64,69 +68,11 @@ export default function CardBrowser() {
     };
   }, []);
 
-  // Auth check
-  useEffect(() => {
-    const checkAuthOnLoad = async () => {
-      const token = localStorage.getItem('auth_token');
-      if (token) {
-        try {
-          const response = await fetch('/api/auth/me', {
-            headers: { 'Authorization': `Bearer ${token}` },
-            credentials: 'include'
-          });
-          
-          if (!response.ok) {
-            localStorage.removeItem('auth_token');
-          }
-        } catch (e) {
-          console.error('Error checking auth on page load:', e);
-        }
-      }
-    };
-    
-    checkAuthOnLoad();
-  }, []);
-
-  // Load user collection
-  useEffect(() => {
-    const loadUserCollection = async () => {
-      try {
-        const storedCollection = localStorage.getItem('user_collection');
-        if (storedCollection) {
-          try {
-            const parsed = JSON.parse(storedCollection);
-            if (Array.isArray(parsed)) {
-              setUserCollection(new Set(parsed));
-            }
-          } catch (e) {
-            console.error('Error parsing stored collection:', e);
-          }
-        }
-        
-        if (isAuthenticated) {
-          try {
-            const collection = await fetchUserCollection();
-            if (collection && Array.isArray(collection)) {
-              const collectionIds = collection.map(item => item.card.id);
-              localStorage.setItem('user_collection', JSON.stringify(collectionIds));
-              setUserCollection(new Set(collectionIds));
-            }
-          } catch (err) {
-            console.error('Error fetching collection from API:', err);
-          }
-        }
-      } catch (err) {
-        console.error('Error in collection loading:', err);
-      }
-    };
-    
-    loadUserCollection();
-  }, [isAuthenticated]);
-
-  // Load filter options
+  // STEP 1: Load filter options first
   useEffect(() => {
     const loadFilterOptions = async () => {
       try {
+        console.log('[Cards] Loading filter options...');
         const [aspectsData, typesData, keywordsData, setsData] = await Promise.all([
           fetchAspects(),
           fetchTypes(),
@@ -153,16 +99,76 @@ export default function CardBrowser() {
         if (Array.isArray(typesData)) setTypes(typesData);
         if (Array.isArray(keywordsData)) setKeywords(keywordsData);
         if (Array.isArray(setsData)) setSets(setsData);
+        
+        setFilterOptionsLoaded(true);
+        console.log('[Cards] Filter options loaded successfully');
       } catch (err) {
-        console.error('Error loading filter options:', err);
+        console.error('[Cards] Error loading filter options:', err);
+        setError('Failed to load filter options');
+        // Set to true anyway so we can still load cards
+        setFilterOptionsLoaded(true);
       }
     };
 
     loadFilterOptions();
   }, []);
 
+  // STEP 2: Load user collection (parallel to filter options)
+  useEffect(() => {
+    const loadUserCollection = async () => {
+      try {
+        // Load from localStorage first for immediate UX
+        const storedCollection = localStorage.getItem('user_collection');
+        if (storedCollection) {
+          try {
+            const parsed = JSON.parse(storedCollection);
+            if (Array.isArray(parsed)) {
+              setUserCollection(new Set(parsed));
+            }
+          } catch (e) {
+            console.error('[Cards] Error parsing stored collection:', e);
+          }
+        }
+        
+        // Then load from API if authenticated
+        if (isAuthenticated && !authLoading) {
+          try {
+            const collection = await fetchUserCollection();
+            if (collection && Array.isArray(collection)) {
+              const collectionIds = collection.map(item => item.card.id);
+              localStorage.setItem('user_collection', JSON.stringify(collectionIds));
+              setUserCollection(new Set(collectionIds));
+            }
+          } catch (err) {
+            console.error('[Cards] Error fetching collection from API:', err);
+          }
+        }
+      } catch (err) {
+        console.error('[Cards] Error in collection loading:', err);
+      }
+    };
+
+    if (!authLoading) {
+      loadUserCollection();
+    }
+  }, [isAuthenticated, authLoading]);
+
+  // STEP 3: Load cards ONLY after filter options are ready
+  useEffect(() => {
+    if (filterOptionsLoaded) {
+      console.log('[Cards] Filter options ready, loading initial cards...');
+      loadCards(1, false, filters);
+    }
+  }, [filterOptionsLoaded]); // Only depend on filterOptionsLoaded
+
   // Improved card loading with better error handling
   const loadCards = useCallback(async (page = 1, append = false, searchFilters = filters) => {
+    // Don't start loading if filter options aren't ready yet
+    if (!filterOptionsLoaded) {
+      console.log('[Cards] Waiting for filter options before loading cards...');
+      return;
+    }
+
     // Abort previous request if it exists
     if (searchAbortController.current) {
       searchAbortController.current.abort();
@@ -179,6 +185,8 @@ export default function CardBrowser() {
       } else if (append) {
         setIsLoadingMore(true);
       }
+      
+      console.log('[Cards] Loading cards with filters:', searchFilters);
       
       // Prepare filter parameters with better sanitization
       const params = {
@@ -204,14 +212,16 @@ export default function CardBrowser() {
       }
       
       if (page === 1 || !append) {
-        setCards(response.data);
+        setCards(response.data || []);
       } else {
-        setCards(prevCards => [...prevCards, ...response.data]);
+        setCards(prevCards => [...prevCards, ...(response.data || [])]);
       }
       
-      setTotalPages(response.meta.pages);
-      setTotalCards(response.meta.total);
+      setTotalPages(response.meta?.pages || 1);
+      setTotalCards(response.meta?.total || 0);
       setCurrentPage(page);
+      
+      console.log('[Cards] Successfully loaded', response.data?.length || 0, 'cards');
       
     } catch (err: any) {
       // Don't show error if request was aborted (normal behavior)
@@ -219,9 +229,9 @@ export default function CardBrowser() {
         return;
       }
       
-      console.error('Error loading cards:', err);
+      console.error('[Cards] Error loading cards:', err);
       if (!isUnmounted.current) {
-        setError('Failed to load cards. Please try again later.');
+        setError('Failed to load cards. Please try again.');
       }
     } finally {
       if (!isUnmounted.current) {
@@ -229,204 +239,171 @@ export default function CardBrowser() {
         setIsLoadingMore(false);
       }
     }
-  }, [filters]);
+  }, [filterOptionsLoaded, filters]);
 
-  // Improved debounced search with cleanup
-  const debouncedLoadCards = useMemo(
-    () => debounce((newFilters: typeof filters) => {
-      setCurrentPage(1);
+  // Debounced search handling
+  const debouncedSearch = useMemo(
+    () => debounce((newFilters) => {
+      console.log('[Cards] Debounced search triggered:', newFilters);
       loadCards(1, false, newFilters);
-    }, 400),
+    }, 500),
     [loadCards]
   );
 
-  // Cleanup debounced function
-  useEffect(() => {
-    return () => {
-      debouncedLoadCards.cancel();
-    };
-  }, [debouncedLoadCards]);
+  // Handle filter changes - FIXED: proper filter merging
+  const handleFilterChange = useCallback((newFilters: typeof filters) => {
+    console.log('[Cards] Filter change received:', newFilters);
+    console.log('[Cards] Current filters:', filters);
+    
+    // Merge new filters with existing ones
+    const mergedFilters = { ...filters, ...newFilters };
+    console.log('[Cards] Merged filters:', mergedFilters);
+    
+    setFilters(mergedFilters);
+    setCurrentPage(1);
+    debouncedSearch(mergedFilters);
+  }, [debouncedSearch, filters]);
 
-  // Load cards when filters change
-  useEffect(() => {
-    debouncedLoadCards(filters);
-  }, [filters, debouncedLoadCards]);
-
-  // Card selection handlers
-  const handleCardClick = useCallback((card: ApiCard) => {
+  // Handle card selection
+  const handleCardSelect = useCallback((card: ApiCard) => {
     setSelectedCard(card);
     setShowDetail(true);
   }, []);
 
-  const handleFilterChange = useCallback((newFilters: any) => {
-    setFilters(prevFilters => ({ ...prevFilters, ...newFilters }));
-  }, []);
-  
-  const handleLoadMore = useCallback(() => {
-    if (currentPage < totalPages && !isLoadingMore) {
-      loadCards(currentPage + 1, true, filters);
-    }
-  }, [currentPage, totalPages, isLoadingMore, loadCards, filters]);
+  // FIXED: Convert userCollection Set to isInCollection function for CardGrid
+  const isInCollection = useCallback((cardId: string) => {
+    return userCollection.has(cardId);
+  }, [userCollection]);
+
+  // Cleanup debounced function
+  useEffect(() => {
+    return () => {
+      debouncedSearch.cancel();
+    };
+  }, [debouncedSearch]);
+
+  // Loading state UI
+  if (loading && !filterOptionsLoaded) {
+    return (
+      <div className="container mx-auto py-8">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <Loader className="h-8 w-8 animate-spin mx-auto mb-4" />
+            <p className="text-lg font-medium">Loading card database...</p>
+            <p className="text-sm text-muted-foreground mt-2">
+              Preparing filters and card data
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state UI
+  if (error && !cards.length) {
+    return (
+      <div className="container mx-auto py-8">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <p className="text-lg font-medium text-red-600 mb-4">{error}</p>
+            <Button 
+              onClick={() => {
+                setError(null);
+                loadCards(1, false, filters);
+              }}
+            >
+              Try Again
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      {/* Header Section */}
-      <section className="py-8 px-4">
-        <div className="max-w-7xl mx-auto">
-          <h1 className="text-4xl md:text-5xl font-bold mb-4 text-white">
-            <span className="bg-gradient-to-r from-purple-500 via-pink-500 to-orange-500 bg-clip-text text-transparent">
-              Card Browser
-            </span>
-          </h1>
-          <p className="text-xl text-gray-300 max-w-3xl">
-            Explore the complete Star Wars Unlimited card collection. Use the filters to find exactly what you need for your next deck.
+    <div className="container mx-auto py-8">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Card Browser</h1>
+          <p className="text-muted-foreground mt-2">
+            Browse all {totalCards.toLocaleString()} Star Wars Unlimited cards
           </p>
         </div>
-      </section>
-
-      {/* Search and Filters Section */}
-      <section className="py-4 px-4 bg-gray-950">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex flex-col md:flex-row gap-4 items-center">
-            <div className="relative flex-grow">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search by card name or text..."
-                className="w-full bg-gray-900 border border-gray-800 rounded-lg py-2 pl-10 pr-4 text-white"
-                value={filters.search}
-                onChange={(e) => handleFilterChange({ search: e.target.value })}
-              />
-            </div>
-            
-            <Button 
-              className="md:hidden w-full flex items-center justify-center space-x-2 bg-purple-600"
-              onClick={() => setShowFilters(!showFilters)}
-            >
-              <Filter className="w-4 h-4" />
-              <span>Filters</span>
-            </Button>
-            
-            <div className="text-gray-300 text-sm">
-              {loading && currentPage === 1 ? 'Loading...' : `${totalCards} cards found`}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Main Content */}
-      <section className="py-6 px-4">
-        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-6">
-          {/* Filters Sidebar */}
-          <div className="hidden md:block">
-            <CardFilters
-              filters={filters}
-              onFilterChange={handleFilterChange}
-              aspects={aspects}
-              types={types}
-              keywords={keywords}
-              sets={sets}
-              onClose={() => setShowFilters(false)}
-            />
-          </div>
-          
-          {/* Mobile Filters Dialog */}
-          <Dialog open={showFilters} onOpenChange={setShowFilters}>
-            <DialogContent className="bg-gray-900 text-white border border-gray-800 sm:max-w-md">
-              <CardFilters
-                filters={filters}
-                onFilterChange={handleFilterChange}
-                aspects={aspects}
-                types={types}
-                keywords={keywords}
-                sets={sets}
-                onClose={() => setShowFilters(false)}
-              />
-            </DialogContent>
-          </Dialog>
-
-          {/* Card Grid */}
-          <div className="md:col-span-3">
-            {loading && currentPage === 1 ? (
-              <div className="flex items-center justify-center h-96">
-                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
-              </div>
-            ) : error ? (
-              <div className="bg-red-900/20 border border-red-800 rounded-lg p-6 text-center">
-                <p className="text-red-400 mb-3">{error}</p>
-                <Button 
-                  onClick={() => {
-                    setError(null);
-                    loadCards(1, false, filters);
-                  }} 
-                  variant="outline" 
-                  className="border-red-700 hover:bg-red-800/30"
-                >
-                  Try Again
-                </Button>
-              </div>
-            ) : cards.length === 0 ? (
-              <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-10 text-center">
-                <p className="text-gray-400 mb-3">No cards found matching your filters.</p>
-                <Button 
-                  onClick={() => setFilters({
-                    search: '',
-                    types: [],
-                    aspects: [],
-                    keywords: [],
-                    costMin: 0,
-                    costMax: 10,
-                    sets: []
-                  })} 
-                  variant="outline"
-                >
-                  Reset Filters
-                </Button>
-              </div>
-            ) : (
-              <>
-                <CardGrid
-                  cards={cards}
-                  onCardClickAction={handleCardClick}
-                  isInCollection={(cardId) => userCollection.has(cardId)}
-                />
         
-                {/* Load More Button */}
-                {currentPage < totalPages && (
-                  <div className="flex justify-center mt-8">
-                    <Button
-                      onClick={handleLoadMore}
-                      disabled={isLoadingMore}
-                      className="bg-purple-600 hover:bg-purple-700 text-white"
-                    >
-                      {isLoadingMore ? (
-                        <span className="flex items-center">
-                          <span className="animate-spin mr-2 h-4 w-4 border-t-2 border-b-2 border-white rounded-full"></span>
-                          Loading more cards...
-                        </span>
-                      ) : (
-                        'Load More Cards'
-                      )}
-                    </Button>
-                  </div>
-                )}
-              </>
-            )}
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowFilters(!showFilters)}
+            className="gap-2"
+          >
+            <Filter className="h-4 w-4" />
+            Filters
+          </Button>
+        </div>
+      </div>
+
+      {/* Filters */}
+      {showFilters && (
+        <div className="mb-8">
+          <CardFilters
+            filters={filters}
+            onFiltersChangeAction={handleFilterChange}
+            aspects={aspects}
+            types={types}
+            keywords={keywords}
+            sets={sets}
+          />
+        </div>
+      )}
+
+      {/* Cards Grid */}
+      {loading ? (
+        <div className="flex items-center justify-center py-12">
+          <div className="text-center">
+            <Loader className="h-8 w-8 animate-spin mx-auto mb-4" />
+            <p>Loading cards...</p>
           </div>
         </div>
-      </section>
+      ) : (
+        <CardGrid
+          cards={cards}
+          onCardClickAction={handleCardSelect}
+          isInCollection={isInCollection}
+        />
+      )}
 
-      {/* Card Detail Modal */}
-      {selectedCard && (
-        <Dialog open={showDetail} onOpenChange={setShowDetail}>
-          <DialogContent className="bg-gray-900 text-white border border-gray-800 sm:max-w-lg">
+      {/* Load More Button */}
+      {currentPage < totalPages && !loading && (
+        <div className="flex justify-center mt-8">
+          <Button
+            onClick={() => loadCards(currentPage + 1, true, filters)}
+            disabled={isLoadingMore}
+          >
+            {isLoadingMore ? (
+              <>
+                <Loader className="h-4 w-4 animate-spin mr-2" />
+                Loading...
+              </>
+            ) : (
+              'Load More Cards'
+            )}
+          </Button>
+        </div>
+      )}
+
+      {/* Card Detail Dialog */}
+      <Dialog open={showDetail} onOpenChange={setShowDetail}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          {selectedCard && (
             <CardDetailDialog
               card={selectedCard}
               onClose={() => setShowDetail(false)}
             />
-          </DialogContent>
-        </Dialog>
-      )}
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
