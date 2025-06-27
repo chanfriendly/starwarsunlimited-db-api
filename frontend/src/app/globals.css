@@ -1,9 +1,10 @@
 /* src/app/globals.css */
 @import "tailwindcss";
 
+/* Force dark theme regardless of system preferences */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0a0a0a;
+  --foreground: #ededed;
 }
 
 @theme inline {
@@ -13,13 +14,8 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+/* Remove the media query that was causing the light mode default */
+/* This ensures the app is always in dark mode */
 body {
   background: var(--background);
   color: var(--foreground);

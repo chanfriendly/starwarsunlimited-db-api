@@ -16,56 +16,61 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 def group_cards_by_identity(cards):
-    """Group cards by name and subtitle to handle variants/special editions with different art."""
-    logger.debug(f"Starting group_cards_by_identity with {len(cards)} cards.")
+    """Group cards by a composite key of name, subtitle, type, and traits."""
+    logger.info(f"Starting card grouping for {len(cards)} cards.")
     grouped = {}
     for card in cards:
-        card_id = card.get('id')
-        card_name = card.get('name')
-        card_subtitle = card.get('subtitle')
-        logger.debug(f"Processing card: ID={card_id}, Name='{card_name}', Subtitle='{card_subtitle}'")
-
-        card_subtitle = card.get('subtitle')
-        # Normalize empty string subtitles to None for consistent grouping
-        if card_subtitle == '':
-            card_subtitle = None
-
-        grouping_key = (card_name, card_subtitle)
-        logger.debug(f"Generated grouping_key: {grouping_key}")
+        # Ensure traits are a sorted tuple for consistent hashing
+        traits = tuple(sorted(card.get('traits', [])))
+        
+        # Create a composite key
+        grouping_key = (
+            card.get('name'),
+            card.get('subtitle'),
+            card.get('type'),
+            traits
+        )
+        
+        # Log the exact data being used for grouping for each card
+        logger.info(
+            f"Processing Card ID: {card.get('id')}, "
+            f"Name: {card.get('name')}, "
+            f"Subtitle: {card.get('subtitle')}, "
+            f"Type: {card.get('type')}, "
+            f"Traits: {traits}, "
+            f"--> Grouping Key: {grouping_key}"
+        )
 
         if grouping_key not in grouped:
-            grouped[grouping_key] = {
-                'primary': card,
-                'variants': []
-            }
-            logger.debug(f"New group created for {grouping_key}. Primary card ID: {card_id}")
+            # This is the first time we see this key. This card becomes the primary.
+            # Initialize its alternate_arts list.
+            card['alternate_arts'] = []
+            grouped[grouping_key] = card
+            logger.info(f"Created new group for key: {grouping_key} with primary card ID: {card.get('id')}")
         else:
-            grouped[grouping_key]['variants'].append(card)
-            logger.debug(f"Card ID {card_id} added as variant to group {grouping_key}.")
+            # This key already exists. The current card is an alternate art of the primary.
+            primary_card = grouped[grouping_key]
+            
+            # Create a dictionary for the alternate art with specific fields
+            alternate_art_info = {
+                "id": card.get('id'),
+                "image_uri": card.get('image_uri'),
+                "image_url": card.get('image_url'),
+                "set_name": card.get('set_name'),
+                "set_code": card.get('set_code'),
+                "card_number": card.get('card_number'),
+                "rarity": card.get('rarity'),
+                "artist": card.get('artist'),
+            }
+            
+            # Add the alternate art info to the primary card's list
+            primary_card['alternate_arts'].append(alternate_art_info)
+            logger.info(f"Added variant ID {card.get('id')} to group with key: {grouping_key}")
 
-    final_grouped_cards = []
-    for key, data in grouped.items():
-        primary_card = data['primary']
-        # Ensure the primary card itself is not in the alternate_arts list
-        alternate_arts = []
-        for v in data['variants']:
-            if v.get('id') != primary_card.get('id'):
-                alternate_arts.append({
-                    "id": v.get('id'),
-                    "image_uri": v.get('image_uri'),
-                    "image_url": v.get('image_url'),
-                    "set_name": v.get('set_name'),
-                    "set_code": v.get('set_code'),
-                    "card_number": v.get('card_number'),
-                    "rarity": v.get('rarity'),
-                    "artist": v.get('artist'),
-                })
-        primary_card['alternate_arts'] = alternate_arts  # Add alternate_arts to the primary card dictionary
-        final_grouped_cards.append(primary_card)
-        logger.debug(f"Final group for {key}: Primary ID={primary_card.get('id')}, Alternate Arts IDs={[v.get('id') for v in alternate_arts]}")
-
-    logger.debug(f"Finished group_cards_by_identity. Returning {len(final_grouped_cards)} grouped cards.")
-    return final_grouped_cards
+    # The values of the dictionary are the fully formed primary cards with their variants
+    final_list = list(grouped.values())
+    logger.info(f"Finished grouping. Result contains {len(final_list)} unique cards.")
+    return final_list
 
 
 @router.get("/")
@@ -190,15 +195,29 @@ async def get_cards(
             base_sql += " AND " + " AND ".join(conditions)
         
         # Add sorting
+        order_by_clause = ""
         if sort:
-            # Simple sort handling - could be expanded
-            if sort == "name":
-                base_sql += " ORDER BY c.name ASC"
-            elif sort == "cost":
-                base_sql += " ORDER BY c.energy_cost ASC"
+            sort_map = {
+                "name_asc": "c.name ASC",
+                "name_desc": "c.name DESC",
+                "cost_asc": "c.energy_cost ASC, c.name ASC",
+                "cost_desc": "c.energy_cost DESC, c.name ASC",
+                "type_asc": "c.type ASC, c.name ASC",
+                "set_newest": "c.set_code DESC, c.card_number ASC",
+                "set_oldest": "c.set_code ASC, c.card_number ASC",
+                "rarity_rare": "CASE c.rarity WHEN 'Legendary' THEN 1 WHEN 'Rare' THEN 2 WHEN 'Uncommon' THEN 3 WHEN 'Common' THEN 4 ELSE 5 END, c.name ASC",
+                "rarity_common": "CASE c.rarity WHEN 'Common' THEN 1 WHEN 'Uncommon' THEN 2 WHEN 'Rare' THEN 3 WHEN 'Legendary' THEN 4 ELSE 5 END, c.name ASC"
+            }
+            if sort in sort_map:
+                order_by_clause = f" ORDER BY {sort_map[sort]}"
+            else:
+                # Default sort if sort param is invalid
+                order_by_clause = " ORDER BY c.name ASC"
         else:
             # Default sort
-            base_sql += " ORDER BY c.name ASC"
+            order_by_clause = " ORDER BY c.name ASC"
+
+        base_sql += order_by_clause
         
         # Count query for pagination
         count_sql = base_sql.replace("SELECT c.*", "SELECT COUNT(*)")

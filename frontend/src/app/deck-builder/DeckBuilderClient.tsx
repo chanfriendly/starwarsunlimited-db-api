@@ -119,14 +119,14 @@ export default function DeckBuilderClient() {
         console.log(`[API] Fetching cards: Stage=${currentStage}, Page=${page}, Append=${append}, Search='${currentSearch}'`);
         
         const params: FetchCardsParams = { 
-            page: page.toString(), 
-            limit: CARDS_PER_PAGE.toString(), 
-            search: currentSearch || undefined 
-        };
-        
-        if (currentStage === 'leaders') params.type = 'Leader';
-        else if (currentStage === 'base') params.type = 'Base';
-        else if (currentStage === 'cards') params.not_type = 'Leader,Base';
+        page: page.toString(), 
+        limit: CARDS_PER_PAGE.toString(), 
+        search: currentSearch || undefined 
+    };
+    
+    if (currentStage === 'leaders') params.type = 'Leader';
+    else if (currentStage === 'base') params.type = 'Base';
+    else if (currentStage === 'cards') params.type = 'Unit,Event,Upgrade'; // Only fetch main card types
         
         try {
             const response = await fetchCards(params);
@@ -242,12 +242,11 @@ export default function DeckBuilderClient() {
                     
                     // Add Cards - need to handle the backend format
                     if (Array.isArray(deckData.cards)) {
-                        deckData.cards.forEach((cardItem: {card_id: string, quantity: number, card?: CardType}) => { 
-                            // Use the embedded card data if available
+                        deckData.cards.forEach((cardItem: { card: CardType; quantity: number }) => {
                             if (cardItem.card?.id) {
-                                addCard(cardItem.card); 
+                                addCard(cardItem.card);
                             } else {
-                                console.error("[DEBUG] Invalid card format - missing card data:", cardItem); 
+                                console.error("[DEBUG] Invalid card format - missing card data:", cardItem);
                             }
                         });
                     }
@@ -434,7 +433,7 @@ export default function DeckBuilderClient() {
                             <div key={`leader-${leader.id}`} className="relative max-w-xs group cursor-pointer" onClick={() => setSelectedCard(leader)}>
                                 <div className="aspect-[7/10] relative rounded-lg overflow-hidden border-2 border-purple-500 bg-gray-800">
                                     <img 
-                                        src={leader.image_uri ?? leader.image_url ?? '/placeholder-card.png'} 
+                                        src={leader.image_uri ?? '/placeholder-card.png'} 
                                         alt={leader.name} 
                                         className="w-full h-full object-contain" 
                                         onError={(e) => { 
@@ -490,7 +489,7 @@ export default function DeckBuilderClient() {
                         <div className="relative max-w-xs group cursor-pointer" onClick={() => setSelectedCard(base)}>
                             <div className="aspect-[7/10] relative rounded-lg overflow-hidden border-2 border-purple-500 bg-gray-800">
                                 <img 
-                                    src={base.image_uri ?? base.image_url ?? '/placeholder-card.png'} 
+                                    src={base.image_uri ?? '/placeholder-card.png'} 
                                     alt={base.name} 
                                     className="w-full h-full object-contain" 
                                     onError={(e) => { 
@@ -550,7 +549,7 @@ export default function DeckBuilderClient() {
                                 <div key={`deck-${card.id}`} className="relative group cursor-pointer" onClick={() => setSelectedCard(card)}>
                                     <div className="aspect-[7/10] relative rounded-lg overflow-hidden border border-gray-700 hover:border-purple-500 transition-colors bg-gray-800">
                                         <img 
-                                            src={card.image_uri ?? card.image_url ?? '/placeholder-card.png'} 
+                                            src={card.image_uri ?? '/placeholder-card.png'} 
                                             alt={card.name} 
                                             className="w-full h-full object-contain" 
                                             onError={(e) => { 
@@ -750,12 +749,12 @@ export default function DeckBuilderClient() {
                                         <CardGrid 
                                             key={`card-grid-${currentStage}-${searchQuery}-${cardTypeFilter}-${showAllCards}-${hideCardsInDeck}`} 
                                             cards={displayedCards} 
-                                            onCardClickAction={handleCardClick}        // ✅ FIXED: Changed from onCardClick
-                                            onDoubleClickAction={handleCardDoubleClick} 
-                                            selectedCardId={selectedCard?.id} 
-                                            isCompatible={isCardInAspect} 
+                                            onCardClickAction={handleCardClick}
+                                            // selectedCardId prop removed as it's not supported by CardGridProps
+                                            // isCompatible prop removed as it's not supported by CardGridProps
                                             isInDeck={isCardIdInDeck} 
-                                            currentStage={currentStage} 
+                                            // currentStage prop removed as it's not supported by CardGridProps
+                                            // Removed onDoubleClickAction prop as it's not supported by CardGridProps
                                         />
                                         {hasMoreCards && displayedCards.length > 0 && (
                                             <div ref={lastCardElementRef} style={{ height: '10px', background: 'transparent' }} />

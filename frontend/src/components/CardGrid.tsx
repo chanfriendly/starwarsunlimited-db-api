@@ -1,266 +1,270 @@
-// frontend/src/components/CardGrid.tsx - Improved with mobile tap-to-add
-
+// Fixed frontend/src/components/CardGrid.tsx - Correct Property Names
 'use client';
-import React, { useCallback, useState, useEffect } from 'react';
-import { Card } from '@/lib/api';
-import { cn } from '@/lib/utils';
-import { Plus, Check, Eye } from 'lucide-react';
+
+import React, { useState, useCallback } from 'react';
+import { ApiCard } from '@/lib/api';
+import { ChevronLeft, ChevronRight, Image } from 'lucide-react';
 
 interface CardGridProps {
-  cards: GroupedCard[];
-  onCardClickAction: (card: Card) => void; // Changed from onCardClick
-  selectedCardId?: string;
-  isCompatible?: (card: Card) => boolean;
-  isInDeck?: (cardId: string) => boolean;
-  onDoubleClickAction?: (card: Card) => void; // Changed from onDoubleClick
-  currentStage?: 'leaders' | 'base' | 'cards';
-  hideCardsInDeck?: boolean;
+  cards: ApiCard[];
+  onCardClickAction: (card: ApiCard) => void;
   isInCollection?: (cardId: string) => boolean;
-  onAddToCollectionAction?: (cardId: string) => Promise<void>; // Changed from onAddToCollection
+  hideCardsInDeck?: boolean;
+  isInDeck?: (cardId: string) => boolean;
+  compatibleCards?: Set<string>;
 }
 
 export function CardGrid({ 
   cards, 
-  onCardClickAction: onCardClick, // Rename for internal use
-  selectedCardId, 
-  isCompatible,
-  isInDeck,
-  onDoubleClickAction: onDoubleClick, // Rename for internal use
-  currentStage = 'cards',
-  hideCardsInDeck = false,
+  onCardClickAction, 
   isInCollection,
-  onAddToCollectionAction: onAddToCollection // Rename for internal use
+  hideCardsInDeck = false,
+  isInDeck,
+  compatibleCards
 }: CardGridProps) {
+  // Track selected art variants for each card
+  const [selectedArtVariants, setSelectedArtVariants] = useState<Record<string, number>>({});
   
-  const [isMobile, setIsMobile] = useState(false);
-  const [addingToCollection, setAddingToCollection] = useState<Set<string>>(new Set());
-  const [recentlyAdded, setRecentlyAdded] = useState<Set<string>>(new Set());
-  const [selectedArtId, setSelectedArtId] = useState<string | null>(null);
-
-  // Detect if device is mobile
-  useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768 || 'ontouchstart' in window);
-    };
-    
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
-
-  // Handle card interaction - different behavior for mobile vs desktop
-  const handleCardInteraction = useCallback(async (card: GroupedCard, event: React.MouseEvent) => {
-  event.preventDefault();
-  event.stopPropagation();
-
-  // Determine the actual card object to use (main or selected alternate art)
-  const cardToUse = selectedArtId ? card.alternate_arts?.find(art => art.id === selectedArtId) || card : card;
-
-  if (isMobile && currentStage !== 'cards' && onDoubleClick) {
-    // In deck building stages, directly add on tap
-    onDoubleClick(cardToUse);
-    
-    // Show brief visual feedback
-    setRecentlyAdded(prev => new Set([...prev, cardToUse.id]));
-    setTimeout(() => {
-      setRecentlyAdded(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(cardToUse.id);
-        return newSet;
-      });
-    }, 1500);
-  } else {
-    // Otherwise show details
-    onCardClick(cardToUse);
-  }
-}, [isMobile, currentStage, onDoubleClick, onCardClick, selectedArtId]);
-
-  // Handle double click for desktop
-  const handleDoubleClick = useCallback((card: GroupedCard) => {
-    if (!isMobile && onDoubleClick) {
-      const cardToUse = selectedArtId ? card.alternate_arts?.find(art => art.id === selectedArtId) || card : card;
-      onDoubleClick(cardToUse);
+  // Group cards by name to handle art variants
+  const groupedCards = cards.reduce((acc, card) => {
+    const key = card.name;
+    if (!acc[key]) {
+      acc[key] = [];
     }
-  }, [isMobile, onDoubleClick, selectedArtId]);
+    acc[key].push(card);
+    return acc;
+  }, {} as Record<string, ApiCard[]>);
 
-  // Filter out cards that should be hidden
-  const visibleCards = hideCardsInDeck && isInDeck 
-    ? cards.filter(card => !isInDeck(card.id)) 
-    : cards;
-  
+  // Get the currently selected variant for a card group
+  const getSelectedVariant = useCallback((cardName: string, variants: ApiCard[]) => {
+    const selectedIndex = selectedArtVariants[cardName] || 0;
+    return variants[Math.min(selectedIndex, variants.length - 1)];
+  }, [selectedArtVariants]);
+
+  // Handle art variant cycling
+  const cycleArtVariant = useCallback((cardName: string, variants: ApiCard[], direction: 'next' | 'prev') => {
+    const currentIndex = selectedArtVariants[cardName] || 0;
+    let newIndex;
+    
+    if (direction === 'next') {
+      newIndex = (currentIndex + 1) % variants.length;
+    } else {
+      newIndex = currentIndex === 0 ? variants.length - 1 : currentIndex - 1;
+    }
+    
+    setSelectedArtVariants(prev => ({
+      ...prev,
+      [cardName]: newIndex
+    }));
+  }, [selectedArtVariants]);
+
+  // Create display cards from grouped cards
+  const displayCards = Object.entries(groupedCards).map(([cardName, variants]) => {
+    const selectedCard = getSelectedVariant(cardName, variants);
+    return {
+      ...selectedCard,
+      variants: variants,
+      hasMultipleVariants: variants.length > 1,
+      currentVariantIndex: selectedArtVariants[cardName] || 0
+    };
+  });
+
+  // Filter cards based on deck status if needed
+  const visibleCards = displayCards.filter(card => {
+    if (hideCardsInDeck && isInDeck) {
+      return !isInDeck(card.id);
+    }
+    return true;
+  });
+
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-2">
-      {visibleCards.map((card, index) => {
-        const isSelected = card.id === selectedCardId;
-        const compatible = isCompatible ? isCompatible(card) : true;
-        const inDeck = isInDeck ? isInDeck(card.id) : false;
-        const owned = isInCollection ? isInCollection(card.id) : false;
-        const isAdding = addingToCollection.has(card.id);
-        const wasRecentlyAdded = recentlyAdded.has(card.id);
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+      {visibleCards.map((displayCard) => {
+        const inCollection = isInCollection ? isInCollection(displayCard.id) : false;
+        const inDeck = isInDeck ? isInDeck(displayCard.id) : false;
+        const compatible = compatibleCards ? compatibleCards.has(displayCard.id) : true;
         
-        // Determine the image to display based on selectedArtId or default
-        const displayCard = selectedArtId && card.alternate_arts?.find(art => art.id === selectedArtId) || card;
-
         return (
           <div
-            key={`${card.id}-${index}`}
-            className={cn(
-              "relative cursor-pointer overflow-hidden rounded-lg transition-all duration-200",
-              "border-2 flex-shrink-0 group", 
-              isSelected ? "border-purple-500" : "border-gray-800",
-              !compatible && "opacity-60",
-              inDeck && "opacity-50",
-              isMobile ? "active:scale-95" : "hover:scale-105"
-            )}
-            onClick={(e) => handleCardInteraction(card, e)}
-            onDoubleClick={() => handleDoubleClick(card)}
+            key={`${displayCard.name}-${displayCard.currentVariantIndex}`}
+            className="group relative"
           >
-            {/* Collection Status Indicators */}
-            {owned && (
-              <div className="absolute top-1 right-1 z-20 bg-green-600 text-white text-xs font-bold py-0.5 px-2 rounded shadow-md">
-                Owned
-              </div>
-            )}
+            {/* Main Card Container */}
+            <div
+              className={`
+                relative bg-gray-800 rounded-lg overflow-hidden border transition-all duration-200 cursor-pointer
+                ${compatible ? 'border-gray-700 hover:border-purple-500' : 'border-red-500/50'}
+                ${inCollection ? 'ring-2 ring-green-500/50' : ''}
+                group-hover:shadow-lg group-hover:shadow-purple-500/20
+              `}
+              onClick={() => onCardClickAction(displayCard)}
+            >
+              {/* Card Image - FIXED: Use safe property access */}
+              <div className="aspect-[7/10] relative">
+                {displayCard.image_uri ? (
+                  <img
+                    src={displayCard.image_uri}
+                    alt={displayCard.name}
+                    className={`w-full h-full ${displayCard.type === 'Leader' || displayCard.type === 'Base' ? 'object-contain' : 'object-cover'}`}
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-gray-900 text-gray-500">
+                    <Image className="w-8 h-8" />
+                  </div>
+                )}
 
-            {wasRecentlyAdded && (
-              <div className="absolute top-1 left-1 z-20 bg-green-500 text-white text-xs font-bold py-0.5 px-2 rounded shadow-md flex items-center gap-1">
-                <Check className="w-3 h-3" />
-                Added!
-              </div>
-            )}
+                {/* Art Variant Indicators */}
+                {displayCard.hasMultipleVariants && (
+                  <>
+                    {/* Variant Counter */}
+                    <div className="absolute top-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1">
+                      <Image className="w-3 h-3" />
+                      {displayCard.currentVariantIndex + 1}/{displayCard.variants.length}
+                    </div>
 
-            {/* Mobile Action Overlay */}
-            {isMobile && (
-              <div className="absolute inset-0 bg-black/0 group-active:bg-black/30 flex items-center justify-center opacity-0 group-active:opacity-100 transition-all z-10">
-                <div className="bg-white/90 text-gray-900 text-sm font-medium px-3 py-2 rounded-full flex items-center gap-2">
-                  {onAddToCollection && !owned ? (
-                    <>
-                      {isAdding ? (
-                        <div className="animate-spin w-4 h-4 border-2 border-gray-900 border-t-transparent rounded-full" />
-                      ) : (
-                        <Plus className="w-4 h-4" />
-                      )}
-                      {isAdding ? 'Adding...' : 'Add to Collection'}
-                    </>
-                  ) : currentStage !== 'cards' && onDoubleClick ? (
-                    <>
-                      <Plus className="w-4 h-4" />
-                      Add to Deck
-                    </>
-                  ) : (
-                    <>
-                      <Eye className="w-4 h-4" />
-                      View Details
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
+                    {/* Art Cycling Controls - Show on Hover */}
+                    <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-between px-2 pointer-events-none">
+                      <button
+                        className="p-1 bg-black/70 rounded-full text-white hover:bg-black/90 transition-colors pointer-events-auto"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          cycleArtVariant(displayCard.name, displayCard.variants, 'prev');
+                        }}
+                        title="Previous art variant"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                      
+                      <button
+                        className="p-1 bg-black/70 rounded-full text-white hover:bg-black/90 transition-colors pointer-events-auto"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          cycleArtVariant(displayCard.name, displayCard.variants, 'next');
+                        }}
+                        title="Next art variant"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
 
-            {/* Desktop Hover Tooltip */}
-            {!isMobile && (
-              <div className="absolute inset-0 bg-black/70 flex items-center justify-center opacity-0 group-hover:opacity-80 transition-opacity z-10">
-                <div className="text-white text-sm font-medium px-2 py-1 rounded text-center">
-                  {onDoubleClick ? (
-                    <>
-                      Click to view details<br />
-                      Double-click to {currentStage === 'leaders' ? 'select leader' : currentStage === 'base' ? 'select base' : 'add to deck'}
-                    </>
-                  ) : (
-                    'Click to view details'
-                  )}
-                </div>
-              </div>
-            )}
-            
-            <div className="aspect-[7/10] w-full h-auto relative">
-              {displayCard.image_uri || displayCard.image_url ? (
-                <img
-                  src={displayCard.image_uri || displayCard.image_url || ''}
-                  alt={displayCard.name || 'Card'}
-                  className={cn(
-                    "w-full h-full object-contain",
-                    inDeck && "grayscale"
-                  )}
-                  loading="lazy"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center bg-gray-900">
-                  <span className="text-xs text-center px-2">{displayCard.name}</span>
-                </div>
-              )}
-              
-              {/* Alternate Art Selector */}
-              {card.alternate_arts && card.alternate_arts.length > 0 && (
-                <div className="absolute top-1 left-1 z-20">
-                  <select
-                    className="bg-gray-900 text-white text-xs rounded-full px-1 py-0.5"
-                    onChange={(e) => setSelectedArtId(e.target.value)}
-                    onClick={(e) => e.stopPropagation()} // Prevent card click when selecting art
-                  >
-                    <option value={card.id}>Main Art</option>
-                    {card.alternate_arts.map(art => (
-                      <option key={art.id} value={art.id}>
-                        Alt Art ({art.set_code || art.set_name})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+                    {/* Art Variant Dots */}
+                    <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex space-x-1">
+                      {displayCard.variants.map((_, index) => (
+                        <button
+                          key={index}
+                          className={`w-2 h-2 rounded-full transition-colors ${
+                            index === displayCard.currentVariantIndex 
+                              ? 'bg-purple-500' 
+                              : 'bg-gray-500 hover:bg-gray-400'
+                          }`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedArtVariants(prev => ({
+                              ...prev,
+                              [displayCard.name]: index
+                            }));
+                          }}
+                          title={`Art variant ${index + 1}`}
+                        />
+                      ))}
+                    </div>
+                  </>
+                )}
 
-              {/* Selection overlay */}
-              {isSelected && (
-                <div className="absolute inset-0 bg-purple-500/20 flex items-center justify-center">
-                  <svg 
-                    className="w-10 h-10 text-white" 
-                    fill="none" 
-                    stroke="currentColor" 
-                    viewBox="0 0 24 24"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <path 
-                      strokeLinecap="round" 
-                      strokeLinejoin="round" 
-                      strokeWidth={2} 
-                      d="M5 13l4 4L19 7" 
-                    />
-                  </svg>
-                </div>
-              )}
-              
-              {/* Action hint overlay for leaders and bases */}
-              {(currentStage === 'leaders' || currentStage === 'base') && (
-                <div className="absolute top-1 left-1 bg-purple-500/90 text-white text-xs py-0.5 px-1 rounded-full">
-                  {isMobile ? 'Tap' : 'Click'} to Select
-                </div>
-              )}
-              
-              {/* Compatibility indicator */}
-              {!compatible && (
-                <div className="absolute top-1 right-1 bg-amber-600/90 text-white text-xs py-0.5 px-1 rounded-full">
-                  Out of Aspect
-                </div>
-              )}
+                {/* Collection Status */}
+                {inCollection && (
+                  <div className="absolute top-2 left-2 bg-green-600/90 text-white text-xs py-0.5 px-2 rounded-full">
+                    Owned
+                  </div>
+                )}
 
-              {/* Already in Deck indicator */}
-              {inDeck && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-                  <div className="bg-red-600 text-white text-xs font-bold py-1 px-3 rounded-full transform -rotate-12">
-                    Already in Deck
+                {/* Touch indicator for mobile */}
+                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20 sm:hidden">
+                  <div className="bg-purple-600 text-white text-xs py-1 px-2 rounded-full">
+                    {displayCard.hasMultipleVariants ? 'Tap for Details' : 'Tap to Select'}
                   </div>
                 </div>
-              )}
-              
-              {/* Card type badge */}
-              <div className="absolute bottom-1 left-1 bg-black/70 text-white text-xs py-0.5 px-1 rounded-full">
-                {displayCard.type}
+
+                {/* Compatibility indicator */}
+                {!compatible && (
+                  <div className="absolute top-1 right-1 bg-red-600/90 text-white text-xs py-0.5 px-1 rounded-full">
+                    Out of Aspect
+                  </div>
+                )}
+
+                {/* Already in Deck indicator */}
+                {inDeck && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+                    <div className="bg-red-600 text-white text-xs font-bold py-1 px-3 rounded-full transform -rotate-12">
+                      Already in Deck
+                    </div>
+                  </div>
+                )}
+
+                {/* Card type badge */}
+                <div className="absolute bottom-1 left-1 bg-black/70 text-white text-xs py-0.5 px-1 rounded-full">
+                  {displayCard.type}
+                </div>
+              </div>
+
+              {/* Card Info - FIXED: Use safe property access */}
+              <div className="p-2 bg-gray-900">
+                <h3 className="text-xs font-medium text-white truncate">{displayCard.name}</h3>
+                {displayCard.subtitle && (
+                  <p className="text-xs text-gray-400 truncate mt-0.5">{displayCard.subtitle}</p>
+                )}
+                <div className="flex justify-between items-center mt-1">
+                  <span className="text-xs text-gray-500">{displayCard.set_name || 'Unknown Set'}</span>
+                  {displayCard.energy_cost !== null && displayCard.energy_cost !== undefined && (
+                    <span className="text-xs font-bold text-yellow-400">
+                      {displayCard.energy_cost}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
-            
-            <div className="p-1 bg-gray-900 text-center">
-              <h3 className="text-xs font-medium text-white truncate">{displayCard.name}</h3>
-            </div>
+
+            {/* Art Variants Preview Thumbnails - Show on Hover for Desktop */}
+            {displayCard.hasMultipleVariants && (
+              <div className="absolute -bottom-16 left-0 right-0 opacity-0 group-hover:opacity-100 transition-opacity hidden sm:block pointer-events-none z-10">
+                <div className="flex justify-center space-x-1 p-2 bg-black/90 rounded-lg backdrop-blur-sm">
+                  {displayCard.variants.slice(0, 4).map((variant, index) => (
+                    <div
+                      key={variant.id}
+                      className={`w-8 h-12 rounded border overflow-hidden cursor-pointer pointer-events-auto ${
+                        index === displayCard.currentVariantIndex 
+                          ? 'border-purple-500 ring-1 ring-purple-500' 
+                          : 'border-gray-600 hover:border-gray-400'
+                      }`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedArtVariants(prev => ({
+                          ...prev,
+                          [displayCard.name]: index
+                        }));
+                      }}
+                      title={`Switch to variant ${index + 1}`}
+                    >
+                      <img
+                        src={variant.image_uri || ''}
+                        alt={`${variant.name} variant ${index + 1}`}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          // Hide broken images gracefully
+                          e.currentTarget.style.display = 'none';
+                        }}
+                      />
+                    </div>
+                  ))}
+                  {displayCard.variants.length > 4 && (
+                    <div className="w-8 h-12 rounded border border-gray-600 bg-gray-800 flex items-center justify-center text-gray-400 text-xs">
+                      +{displayCard.variants.length - 4}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         );
       })}

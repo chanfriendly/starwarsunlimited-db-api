@@ -1,12 +1,12 @@
-// Fixed frontend/src/components/CardFilters.tsx
+// Fixed frontend/src/components/CardFilters.tsx - No Slider, Simple Dropdowns
 'use client';
 
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { X } from 'lucide-react';
 
 interface CardFiltersProps {
@@ -15,21 +15,37 @@ interface CardFiltersProps {
     types: string[];
     aspects: string[];
     keywords: string[];
-    costMin: number;
-    costMax: number;
+    costMin: string;
+    costMax: string;
     sets: string[];
   };
-  onFiltersChangeAction: (filters: any) => void; // Fixed Server Action naming
+  onFiltersChangeAction: (filters: any) => void;
   aspects: string[];
   types: string[];
   keywords: string[];
   sets: string[];
-  onClose?: () => void;
+  onClose?: () => void; // Only used for mobile overlay
 }
+
+// Cost options for dropdowns - FIXED: No empty string values
+const COST_OPTIONS = [
+  { value: 'any', label: 'Any' },
+  { value: '0', label: '0' },
+  { value: '1', label: '1' },
+  { value: '2', label: '2' },
+  { value: '3', label: '3' },
+  { value: '4', label: '4' },
+  { value: '5', label: '5' },
+  { value: '6', label: '6' },
+  { value: '7', label: '7' },
+  { value: '8', label: '8' },
+  { value: '9', label: '9' },
+  { value: '10', label: '10+' }
+];
 
 export function CardFilters({ 
   filters, 
-  onFiltersChangeAction, // Fixed naming
+  onFiltersChangeAction,
   aspects, 
   types, 
   keywords, 
@@ -52,60 +68,68 @@ export function CardFilters({
     });
   };
 
-  // FIXED: Handle cost slider change - preserve existing filters
-    const handleCostChange = (value: number[]) => {
-    console.log("handleCostChange - received value:", value);
-    const [newCostMin, newCostMax] = value;
-    console.log("handleCostChange - newCostMin:", newCostMin, "newCostMax:", newCostMax);    
-    // IMPORTANT: Merge with existing filters instead of replacing them
-    const updatedFilters = {
-      ...filters, // Preserve all existing filters
-      costMin: Math.min(newCostMin, newCostMax), 
-      costMax: Math.max(newCostMin, newCostMax) 
-    };
-    
-    console.log("handleCostChange - calling onFiltersChangeAction with:", updatedFilters);
-    onFiltersChangeAction(updatedFilters);
+  // Handle cost filter changes - FIXED: Handle 'any' value properly
+  const handleCostMinChange = (value: string) => {
+    onFiltersChangeAction({
+      ...filters,
+      costMin: value === 'any' ? '' : value
+    });
   };
 
-  // Reset all filters
+  const handleCostMaxChange = (value: string) => {
+    onFiltersChangeAction({
+      ...filters,
+      costMax: value === 'any' ? '' : value
+    });
+  };
+
+  // Reset all filters - FIXED: Use 'any' for cost defaults
   const resetFilters = () => {
     onFiltersChangeAction({
       search: '',
       types: [],
       aspects: [],
       keywords: [],
-      costMin: 0,
-      costMax: 10,
+      costMin: '',
+      costMax: '',
       sets: []
     });
   };
   
   return (
-    <Card className="bg-gray-900 border-gray-800 sticky top-4">
-      <CardHeader className="flex flex-row items-center justify-between border-b border-gray-800">
-        <CardTitle className="text-xl">Filters</CardTitle>
-        {onClose && (
-          <Button variant="ghost" size="icon" onClick={onClose}>
-            <X className="h-5 w-5" />
-          </Button>
-        )}
+    <Card className="bg-gray-900 border-gray-800 h-full shadow-xl">
+      <CardHeader className="border-b border-gray-800 py-4">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-xl text-white">Filters</CardTitle>
+          {onClose && (
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={onClose} 
+              className="text-gray-400 hover:text-white hover:bg-gray-800"
+            >
+              <X className="h-5 w-5" />
+            </Button>
+          )}
+        </div>
       </CardHeader>
-      <CardContent className="py-4 max-h-[80vh] overflow-y-auto">
+      
+      <CardContent className="py-4 space-y-6 overflow-y-auto max-h-[calc(100vh-120px)]">
         {/* Card Types */}
-        <div className="mb-6">
-          <h3 className="text-white font-medium mb-2">Card Types</h3>
-          <div className="grid grid-cols-2 gap-2">
+        <div>
+          <h3 className="text-white font-medium mb-3 text-sm uppercase tracking-wide">Card Types</h3>
+          <div className="space-y-2">
             {types.map((type) => (
               <div key={type} className="flex items-center space-x-2">
                 <Checkbox
                   id={`type-${type}`}
                   checked={filters.types.includes(type)}
                   onCheckedChange={() => toggleArrayFilter('types', type)}
+                  className="border-gray-600 data-[state=checked]:bg-purple-600 data-[state=checked]:border-purple-600"
                 />
                 <Label
                   htmlFor={`type-${type}`}
-                  className="text-sm cursor-pointer"
+                  className="text-sm text-gray-300 cursor-pointer hover:text-white transition-colors"
                 >
                   {type}
                 </Label>
@@ -115,19 +139,20 @@ export function CardFilters({
         </div>
 
         {/* Aspects */}
-        <div className="mb-6">
-          <h3 className="text-white font-medium mb-2">Aspects</h3>
-          <div className="grid grid-cols-2 gap-2">
+        <div>
+          <h3 className="text-white font-medium mb-3 text-sm uppercase tracking-wide">Aspects</h3>
+          <div className="space-y-2">
             {aspects.map((aspect) => (
               <div key={aspect} className="flex items-center space-x-2">
                 <Checkbox
                   id={`aspect-${aspect}`}
                   checked={filters.aspects.includes(aspect)}
                   onCheckedChange={() => toggleArrayFilter('aspects', aspect)}
+                  className="border-gray-600 data-[state=checked]:bg-purple-600 data-[state=checked]:border-purple-600"
                 />
                 <Label
                   htmlFor={`aspect-${aspect}`}
-                  className="text-sm cursor-pointer"
+                  className="text-sm text-gray-300 cursor-pointer hover:text-white transition-colors"
                 >
                   {aspect}
                 </Label>
@@ -136,43 +161,74 @@ export function CardFilters({
           </div>
         </div>
 
-        {/* FIXED: Energy Cost - proper range handling */}
-        <div className="mb-6">
-          <h3 className="text-white font-medium mb-2">Resource Cost</h3>
-          <div className="px-2">
-            <Slider
-              value={[filters.costMin, filters.costMax]}
-              min={0}
-              max={10}
-              step={1}
-              onValueChange={handleCostChange}
-              className="my-6"
-            />
-            <div className="flex justify-between text-sm text-gray-300">
-              <span>{filters.costMin}</span>
-              <span>{filters.costMax === 10 ? '10+' : filters.costMax}</span>
+        {/* Resource Cost - REPLACED SLIDER WITH DROPDOWNS */}
+        <div>
+          <h3 className="text-white font-medium mb-3 text-sm uppercase tracking-wide">Resource Cost</h3>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs text-gray-400 mb-1 block">Minimum Cost</Label>
+              <Select value={filters.costMin || 'any'} onValueChange={handleCostMinChange}>
+                <SelectTrigger className="w-full bg-gray-800 border-gray-700 text-white text-sm">
+                  <SelectValue placeholder="Min cost" />
+                </SelectTrigger>
+                <SelectContent className="bg-gray-800 border-gray-700">
+                  {COST_OPTIONS.map((option) => (
+                    <SelectItem 
+                      key={`min-${option.value}`} 
+                      value={option.value}
+                      className="text-white hover:bg-gray-700"
+                    >
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            {/* Debug info - remove in production */}
-            <div className="text-xs text-gray-500 mt-1">
-              Range: {filters.costMin} - {filters.costMax}
+            
+            <div>
+              <Label className="text-xs text-gray-400 mb-1 block">Maximum Cost</Label>
+              <Select value={filters.costMax || 'any'} onValueChange={handleCostMaxChange}>
+                <SelectTrigger className="w-full bg-gray-800 border-gray-700 text-white text-sm">
+                  <SelectValue placeholder="Max cost" />
+                </SelectTrigger>
+                <SelectContent className="bg-gray-800 border-gray-700">
+                  {COST_OPTIONS.map((option) => (
+                    <SelectItem 
+                      key={`max-${option.value}`} 
+                      value={option.value}
+                      className="text-white hover:bg-gray-700"
+                    >
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
+            
+            {/* Display current filter - FIXED: Handle empty string display */}
+            {(filters.costMin || filters.costMax) && (
+              <div className="text-xs text-purple-400 bg-purple-900/20 px-2 py-1 rounded">
+                Cost: {filters.costMin || 'Any'} - {filters.costMax || 'Any'}
+              </div>
+            )}
           </div>
         </div>
 
         {/* Keywords */}
-        <div className="mb-6">
-          <h3 className="text-white font-medium mb-2">Keywords</h3>
-          <div className="grid grid-cols-2 gap-2">
+        <div>
+          <h3 className="text-white font-medium mb-3 text-sm uppercase tracking-wide">Keywords</h3>
+          <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
             {keywords.map((keyword) => (
               <div key={keyword} className="flex items-center space-x-2">
                 <Checkbox
                   id={`keyword-${keyword}`}
                   checked={filters.keywords.includes(keyword)}
                   onCheckedChange={() => toggleArrayFilter('keywords', keyword)}
+                  className="border-gray-600 data-[state=checked]:bg-purple-600 data-[state=checked]:border-purple-600"
                 />
                 <Label 
                   htmlFor={`keyword-${keyword}`}
-                  className="text-sm text-gray-300 cursor-pointer"
+                  className="text-sm text-gray-300 cursor-pointer hover:text-white transition-colors"
                 >
                   {keyword}
                 </Label>
@@ -182,19 +238,20 @@ export function CardFilters({
         </div>
 
         {/* Sets */}
-        <div className="mb-6">
-          <h3 className="text-white font-medium mb-2">Sets</h3>
-          <div className="grid grid-cols-2 gap-2">
+        <div>
+          <h3 className="text-white font-medium mb-3 text-sm uppercase tracking-wide">Sets</h3>
+          <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
             {sets.map((set) => (
               <div key={set} className="flex items-center space-x-2">
                 <Checkbox
                   id={`set-${set}`}
                   checked={filters.sets.includes(set)}
                   onCheckedChange={() => toggleArrayFilter('sets', set)}
+                  className="border-gray-600 data-[state=checked]:bg-purple-600 data-[state=checked]:border-purple-600"
                 />
                 <Label
                   htmlFor={`set-${set}`}
-                  className="text-sm cursor-pointer"
+                  className="text-sm text-gray-300 cursor-pointer hover:text-white transition-colors"
                 >
                   {set}
                 </Label>
@@ -203,13 +260,27 @@ export function CardFilters({
           </div>
         </div>
 
+        {/* Active Filters Summary */}
+        {(filters.types.length > 0 || filters.aspects.length > 0 || filters.keywords.length > 0 || filters.sets.length > 0 || filters.costMin || filters.costMax) && (
+          <div className="border-t border-gray-800 pt-4">
+            <h4 className="text-white font-medium mb-2 text-sm">Active Filters</h4>
+            <div className="text-xs text-gray-400 space-y-1">
+              {filters.types.length > 0 && <div>Types: {filters.types.length}</div>}
+              {filters.aspects.length > 0 && <div>Aspects: {filters.aspects.length}</div>}
+              {filters.keywords.length > 0 && <div>Keywords: {filters.keywords.length}</div>}
+              {filters.sets.length > 0 && <div>Sets: {filters.sets.length}</div>}
+              {(filters.costMin || filters.costMax) && <div>Cost Range: Yes</div>}
+            </div>
+          </div>
+        )}
+
         {/* Reset Button */}
         <Button 
           onClick={resetFilters} 
           variant="outline" 
-          className="w-full mt-4 border-gray-700 hover:bg-gray-800 !text-gray-900 hover:text-white"
+          className="w-full border-gray-700 hover:bg-gray-800 text-gray-300 hover:text-white transition-colors"
         >
-          Reset Filters
+          Reset All Filters
         </Button>
       </CardContent>
     </Card>

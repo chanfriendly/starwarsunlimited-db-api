@@ -21,7 +21,7 @@ def enrich_card_with_relationships(db, card_dict):
     card_dict["keywords"] = [k[0] for k in keywords]
     
     # Get traits
-    traits_query = text("SELECT trait FROM card_traits WHERE card_id = :card_id")
+    traits_query = text("SELECT trait FROM card_traits WHERE card_id = :card_id ORDER BY trait")
     traits = db.execute(traits_query, {"card_id": card_id}).fetchall()
     card_dict["traits"] = [t[0] for t in traits]
     
