@@ -15,6 +15,59 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+def group_cards_by_identity(cards):
+    """Group cards by name and subtitle to handle variants/special editions with different art."""
+    logger.debug(f"Starting group_cards_by_identity with {len(cards)} cards.")
+    grouped = {}
+    for card in cards:
+        card_id = card.get('id')
+        card_name = card.get('name')
+        card_subtitle = card.get('subtitle')
+        logger.debug(f"Processing card: ID={card_id}, Name='{card_name}', Subtitle='{card_subtitle}'")
+
+        card_subtitle = card.get('subtitle')
+        # Normalize empty string subtitles to None for consistent grouping
+        if card_subtitle == '':
+            card_subtitle = None
+
+        grouping_key = (card_name, card_subtitle)
+        logger.debug(f"Generated grouping_key: {grouping_key}")
+
+        if grouping_key not in grouped:
+            grouped[grouping_key] = {
+                'primary': card,
+                'variants': []
+            }
+            logger.debug(f"New group created for {grouping_key}. Primary card ID: {card_id}")
+        else:
+            grouped[grouping_key]['variants'].append(card)
+            logger.debug(f"Card ID {card_id} added as variant to group {grouping_key}.")
+
+    final_grouped_cards = []
+    for key, data in grouped.items():
+        primary_card = data['primary']
+        # Ensure the primary card itself is not in the alternate_arts list
+        alternate_arts = []
+        for v in data['variants']:
+            if v.get('id') != primary_card.get('id'):
+                alternate_arts.append({
+                    "id": v.get('id'),
+                    "image_uri": v.get('image_uri'),
+                    "image_url": v.get('image_url'),
+                    "set_name": v.get('set_name'),
+                    "set_code": v.get('set_code'),
+                    "card_number": v.get('card_number'),
+                    "rarity": v.get('rarity'),
+                    "artist": v.get('artist'),
+                })
+        primary_card['alternate_arts'] = alternate_arts  # Add alternate_arts to the primary card dictionary
+        final_grouped_cards.append(primary_card)
+        logger.debug(f"Final group for {key}: Primary ID={primary_card.get('id')}, Alternate Arts IDs={[v.get('id') for v in alternate_arts]}")
+
+    logger.debug(f"Finished group_cards_by_identity. Returning {len(final_grouped_cards)} grouped cards.")
+    return final_grouped_cards
+
+
 @router.get("/")
 async def get_cards(
     db: Session = Depends(get_card_db),
@@ -28,9 +81,11 @@ async def get_cards(
     costMax: Optional[int] = Query(None, description="Maximum cost filter"),
     keyword: Optional[str] = Query(None, description="Filter by keywords (comma-separated)"),
     set: Optional[str] = Query(None, description="Filter by sets (comma-separated)"),
-    sort: Optional[str] = None
+    sort: Optional[str] = None,
+    structured: Optional[bool] = None # Added to acknowledge frontend parameter
 ):
     """Get cards with flexible filtering options."""
+    logger.info(f"Starting get_cards request with page={page}, limit={limit}, search={search}, type={type}, aspect={aspect}, costMin={costMin}, costMax={costMax}")
     try:
         # Initialize params dictionary and conditions list
         params = {}
@@ -162,7 +217,9 @@ async def get_cards(
         logger.debug(f"Executing SQL: {base_sql}")
         logger.debug(f"With params: {params}")
         
+        logger.info("Executing database query...")
         result = db.execute(text(base_sql), params)
+        logger.info("Database query executed.")
         
         # Process results
         columns = result.keys()
@@ -181,9 +238,14 @@ async def get_cards(
             # Add relationship data
             cards.append(enrich_card_with_relationships(db, card))
         
+        # Group cards by identity
+        grouped_cards = group_cards_by_identity(cards)
+
+        logger.info(f"Finished get_cards request. Total cards: {total}, Grouped cards: {len(grouped_cards)}")
+        
         # Return results with pagination info
         return {
-            "data": cards,
+            "data": grouped_cards,
             "meta": {
                 "total": total,
                 "page": page,

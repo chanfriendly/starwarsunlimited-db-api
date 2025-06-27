@@ -9,45 +9,33 @@ interface SliderProps {
   min?: number;
   max?: number;
   step?: number;
-  defaultValue?: number[];
+  value?: number[];
   onValueChange?: (value: number[]) => void;
 }
 
 export const Slider = React.forwardRef<HTMLDivElement, SliderProps>(
-  ({ className, min = 0, max = 100, step = 1, defaultValue = [0, 100], onValueChange, ...props }, ref) => {
-    // Initialize state with defaultValue
-    const [values, setValues] = useState<number[]>(defaultValue);
-
-    // Update internal state when defaultValue prop changes
-    useEffect(() => {
-      if (defaultValue[0] !== values[0] || defaultValue[1] !== values[1]) {
-        setValues([...defaultValue]);
-      }
-    }, [defaultValue, values]);
+  ({ className, min = 0, max = 100, step = 1, value, onValueChange, ...props }, ref) => {
 
     const handleChange = (index: number, newValue: number) => {
-      const updatedValues = [...values];
-      // Ensure the value is within the min/max range
+      const updatedValues = [...(value || [min, max])]; // Use prop value or default
       updatedValues[index] = Math.max(min, Math.min(max, newValue));
       
-      // Ensure values don't cross each other (prevent min > max)
-      if (index === 0 && updatedValues[0] > updatedValues[1]) {
-        updatedValues[0] = updatedValues[1];
-      } else if (index === 1 && updatedValues[1] < updatedValues[0]) {
-        updatedValues[1] = updatedValues[0];
+      // Prevent crossing
+      if (index === 0) {
+        updatedValues[0] = Math.min(updatedValues[0], updatedValues[1]);
+      } else {
+        updatedValues[1] = Math.max(updatedValues[0], updatedValues[1]);
       }
       
-      setValues(updatedValues);
-      
-      if (onValueChange) {
-        onValueChange(updatedValues);
-      }
+      onValueChange?.(updatedValues);
     };
 
     // Calculate thumb positions as percentages for CSS positioning
-    const getPosition = (value: number) => {
-      return ((value - min) / (max - min)) * 100;
+    const getPosition = (val: number) => {
+      return ((val - min) / (max - min)) * 100;
     };
+
+    const currentValues = value || [min, max]; // Use prop value or default
 
     return (
       <div 
@@ -63,30 +51,36 @@ export const Slider = React.forwardRef<HTMLDivElement, SliderProps>(
           <div 
             className="absolute h-full bg-purple-600 rounded-full" 
             style={{
-              left: `${getPosition(values[0])}%`,
-              width: `${getPosition(values[1]) - getPosition(values[0])}%`
+              left: `${getPosition(currentValues[0])}%`,
+              width: `${getPosition(currentValues[1]) - getPosition(currentValues[0])}%`
             }}
           />
           
           {/* Thumbs inputs (invisible but handle interactions) */}
-          {[0, 1].map((index) => (
-            <input
-              key={index}
-              type="range"
-              min={min}
-              max={max}
-              step={step}
-              value={values[index]}
-              onChange={(e) => handleChange(index, Number(e.target.value))}
-              className={cn(
-                "absolute w-full h-2 opacity-0 cursor-pointer z-10",
-                "appearance-none"
-              )}
-              style={{
-                pointerEvents: "auto"
-              }}
-            />
-          ))}
+          <input
+            type="range"
+            min={min}
+            max={max}
+            step={step}
+            value={currentValues[0]} // Control the left thumb
+            onChange={(e) => handleChange(0, Number(e.target.value))}
+            className="absolute w-full h-full opacity-0 cursor-pointer z-10"
+            style={{
+              pointerEvents: "auto",
+            }}
+          />
+          <input
+            type="range"
+            min={min}
+            max={max}
+            step={step}
+            value={currentValues[1]} // Control the right thumb
+            onChange={(e) => handleChange(1, Number(e.target.value))}
+            className="absolute w-full h-full opacity-0 cursor-pointer z-10"
+            style={{
+              pointerEvents: "auto",
+            }}
+          />
           
           {/* Thumb visuals */}
           {[0, 1].map((index) => (
@@ -94,7 +88,7 @@ export const Slider = React.forwardRef<HTMLDivElement, SliderProps>(
               key={`thumb-${index}`}
               className="absolute h-5 w-5 rounded-full bg-white border-2 border-purple-600 shadow-md"
               style={{
-                left: `calc(${getPosition(values[index])}% - 10px)`,
+                left: `calc(${getPosition(currentValues[index])}% - 10px)`,
                 top: "-6px"
               }}
             />

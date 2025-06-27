@@ -358,25 +358,54 @@ export default function DeckBuilderClient() {
         }
     }, [hasMoreCards, isLoadingMore, currentPage, searchQuery, loadCards]);
 
+    // --- Helper function to check if leaders share aspects ---
+    const leadersShareAspects = useCallback((leader1: CardType, leader2: CardType): boolean => {
+        const aspects1 = leader1.aspects?.map(a => a.aspect_name) || [];
+        const aspects2 = leader2.aspects?.map(a => a.aspect_name) || [];
+        
+        // Leaders must share at least one aspect in Twin Suns format
+        return aspects1.some(aspect => aspects2.includes(aspect));
+    }, []);
+
+
     // --- Client-Side Filtering ---
     const displayedCards = useMemo(() => {
-        let filtered = cards;
-        
-        if (currentStage === 'cards' && hideCardsInDeck) { 
-            const deckCardIds = new Set(deckCards.map(dc => dc.card.id)); 
-            filtered = filtered.filter(card => !deckCardIds.has(card.id)); 
-        }
-        
-        if (currentStage === 'cards' && !showAllCards && leaders.length === 2 && base) { 
-            filtered = filtered.filter(card => isCardInAspect(card)); 
-        }
-        
-        if (cardTypeFilter && cardTypeFilter !== 'All') { 
-            filtered = filtered.filter(card => card.type?.toLowerCase() === cardTypeFilter.toLowerCase()); 
-        }
-        
-        return filtered;
-    }, [cards, hideCardsInDeck, deckCards, currentStage, showAllCards, leaders, base, cardTypeFilter, isCardInAspect]);
+    let filtered = cards;
+    
+    // Filter leaders based on compatibility with first selected leader
+    if (currentStage === 'leaders' && leaders.length === 1) {
+        const firstLeader = leaders[0];
+        filtered = filtered.filter(card => {
+            // Don't show the already selected leader
+            if (card.id === firstLeader.id) return false;
+            
+            // Only show leaders that share at least one aspect with the first leader
+            return leadersShareAspects(firstLeader, card);
+        });
+    }
+    
+    // Filter out leaders that are already selected (when browsing all leaders)
+    if (currentStage === 'leaders') {
+        const selectedLeaderIds = new Set(leaders.map(l => l.id));
+        filtered = filtered.filter(card => !selectedLeaderIds.has(card.id));
+    }
+    
+    // Existing filtering logic
+    if (currentStage === 'cards' && hideCardsInDeck) { 
+        const deckCardIds = new Set(deckCards.map(dc => dc.card.id)); 
+        filtered = filtered.filter(card => !deckCardIds.has(card.id)); 
+    }
+    
+    if (currentStage === 'cards' && !showAllCards && leaders.length === 2 && base) { 
+        filtered = filtered.filter(card => isCardInAspect(card)); 
+    }
+    
+    if (cardTypeFilter && cardTypeFilter !== 'All') { 
+        filtered = filtered.filter(card => card.type?.toLowerCase() === cardTypeFilter.toLowerCase()); 
+    }
+    
+    return filtered;
+}, [cards, hideCardsInDeck, deckCards, currentStage, showAllCards, leaders, base, cardTypeFilter, isCardInAspect, leadersShareAspects]);
 
     // --- UI Helper Functions ---
     const getStageInfo = useCallback(() => {

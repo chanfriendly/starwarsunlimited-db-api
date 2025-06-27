@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Card } from '@/lib/api';
+import { Card, GroupedCard, AlternateArt } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 
 interface CardDetailProps {
-  card: Card | null;
-  onAddToDeck?: (card: Card) => void;
+  card: GroupedCard | null;
+  onAddToDeck?: (card: GroupedCard) => void;
   onRemoveFromDeck?: (cardId: string) => void;
   isInDeck?: boolean;
   isCompatible?: boolean;
@@ -16,20 +16,31 @@ interface CardDetailProps {
 const MemoizedCardDetail = React.memo(CardDetail);
 
 
-export function CardDetail({ 
-  card, 
-  onAddToDeck, 
-  onRemoveFromDeck, 
+export function CardDetail({
+  card,
+  onAddToDeck,
+  onRemoveFromDeck,
   isInDeck = false,
   isCompatible = true,
-  currentStage = 'cards'
+  currentStage = 'cards',
 }: CardDetailProps) {
   const [showBackSide, setShowBackSide] = useState(false);
-  
+  const [selectedArtId, setSelectedArtId] = useState<string | undefined>(card?.id);
+
+  useEffect(() => {
+    setSelectedArtId(card?.id);
+  }, [card]);
+
+  const displayCard = useMemo(() => {
+    if (!card) return null;
+    if (selectedArtId === card.id) return card;
+    return card.alternate_arts?.find(art => art.id === selectedArtId) || card;
+  }, [card, selectedArtId]);
+
   // Only allow flipping for cards with a back side (mainly Leaders)
-  const canFlip = card?.image_back_uri !== undefined && card?.image_back_uri !== null;
+  const canFlip = displayCard?.image_back_uri !== undefined && displayCard?.image_back_uri !== null;
   
-  if (!card) {
+  if (!displayCard) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-6">
         <div className="w-16 h-16 rounded-full bg-gray-800 mb-4 flex items-center justify-center">
@@ -56,7 +67,7 @@ export function CardDetail({
     );
   }
 
-  const currentImage = showBackSide && card.image_back_uri ? card.image_back_uri : card.image_uri;
+  const currentImage = showBackSide && displayCard.image_back_uri ? displayCard.image_back_uri : displayCard.image_uri;
 
   // Function to get the appropriate button text based on the card's stage and status
   const getButtonText = () => {
@@ -68,7 +79,7 @@ export function CardDetail({
       return 'Incompatible with Deck';
     }
 
-    if (currentStage === 'base' && card.type !== 'Base') {
+    if (currentStage === 'base' && displayCard.type !== 'Base') {
       return 'Not a Base Card';
     }
 
@@ -87,7 +98,7 @@ export function CardDetail({
     }
 
     // Can't add non-base cards as base
-    if (currentStage === 'base' && card.type !== 'Base') {
+    if (currentStage === 'base' && displayCard.type !== 'Base') {
       return true;
     }
 
@@ -98,17 +109,30 @@ export function CardDetail({
     <div className="h-full overflow-auto p-4">
       <div className="flex flex-col items-center mb-6">
         {/* Card image with controlled size */}
-        <div className="max-w-xs w-full mx-auto mb-4 relative">
+        <div 
+          className={`max-w-xs w-full mx-auto mb-4 relative ${
+            onAddToDeck && onRemoveFromDeck ? 'cursor-pointer' : ''
+          }`}
+          onClick={() => {
+            if (onAddToDeck && onRemoveFromDeck && displayCard) {
+              if (isInDeck) {
+                onRemoveFromDeck(displayCard.id);
+              } else if (!isButtonDisabled()) {
+                onAddToDeck(displayCard);
+              }
+            }
+          }}
+        >
           <div className="aspect-[7/10] relative rounded-lg overflow-hidden border border-gray-700">
             {currentImage ? (
               <img
                 src={currentImage}
-                alt={`${card.name} ${showBackSide ? '(back)' : '(front)'}`}
+                alt={`${displayCard.name} ${showBackSide ? '(back)' : '(front)'}`}
                 className="w-full h-full object-contain"
               />
             ) : (
               <div className="w-full h-full flex items-center justify-center bg-gray-900">
-                <span className="text-lg text-center p-4">{card.name}</span>
+                <span className="text-lg text-center p-4">{displayCard.name}</span>
               </div>
             )}
           </div>
@@ -124,15 +148,33 @@ export function CardDetail({
               </svg>
             </button>
           )}
+
+          {/* Alternate Art Selector */}
+          {card && card.alternate_arts && card.alternate_arts.length > 0 && (
+            <div className="absolute top-2 left-2 z-10">
+              <select
+                className="bg-gray-900 text-white text-xs rounded-full px-1 py-0.5"
+                value={selectedArtId}
+                onChange={(e) => setSelectedArtId(e.target.value)}
+              >
+                <option value={card.id}>Main Art</option>
+                {card.alternate_arts.map(art => (
+                  <option key={art.id} value={art.id}>
+                    Alt Art ({art.set_code || art.set_name})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
         
-        <h2 className="text-xl font-bold mb-1">{card.name}</h2>
-        {card.subtitle && (
-          <p className="text-gray-400 mb-2">{card.subtitle}</p>
+        <h2 className="text-xl font-bold mb-1">{displayCard.name}</h2>
+        {displayCard.subtitle && (
+          <p className="text-gray-400 mb-2">{displayCard.subtitle}</p>
         )}
         
         <div className="flex flex-wrap gap-2 mb-4 justify-center">
-          {card.aspects?.map((aspect) => (
+          {displayCard.aspects?.map((aspect) => (
             <div 
               key={aspect.aspect_name}
               className="px-2 py-1 text-xs rounded-full"
@@ -148,38 +190,38 @@ export function CardDetail({
         </div>
         
         <div className="grid grid-cols-3 gap-4 mb-4 bg-gray-800/50 p-3 rounded-lg w-full max-w-xs">
-          {card.energy_cost !== undefined && (
+          {displayCard.energy_cost !== undefined && (
             <div className="text-center">
               <p className="text-xs text-gray-400">Cost</p>
-              <p className="text-lg font-bold text-amber-400">{card.energy_cost}</p>
+              <p className="text-lg font-bold text-amber-400">{displayCard.energy_cost}</p>
             </div>
           )}
-          {card.attack !== undefined && (
+          {displayCard.attack !== undefined && (
             <div className="text-center">
               <p className="text-xs text-gray-400">Attack</p>
-              <p className="text-lg font-bold text-red-400">{card.attack}</p>
+              <p className="text-lg font-bold text-red-400">{displayCard.attack}</p>
             </div>
           )}
-          {card.health !== undefined && (
+          {displayCard.health !== undefined && (
             <div className="text-center">
               <p className="text-xs text-gray-400">Health</p>
-              <p className="text-lg font-bold text-green-400">{card.health}</p>
+              <p className="text-lg font-bold text-green-400">{displayCard.health}</p>
             </div>
           )}
         </div>
         
-        {card.text && (
+        {displayCard.text && (
           <div className="mb-4 w-full max-w-xs">
             <h3 className="text-sm font-medium mb-1">Card Text</h3>
-            <p className="text-sm text-gray-300 whitespace-pre-line">{card.text}</p>
+            <p className="text-sm text-gray-300 whitespace-pre-line">{displayCard.text}</p>
           </div>
         )}
         
-        {card.keywords && card.keywords.length > 0 && (
+        {displayCard.keywords && displayCard.keywords.length > 0 && (
           <div className="mb-4 w-full max-w-xs">
             <h3 className="text-sm font-medium mb-1">Keywords</h3>
             <div className="flex flex-wrap gap-2">
-              {card.keywords.map((keyword) => (
+              {displayCard.keywords.map((keyword) => (
                 <span 
                   key={keyword}
                   className="text-xs px-2 py-1 bg-purple-900/30 border border-purple-700 text-purple-300 rounded-full"
@@ -195,7 +237,7 @@ export function CardDetail({
           <div className="mt-4 w-full max-w-xs">
             {isInDeck ? (
               <Button 
-                onClick={() => onRemoveFromDeck(card.id)}
+                onClick={() => onRemoveFromDeck(displayCard.id)}
                 variant="destructive"
                 className="w-full"
               >
@@ -203,7 +245,7 @@ export function CardDetail({
               </Button>
             ) : (
               <Button 
-                onClick={() => onAddToDeck(card)}
+                onClick={() => onAddToDeck(displayCard)}
                 className={`w-full ${!isCompatible ? 'bg-gray-700' : 'bg-gradient-to-r from-purple-500 to-pink-500'}`}
                 disabled={isButtonDisabled()}
               >

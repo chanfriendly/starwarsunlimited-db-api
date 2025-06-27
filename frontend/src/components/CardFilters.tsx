@@ -36,6 +36,7 @@ export function CardFilters({
   sets,
   onClose
 }: CardFiltersProps) {
+  console.log("CardFilters - Initial filters prop:", filters);
   // Toggle a filter value in array
   const toggleArrayFilter = (filterName: string, value: string) => {
     const currentValues = filters[filterName as keyof typeof filters] as string[];
@@ -47,7 +48,17 @@ export function CardFilters({
 
   // Handle cost slider change
   const handleCostChange = (value: number[]) => {
-    onFilterChange({ costMin: value[0], costMax: value[1] });
+    console.log("handleCostChange - received value:", value);
+    const [newCostMin, newCostMax] = value;
+    console.log("handleCostChange - newCostMin:", newCostMin, "newCostMax:", newCostMax);
+    onFilterChange({ 
+      costMin: Math.min(newCostMin, newCostMax), 
+      costMax: Math.max(newCostMin, newCostMax) 
+    });
+    console.log("handleCostChange - calling onFilterChange with:", { 
+      costMin: Math.min(newCostMin, newCostMax), 
+      costMax: Math.max(newCostMin, newCostMax) 
+    });
   };
 
   // Reset all filters
@@ -123,13 +134,14 @@ export function CardFilters({
           <h3 className="text-white font-medium mb-2">Resource Cost</h3>
           <div className="px-2">
             <Slider
-              defaultValue={[filters.costMin, filters.costMax]}
+              value={[filters.costMin, filters.costMax]}
               min={0}
               max={10}
               step={1}
               onValueChange={handleCostChange}
               className="my-6"
             />
+            {console.log("CardFilters - Slider value prop:", [filters.costMin, filters.costMax])}
             <div className="flex justify-between text-sm text-gray-300">
                 <span>{filters.costMin}</span>
                 <span>{filters.costMax === 10 ? '10+' : filters.costMax}</span>
@@ -185,7 +197,7 @@ export function CardFilters({
         <Button 
           onClick={resetFilters} 
           variant="outline" 
-          className="w-full mt-4 border-gray-700 hover:bg-gray-800"
+          className="w-full mt-4 border-gray-700 hover:bg-gray-800 !text-gray-900 hover:text-white"
         >
           Reset Filters
         </Button>

@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import { Plus, Check, Eye } from 'lucide-react';
 
 interface CardGridProps {
-  cards: Card[];
+  cards: GroupedCard[];
   onCardClickAction: (card: Card) => void; // Changed from onCardClick
   selectedCardId?: string;
   isCompatible?: (card: Card) => boolean;
@@ -35,6 +35,7 @@ export function CardGrid({
   const [isMobile, setIsMobile] = useState(false);
   const [addingToCollection, setAddingToCollection] = useState<Set<string>>(new Set());
   const [recentlyAdded, setRecentlyAdded] = useState<Set<string>>(new Set());
+  const [selectedArtId, setSelectedArtId] = useState<string | null>(null);
 
   // Detect if device is mobile
   useEffect(() => {
@@ -49,55 +50,39 @@ export function CardGrid({
   }, []);
 
   // Handle card interaction - different behavior for mobile vs desktop
-  const handleCardInteraction = useCallback(async (card: Card, event: React.MouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
+  const handleCardInteraction = useCallback(async (card: GroupedCard, event: React.MouseEvent) => {
+  event.preventDefault();
+  event.stopPropagation();
 
-    if (isMobile) {
-      // On mobile, single tap adds to collection/deck or shows details
-      if (onAddToCollection && !isInCollection?.(card.id)) {
-        // Add to collection on mobile
-        try {
-          setAddingToCollection(prev => new Set([...prev, card.id]));
-          await onAddToCollection(card.id);
-          setRecentlyAdded(prev => new Set([...prev, card.id]));
-          
-          // Clear the "recently added" status after 2 seconds
-          setTimeout(() => {
-            setRecentlyAdded(prev => {
-              const newSet = new Set(prev);
-              newSet.delete(card.id);
-              return newSet;
-            });
-          }, 2000);
-        } catch (error) {
-          console.error('Error adding to collection:', error);
-        } finally {
-          setAddingToCollection(prev => {
-            const newSet = new Set(prev);
-            newSet.delete(card.id);
-            return newSet;
-          });
-        }
-      } else if (onDoubleClick && currentStage !== 'cards') {
-        // For deck building stages, add to deck
-        onDoubleClick(card);
-      } else {
-        // Otherwise show card details
-        onCardClick(card);
-      }
-    } else {
-      // On desktop, click shows details
-      onCardClick(card);
-    }
-  }, [isMobile, onAddToCollection, isInCollection, onDoubleClick, currentStage, onCardClick]);
+  // Determine the actual card object to use (main or selected alternate art)
+  const cardToUse = selectedArtId ? card.alternate_arts?.find(art => art.id === selectedArtId) || card : card;
+
+  if (isMobile && currentStage !== 'cards' && onDoubleClick) {
+    // In deck building stages, directly add on tap
+    onDoubleClick(cardToUse);
+    
+    // Show brief visual feedback
+    setRecentlyAdded(prev => new Set([...prev, cardToUse.id]));
+    setTimeout(() => {
+      setRecentlyAdded(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(cardToUse.id);
+        return newSet;
+      });
+    }, 1500);
+  } else {
+    // Otherwise show details
+    onCardClick(cardToUse);
+  }
+}, [isMobile, currentStage, onDoubleClick, onCardClick, selectedArtId]);
 
   // Handle double click for desktop
-  const handleDoubleClick = useCallback((card: Card) => {
+  const handleDoubleClick = useCallback((card: GroupedCard) => {
     if (!isMobile && onDoubleClick) {
-      onDoubleClick(card);
+      const cardToUse = selectedArtId ? card.alternate_arts?.find(art => art.id === selectedArtId) || card : card;
+      onDoubleClick(cardToUse);
     }
-  }, [isMobile, onDoubleClick]);
+  }, [isMobile, onDoubleClick, selectedArtId]);
 
   // Filter out cards that should be hidden
   const visibleCards = hideCardsInDeck && isInDeck 
@@ -114,6 +99,9 @@ export function CardGrid({
         const isAdding = addingToCollection.has(card.id);
         const wasRecentlyAdded = recentlyAdded.has(card.id);
         
+        // Determine the image to display based on selectedArtId or default
+        const displayCard = selectedArtId && card.alternate_arts?.find(art => art.id === selectedArtId) || card;
+
         return (
           <div
             key={`${card.id}-${index}`}
@@ -187,10 +175,10 @@ export function CardGrid({
             )}
             
             <div className="aspect-[7/10] w-full h-auto relative">
-              {card.image_uri || card.image_url ? (
+              {displayCard.image_uri || displayCard.image_url ? (
                 <img
-                  src={card.image_uri || card.image_url || ''}
-                  alt={card.name || 'Card'}
+                  src={displayCard.image_uri || displayCard.image_url || ''}
+                  alt={displayCard.name || 'Card'}
                   className={cn(
                     "w-full h-full object-contain",
                     inDeck && "grayscale"
@@ -199,10 +187,28 @@ export function CardGrid({
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center bg-gray-900">
-                  <span className="text-xs text-center px-2">{card.name}</span>
+                  <span className="text-xs text-center px-2">{displayCard.name}</span>
                 </div>
               )}
               
+              {/* Alternate Art Selector */}
+              {card.alternate_arts && card.alternate_arts.length > 0 && (
+                <div className="absolute top-1 left-1 z-20">
+                  <select
+                    className="bg-gray-900 text-white text-xs rounded-full px-1 py-0.5"
+                    onChange={(e) => setSelectedArtId(e.target.value)}
+                    onClick={(e) => e.stopPropagation()} // Prevent card click when selecting art
+                  >
+                    <option value={card.id}>Main Art</option>
+                    {card.alternate_arts.map(art => (
+                      <option key={art.id} value={art.id}>
+                        Alt Art ({art.set_code || art.set_name})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               {/* Selection overlay */}
               {isSelected && (
                 <div className="absolute inset-0 bg-purple-500/20 flex items-center justify-center">
@@ -248,12 +254,12 @@ export function CardGrid({
               
               {/* Card type badge */}
               <div className="absolute bottom-1 left-1 bg-black/70 text-white text-xs py-0.5 px-1 rounded-full">
-                {card.type}
+                {displayCard.type}
               </div>
             </div>
             
             <div className="p-1 bg-gray-900 text-center">
-              <h3 className="text-xs font-medium text-white truncate">{card.name}</h3>
+              <h3 className="text-xs font-medium text-white truncate">{displayCard.name}</h3>
             </div>
           </div>
         );
