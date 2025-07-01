@@ -94,8 +94,9 @@ async def debug_routes():
         })
     return {"routes": routes}
 
-# Health check endpoint
+# Health check endpoint - accepts both GET and HEAD
 @app.get("/health")
+@app.head("/health")
 async def health():
     return {"status": "healthy"}
 

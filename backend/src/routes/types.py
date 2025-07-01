@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from src.database.db import get_app_db
+from src.database.db import get_card_db
 import logging
 
 logger = logging.getLogger(__name__)

@@ -114,11 +114,11 @@ export default function CardBrowser() {
         ]);
 
         if (!isUnmounted.current) {
-          // FIXED: Handle both array of objects and array of strings
+          // FIXED: Handle both array of objects and array of strings with deduplication
           const aspectNames = Array.isArray(aspectsData) 
-            ? aspectsData.map((item: AspectResponse | string) => 
+            ? [...new Set(aspectsData.map((item: AspectResponse | string) => 
                 typeof item === 'string' ? item : item.aspect_name
-              )
+              ))]
             : [];
             
           const typeNames = Array.isArray(typesData)
@@ -333,6 +333,27 @@ export default function CardBrowser() {
     setShowDetail(true);
   }, []);
 
+  // Handle double-click to add to collection
+  const handleCardDoubleClick = useCallback(async (card: ApiCard) => {
+    if (!isAuthenticated) {
+      console.log('[Cards] Double-click ignored - user not authenticated');
+      return;
+    }
+
+    try {
+      console.log('[Cards] Adding card to collection:', card.name);
+      const { addCardToCollection } = await import('@/lib/api');
+      await addCardToCollection(card.id, 1);
+      
+      // Update the user collection state
+      setUserCollection(prev => new Set([...prev, card.id]));
+      
+      console.log('[Cards] Card added to collection successfully');
+    } catch (error) {
+      console.error('[Cards] Error adding card to collection:', error);
+    }
+  }, [isAuthenticated]);
+
   // Convert userCollection Set to isInCollection function for CardGrid
   const isInCollection = useCallback((cardId: string) => {
     return userCollection.has(cardId);
@@ -492,6 +513,7 @@ export default function CardBrowser() {
               <CardGrid
                 cards={cards}
                 onCardClickAction={handleCardSelect}
+                onDoubleClickAction={handleCardDoubleClick}
                 isInCollection={isInCollection}
               />
             )}

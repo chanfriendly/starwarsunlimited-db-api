@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Star Wars Unlimited Deck Builder is a comprehensive web application designed for Star Wars Unlimited card game players, specifically optimized for the Twin Suns format. The application provides card browsing, deck building, and collection management features with **AI-powered deck suggestions and playtesting capabilities** in development.
+Star Wars Unlimited Deck Builder is a comprehensive web application designed for Star Wars Unlimited card game players, specifically optimized for the Twin Suns format. The application provides card browsing, deck building, and collection management features with **AI-powered deck suggestions and playtesting capabilities** planned for future development.
 
 ## ✨ Current Features
 
@@ -14,10 +14,11 @@ Star Wars Unlimited Deck Builder is a comprehensive web application designed for
 - **Card Details**: Comprehensive view of card information, including aspects, abilities, and high-quality card art
 - **Art Variant Navigation**: Navigate through multiple art variants using intuitive arrow controls
 - **Collection Tracking**: Users can mark cards they own and manage their collection with quantity tracking
+- **Double-Click to Collect**: Double-click any card to instantly add it to your collection
 
 ### 🔍 Enhanced Search & Browsing
 - **Real-time Search**: Instant search across card names, text, and abilities with 300ms debounce
-- **Collapsible Advanced Filters**: Toggleable filter panel with multi-select dropdowns
+- **Collapsible Advanced Filters**: Toggleable filter panel with multi-select dropdowns (no duplicate aspects!)
 - **Cost Range Filtering**: Min/max cost inputs for precise filtering
 - **Active Filter Display**: Visual badges showing applied filters with one-click removal
 - **Sort Options**: Multiple sort options including name, cost, type, set, and rarity
@@ -29,6 +30,7 @@ Star Wars Unlimited Deck Builder is a comprehensive web application designed for
 - **Deck Editing**: Full CRUD support for creating, viewing, editing, and deleting decks
 - **Deck Stats**: Visual breakdown of deck composition, mana curves, and format compliance
 - **Leader & Base Selection**: Dedicated interfaces for choosing leaders and bases with format validation
+- **Save Decks**: Authenticated users can save and manage their deck collections
 
 ### 📱 Enhanced User Experience
 - **Mobile-First Design**: Optimized for both desktop and mobile with touch-friendly interactions
@@ -48,10 +50,10 @@ Star Wars Unlimited Deck Builder is a comprehensive web application designed for
 ## 🏗️ Architecture
 
 ### Frontend (Next.js)
-- **Framework**: Next.js 14+ with App Router
+- **Framework**: Next.js 15+ with App Router
 - **Styling**: Tailwind CSS with custom design system
 - **State Management**: React Context with optimized re-render patterns
-- **API Handling**: Built-in proxy configuration with automatic redirects
+- **API Handling**: Built-in API routes with automatic server-side proxy to backend
 - **Build**: Standalone output for Docker deployment
 - **Search**: Debounced search with intelligent caching and state management
 
@@ -70,19 +72,17 @@ Star Wars Unlimited Deck Builder is a comprehensive web application designed for
 - **Backup Strategy**: Automated database backups with versioning
 - **Indexing**: Optimized database indices for fast search and filtering
 
-### Deployment
-- **Containerization**: Docker with multi-stage builds
-- **Orchestration**: Docker Compose for development and production
-- **Environment Management**: Flexible configuration for different deployment targets
-- **Security**: Hardened containers with non-root users and minimal attack surface
-
 ## 🚀 Quick Start
 
 ### Simple Development Setup
 ```bash
-# Clone and start everything with one command
+# Clone the repository
 git clone https://github.com/yourusername/starwarsunlimited-db-api.git
 cd starwarsunlimited-db-api
+
+# Copy environment configuration
+cp .env.example .env.dev
+# Edit .env.dev if you need to customize any settings
 
 # Make scripts executable and start
 chmod +x dev.sh
@@ -90,15 +90,16 @@ chmod +x dev.sh
 ```
 
 **That's it!** The script will:
-- ✅ Set up databases automatically
+- ✅ Load environment configuration
+- ✅ Set up databases automatically (downloads 1,398+ cards)
 - ✅ Install all dependencies  
 - ✅ Start both frontend and backend
-- ✅ Open browser to http://localhost:3000
+- ✅ Open browser to http://localhost:4000
 
 ### Manual Setup (If Needed)
 
 #### Prerequisites
-- **Node.js 18+** and npm
+- **Node.js 20+** and npm
 - **Python 3.10+** with pip
 - **Git**
 
@@ -106,7 +107,7 @@ chmod +x dev.sh
 ```bash
 cd backend
 python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate  # On Windows: venv\\Scripts\\activate
 pip install -r requirements.txt
 
 # Create environment file
@@ -130,69 +131,149 @@ cp .env.example .env.local
 npm run dev
 ```
 
-## 🐳 Docker Deployment
+## 🐳 Production Deployment
 
-This project is configured for easy deployment using Docker. We provide two separate `docker-compose` files: one for local development and one for production.
+This project uses a clean, production-ready deployment workflow:
+**MacBook** → **Docker Hub** → **TrueNAS/Portainer**
 
-### Local Development
+### Prerequisites
+- Docker installed and running on your development machine
+- Docker Hub account access
+- Production server with Portainer
+- Database files properly located
 
-For a seamless development experience with hot-reloading, use the default `docker-compose.yaml`.
-
-```bash
-# Start the development environment
-docker-compose up
-```
-
-This command will mount your local source code into the containers and automatically reload on changes.
-
-### Production Deployment (on NAS, Server, etc.)
-
-For production, we use an optimized, multi-stage build process defined in `docker-compose.prod.yaml`. This creates lightweight, secure images for both the frontend and backend.
-
-**1. Build and Push Images from your MacBook:**
-
-First, build the production images:
-```bash
-docker-compose -f docker-compose.prod.yaml build
-```
-
-Next, log in to your container registry (e.g., GitHub Container Registry or Docker Hub) and push the images. *Replace `your-registry` with your actual registry name.*
+### Step 1: Configure Environment
 
 ```bash
-# Example for GitHub Container Registry
-docker login ghcr.io -u YOUR_USERNAME
+# Copy and customize production environment
+cp .env.example .env.prod
 
-docker push ghcr.io/christianglass/starwarsunlimited-db-api-frontend
-docker push ghcr.io/christianglass/starwarsunlimited-db-api-backend
+# Edit .env.prod with your production settings:
+# - SERVER_IP: Your production server IP
+# - PRODUCTION_DATABASE_PATH: Database storage path
+# - JWT_SECRET: Generate with: openssl rand -hex 32
+# - CORS_ALLOWED_ORIGINS: Your production URL
 ```
 
-**2. Pull and Run on your NAS:**
-
-On your NAS or production server, you just need the `docker-compose.prod.yaml` file. Pull the new images and start the services in detached mode:
+### Step 2: Build and Push Images (Development Machine)
 
 ```bash
-docker-compose -f docker-compose.prod.yaml pull
-docker-compose -f docker-compose.prod.yaml up -d
+# Make the deployment script executable (first time only)
+chmod +x deploy.sh
+
+# Build and push to Docker Hub
+./deploy.sh
 ```
 
-Your application is now running in production mode.
+This script will:
+- ✅ Load production environment configuration
+- ✅ Build optimized, security-hardened Docker images with database initialization
+- ✅ Push both frontend and backend images to Docker Hub
+- ✅ Show you exactly what's happening with colored output
+
+### Step 3: Deploy on Production Server (Portainer)
+
+1. **Copy environment file** to your production server:
+   ```bash
+   scp .env.prod user@your-server:/path/to/twinsuns/.env
+   ```
+
+2. **Copy the production compose file** (`docker-compose.prod.yaml`)
+
+3. **Create a new stack** in Portainer named \"twinsuns\"
+
+4. **Paste the compose file** content into the web editor
+
+5. **Configure the environment file path** in Portainer stack settings:
+   - Set environment file: `/path/to/twinsuns/.env`
+   - Or manually add key environment variables if preferred
+
+6. **Deploy the stack** - Portainer will:
+   - ✅ Pull the latest images from Docker Hub
+   - ✅ Automatically initialize databases on first run
+   - ✅ Start both frontend and backend with proper networking
+
+### Step 4: Verify Deployment
+
+- **Backend health**: http://YOUR_SERVER_IP:8000/health
+- **Frontend**: http://YOUR_SERVER_IP:4000
+- **API test**: http://YOUR_SERVER_IP:8000/api/cards/
+- **Database status**: Check container logs for "Database initialization completed successfully!"
+
+### Production Features
+
+- **🔒 Security hardened**: Non-root users, minimal attack surface
+- **❤️ Health checks**: Automatic monitoring with restart policies
+- **⚡ Optimized builds**: Multi-stage Docker builds for small images
+- **🔄 Easy updates**: Just run `./deploy.sh` and restart the stack
+- **📊 Monitoring**: Built-in health endpoints and logging
+- **🌐 Dual networking**: Automatic container-to-container and browser-to-server routing
+- **🗺 Database automation**: Automatic database download and initialization
+- **🛠️ Environment management**: Flexible configuration via .env files
+
+## 📶 Environment Configuration
+
+### Environment Files
+
+- **`.env.example`**: Template with all available configuration options
+- **`.env.dev`**: Development configuration (copy from .env.example)
+- **`.env.prod`**: Production configuration for your specific server
+
+### Key Configuration Variables
+
+```bash
+# Server Configuration
+SERVER_IP=192.168.1.124          # Your production server IP
+FRONTEND_PORT=4000               # Port for frontend service
+BACKEND_PORT=8000                # Port for backend API
+
+# Database Paths
+PRODUCTION_DATABASE_PATH=/mnt/volume1/docker/twinsuns/databases
+DB_DIR=/databases                # Database directory inside containers
+
+# Security
+JWT_SECRET=your_secret_here      # Generate with: openssl rand -hex 32
+ACCESS_TOKEN_EXPIRE_MINUTES=10080  # 7 days
+
+# Networking
+CORS_ALLOWED_ORIGINS=http://192.168.1.124:4000
+NEXT_PUBLIC_API_URL=http://192.168.1.124:8000
+INTERNAL_API_URL=http://twinsuns-backend:8000
+```
+
+### Environment Setup
+
+```bash
+# Development (automatically loaded by dev.sh)
+cp .env.example .env.dev
+
+# Production (used by deploy.sh and docker-compose.prod.yaml)
+cp .env.example .env.prod
+vim .env.prod  # Customize for your server
+```
+
+### Docker Compose Behavior
+
+- **Development**: Uses `.env.dev` values as defaults
+- **Production**: Loads from `.env.prod` or environment file in Portainer
+- **Fallbacks**: Sensible defaults if environment variables aren't set
 
 ## 🎯 API Endpoints
 
 ### Card Management
 - `GET /api/cards` - Browse and search cards with advanced filtering and sorting
 - `GET /api/cards/{id}` - Get individual card details
-- `GET /api/aspects` - Get all available aspects
+- `GET /api/aspects` - Get all available aspects (deduplicated)
 - `GET /api/types` - Get all card types
 - `GET /api/sets` - Get all available sets
 - `GET /api/keywords` - Get all available keywords
 
 ### Deck Management
-- `GET /api/me/decks` - Get user's decks
-- `POST /api/me/decks` - Create new deck
-- `GET /api/me/decks/{id}` - Get specific deck
-- `PUT /api/me/decks/{id}` - Update deck
-- `DELETE /api/me/decks/{id}` - Delete deck
+- `GET /api/decks` - Get user's decks
+- `POST /api/decks` - Create new deck
+- `GET /api/decks/{id}` - Get specific deck
+- `PUT /api/decks/{id}` - Update deck
+- `DELETE /api/decks/{id}` - Delete deck
 
 ### Authentication
 - `POST /api/auth/register` - Create new account
@@ -202,7 +283,7 @@ Your application is now running in production mode.
 
 ### Collection Management
 - `GET /api/me/collection` - Get user's card collection
-- `POST /api/me/collection` - Add cards to collection
+- `POST /api/me/collection` - Add cards to collection (double-click cards!)
 - `PUT /api/me/collection` - Update card quantities
 
 ## 🔒 Security Features
@@ -214,81 +295,27 @@ Your application is now running in production mode.
 - **Rate Limiting**: API rate limiting to prevent abuse
 - **Security Headers**: Proper HTTP security headers set
 - **Environment Isolation**: Sensitive data in environment variables only
-
-## 📋 Recent Updates & Fixes
-
-### ✅ Version 2.1.0 - Enhanced Search & Navigation
-
-1. **Powerful Search Engine**
-   - **Real-time search**: Instant search across card names, text, and abilities
-   - **Advanced filtering**: Multi-parameter filtering with visual feedback
-   - **Debounced API calls**: Optimized performance with 300ms debounce
-   - **Filter badges**: Visual representation of active filters with one-click removal
-
-2. **Improved Card Grouping**
-   - **Fixed frontend grouping**: Removed incorrect name-only grouping
-   - **Backend grouping respected**: Cards grouped correctly by name + subtitle + type
-   - **Art variant handling**: Proper display of multiple art variants for same cards
-   - **Enhanced debugging**: Comprehensive logging for troubleshooting grouping issues
-
-3. **Enhanced Card Detail Experience**
-   - **Arrow navigation**: Navigate through art variants using intuitive left/right arrows
-   - **Dot indicators**: Visual indicators showing current art variant position
-   - **Art information**: Display set, artist, and rarity for current art variant
-   - **Responsive design**: Optimized for both desktop and mobile interactions
-
-4. **Component Architecture Improvements**
-   - **TypeScript fixes**: Resolved all type safety issues and export conflicts
-   - **Prop standardization**: Consistent "Action" suffix for function props
-   - **Performance optimizations**: Memoized components and optimized re-renders
-   - **Error handling**: Improved error boundaries and loading states
-
-5. **Search & Filter Features**
-   - **Cost range filtering**: Min/max cost inputs for precise control
-   - **Multi-select filters**: Dropdown selections for types, aspects, keywords, sets
-   - **Sort options**: Multiple sorting options including name, cost, type, set, rarity
-   - **Responsive filters**: Collapsible filter panel optimized for mobile
-
-### 🔧 Breaking Changes
-If updating from older versions:
-
-**CardGrid Component Props:**
-```typescript
-// Old (deprecated)
-<CardGrid onCardClick={handler} onDoubleClick={handler} />
-
-// New (current)
-<CardGrid onCardClickAction={handler} onDoubleClickAction={handler} />
-```
-
-**CardSearch Component Props:**
-```typescript
-// Old (deprecated)
-<CardSearch onFiltersChange={handler} />
-
-// New (current)
-<CardSearch onFiltersChangeAction={handler} />
-```
+- **Container Security**: Non-root users in production containers
 
 ## 🔮 AI Integration Roadmap
 
-### Phase 1: Data Foundation (Current)
+### Phase 1: Data Foundation (✅ Complete)
 - ✅ **Real card database** with 1,398+ cards
 - ✅ **Relationship mapping** (aspects, keywords, traits)
 - ✅ **User behavior tracking** (deck building patterns)
 - ✅ **Advanced search infrastructure** for semantic queries
 
-### Phase 2: Basic AI Features (In Development)
-- 🚧 **Card recommendations** based on selected leaders
-- 🚧 **Aspect synergy analysis** using card relationships
-- 🚧 **Deck completion suggestions** with format validation
-- 🚧 **Search relevance ranking** using ML algorithms
+### Phase 2: Basic AI Features (📋 Planned)
+- 📋 **Card recommendations** based on selected leaders
+- 📋 **Aspect synergy analysis** using card relationships
+- 📋 **Deck completion suggestions** with format validation
+- 📋 **Search relevance ranking** using ML algorithms
 
-### Phase 3: Advanced AI (Planned)
-- 📋 **AlphaGo Zero-style learning** from game simulations
-- 📋 **Vector database integration** for semantic card search
-- 📋 **AI playtesting opponent** with adaptive difficulty
-- 📋 **Meta analysis** and deck archetype recommendations
+### Phase 3: Advanced AI (🔮 Future)
+- 🔮 **AlphaGo Zero-style learning** from game simulations
+- 🔮 **Vector database integration** for semantic card search
+- 🔮 **AI playtesting opponent** with adaptive difficulty
+- 🔮 **Meta analysis** and deck archetype recommendations
 
 ## 🛠️ Development
 
@@ -326,6 +353,28 @@ If updating from older versions:
 - **Database Indexing**: Optimized queries for fast search
 - **Caching Strategy**: Intelligent browser and API caching
 - **Debounced Search**: Optimized API calls with smart caching
+
+## 📋 Development Checklist
+
+### ✅ Completed Features
+- ✅ Clean production deployment workflow
+- ✅ Dual environment support (development + production)
+- ✅ Aspect filter deduplication
+- ✅ Deck saving and management
+- ✅ Double-click to add cards to collection
+- ✅ Container networking and health checks
+- ✅ Security-hardened Docker images
+- ✅ Comprehensive API proxy layer
+
+### 🚧 Known Issues
+- 🚧 None currently identified
+
+### 📋 Planned Improvements
+- 📋 Enhanced error handling and user feedback
+- 📋 Offline support with service workers
+- 📋 Advanced deck analytics and statistics
+- 📋 Bulk collection import/export
+- 📋 Social features and deck sharing
 
 ## 🤝 Contributing
 

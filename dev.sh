@@ -1,10 +1,18 @@
 #!/bin/bash
-# dev.sh - Start both backend and frontend servers
+# dev.sh - Start development environment with proper configuration
 
 set -e  # Exit on any error
 
 echo "🚀 Starting Star Wars Unlimited Twin Suns Development Environment"
 echo "================================================================="
+
+# Load development environment
+if [ -f ".env.dev" ]; then
+    echo "📄 Loading development environment from .env.dev"
+    export $(cat .env.dev | grep -v '^#' | xargs)
+else
+    echo "⚠️  .env.dev not found, using defaults"
+fi
 
 # Check if we're in the right directory
 if [ ! -d "backend" ] || [ ! -d "frontend" ]; then
@@ -108,7 +116,9 @@ echo "   🔗 Backend API: http://localhost:8000/api/cards"
 echo "   🔗 API Documentation: http://localhost:8000/docs"
 echo ""
 echo "💡 To test the connection:"
-echo "   curl http://localhost:8000/api/cards?limit=3"
+echo "   🌐 Frontend: curl http://localhost:3000"
+echo "   🔗 Backend API: curl http://localhost:8000/api/cards?limit=3"
+echo "   🔍 API Health: curl http://localhost:8000/health"
 echo ""
 echo "📋 Watching for changes... Press Ctrl+C to stop"
 

@@ -1,4 +1,4 @@
-// frontend/next.config.ts - Simplified version that works across platforms
+// frontend/next.config.ts - Simplified networking for Docker
 
 import type { NextConfig } from "next";
 
@@ -8,25 +8,11 @@ const nextConfig: NextConfig = {
   
   // Basic configuration
   typescript: {
-    // Ignore build errors during development
     ignoreBuildErrors: true,
   },
   
   eslint: {
-    // Don't run ESLint during builds
     ignoreDuringBuilds: true,
-  },
-
-  // API proxy configuration for development and production
-  async rewrites() {
-    return [
-      {
-        source: '/api/:path*',
-        destination: process.env.NEXT_PUBLIC_API_URL 
-          ? `${process.env.NEXT_PUBLIC_API_URL}/api/:path*`
-          : 'http://localhost:8000/api/:path*',
-      },
-    ];
   },
 
   // Image configuration
@@ -43,33 +29,7 @@ const nextConfig: NextConfig = {
 
   // Experimental features
   experimental: {
-    // Optimize package imports
     optimizePackageImports: ['lucide-react'],
-  },
-
-  // Webpack optimizations
-  webpack: (config, { isServer, dev }) => {
-    // Optimize for client-side performance
-    if (!isServer) {
-      config.resolve.fallback = {
-        ...config.resolve.fallback,
-        fs: false,
-        net: false,
-        tls: false,
-      };
-    }
-
-    // Add source maps in development
-    if (dev) {
-      config.devtool = 'eval-source-map';
-    }
-
-    return config;
-  },
-
-  // Environment variables validation
-  env: {
-    CUSTOM_KEY: process.env.CUSTOM_KEY,
   },
 
   // Headers for security and performance

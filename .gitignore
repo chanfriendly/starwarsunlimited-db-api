@@ -53,6 +53,7 @@ logs/
 *.log
 database_build.log
 swu_api.log
+vector_db_build.log
 
 # IDE - Editor-specific files and directories
 .idea/
@@ -73,3 +74,9 @@ Thumbs.db
 # Project-specific
 test_data/
 temp/
+CLEANUP.md
+
+# Development/test files
+test-*.html
+*.backup
+*.tmp

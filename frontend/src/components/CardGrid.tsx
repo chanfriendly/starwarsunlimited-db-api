@@ -8,6 +8,7 @@ import { ChevronLeft, ChevronRight, Image } from 'lucide-react';
 interface CardGridProps {
   cards: ApiCard[];
   onCardClickAction: (card: ApiCard) => void;
+  onDoubleClickAction?: (card: ApiCard) => void;
   isInCollection?: (cardId: string) => boolean;
   hideCardsInDeck?: boolean;
   isInDeck?: (cardId: string) => boolean;
@@ -40,6 +41,7 @@ interface DisplayCard extends ApiCardWithAlternates {
 export function CardGrid({ 
   cards, 
   onCardClickAction, 
+  onDoubleClickAction,
   isInCollection,
   hideCardsInDeck = false,
   isInDeck,
@@ -144,6 +146,7 @@ export function CardGrid({
                 group-hover:shadow-lg group-hover:shadow-purple-500/20
               `}
               onClick={() => onCardClickAction(currentVariant)}
+              onDoubleClick={onDoubleClickAction ? () => onDoubleClickAction(currentVariant) : undefined}
             >
               {/* Card Image */}
               <div className="aspect-[7/10] relative">

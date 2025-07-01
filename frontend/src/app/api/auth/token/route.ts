@@ -2,8 +2,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
-// The backend API URL
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+// The backend API URL - use container networking for server-side requests
+const API_URL = process.env.INTERNAL_API_URL || 'http://localhost:8000';
 
 export async function POST(request: NextRequest) {
   try {
