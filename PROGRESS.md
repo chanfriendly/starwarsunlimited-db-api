@@ -6,12 +6,19 @@
 
 ## Current Status
 
-*(2026-05-04)* Critical frontend breakage repaired. `src/lib/` (utils, fetch-utils, api) was reconstructed from scratch — it was never committed to git. Four `cookies()` calls now properly awaited in Next.js 15 route handlers. Two route handlers were using `NEXT_PUBLIC_API_URL` instead of `INTERNAL_API_URL` for server-side proxy requests (would break in Docker where internal URLs differ). `decks.py` variable bug fixed; router stays disabled since `me.py` already handles all deck CRUD. TypeScript compiles clean with zero errors. The app should be functionally runnable but needs a smoke test. Production JWT secret rotation is still outstanding.
+*(2026-05-04)* **Production stack is fully operational.** JWT secret rotated. All containers running on TrueNAS (`192.168.1.124:4000`). Smoke test passed: 1398 cards loading, aspects/types/keywords/sets all return data, auth returns proper 401 for unauthenticated requests. Frontend rebuilt with route-handler proxy approach (removing the broken `localhost:8000` rewrite from the old image). Several production-side bugs discovered and fixed during smoke test (see CHANGELOG). The app is ready for a live login + deck test in the browser.
 
 ---
 
 ## What's Done
 
+- [x] **[2026-05-04] Full production smoke test — stack operational at 192.168.1.124:4000**
+- [x] JWT secret rotated on production server; `.env.prod` removed from git and gitignored
+- [x] Production-side `DB_DIR` env var added to server compose (backend was falling back to `~/.swu`)
+- [x] `types.py` import bug fixed on server: `get_app_db` → `get_card_db` (still needs git commit on server side — server source was patched in-place)
+- [x] Old frontend image replaced: rewrote proxy approach from broken `localhost:8000` rewrites to route handlers; rebuilt image on TrueNAS
+- [x] All frontend route handlers synced to TrueNAS (`rsync`); image rebuilt and deployed
+- [x] Both containers now on same Docker network (`twinsuns_network`); DNS resolution working
 - [x] Initial project setup (FastAPI backend + Next.js frontend) — *before 2026-05-04*
 - [x] Card database import from official SWU API (1,398+ cards) — *before 2026-05-04*
 - [x] Card browsing with search, filtering, sorting — *before 2026-05-04*
@@ -36,15 +43,13 @@
 
 **Priority order — top item is immediately actionable:**
 
-1. **[SECURITY] Rotate the production JWT secret** — Generate new: `openssl rand -hex 32`. Update in Portainer env vars directly (not via committed .env.prod). Remove secret from `.env.prod`, add `.env.prod` to `.gitignore` or replace with `.env.prod.example`.
+1. **[BROWSER TEST] Login + deck + collection test in browser** — Open `http://192.168.1.124:4000`. Test: login with real credentials, browse cards, double-click to add to collection, create/save a deck, visit profile to see saved decks. This is the next layer of validation — API works but client-side JS flows haven't been tested.
 
-2. **[SMOKE TEST] Full feature test after starting the app** — Run `./dev.sh`, test: card browsing, search, filter, login, collection add (double-click), deck create/save/delete, profile page. This is the first functional test session in ~1 year.
+2. **[REBUILD] Rebuild backend image on TrueNAS** — The `types.py` fix was applied in-place on the server source and patched into the running container, but the image (`twinsuns-backend:local`) was NOT rebuilt. If the backend container restarts, it will load the broken image. Rebuild: `docker build -t twinsuns-backend:local -f backend/Dockerfile backend/` from `/mnt/volume1/docker/twinsuns/`.
 
-5. **[VERIFICATION] Full feature smoke test** — After lib/ restored: test card browsing, search, filter, deck create/edit/delete, collection add, auth login/logout on both dev and production.
+3. **[CLEANUP] Review `requirements.txt` ML dependencies** — `torch`, `sentence-transformers`, `qdrant-client` are unused in the current app. They add significant Docker build time. Consider moving to a separate `requirements-ml.txt` until the AI features are actually built.
 
-6. **[CLEANUP] Review `requirements.txt` ML dependencies** — `torch`, `sentence-transformers`, `qdrant-client` are unused in the current app. They add significant Docker build time. Consider moving to a separate `requirements-ml.txt` until the AI features are actually built.
-
-7. **[ENHANCEMENT] Add meaningful test coverage** — Current tests don't use standard pytest patterns. Add at minimum: auth endpoint tests, card search tests, deck CRUD tests.
+4. **[ENHANCEMENT] Add meaningful test coverage** — Current tests don't use standard pytest patterns. Add at minimum: auth endpoint tests, card search tests, deck CRUD tests.
 
 ---
 
