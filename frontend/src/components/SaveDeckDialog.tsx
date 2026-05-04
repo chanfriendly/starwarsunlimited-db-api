@@ -5,20 +5,23 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { saveUserDeck } from '@/lib/api';
+import { saveUserDeck, updateUserDeck } from '@/lib/api';
 import { useDeckBuilder } from '@/contexts/DeckBuilderContext';
 
 interface SaveDeckDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (deckId: string) => void;
+  existingDeckId?: string;
 }
 
-const SaveDeckDialog = ({ isOpen, onClose, onSuccess }: SaveDeckDialogProps) => {
+const SaveDeckDialog = ({ isOpen, onClose, onSuccess, existingDeckId }: SaveDeckDialogProps) => {
   const { leaders, base, deckCards, deckName, setDeckName } = useDeckBuilder();
   const [name, setName] = useState(deckName || '');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const isUpdate = !!existingDeckId;
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -41,8 +44,7 @@ const SaveDeckDialog = ({ isOpen, onClose, onSuccess }: SaveDeckDialogProps) => 
       return;
     }
 
-    // Prepare deck data for saving
-    const saveData = {
+    const payload = {
       name: name.trim(),
       leaders: leaders.map(leader => leader.id),
       base: base.id,
@@ -56,9 +58,11 @@ const SaveDeckDialog = ({ isOpen, onClose, onSuccess }: SaveDeckDialogProps) => 
     setError(null);
 
     try {
-      const savedDeck = await saveUserDeck(saveData);
+      const savedDeck = isUpdate
+        ? await updateUserDeck(existingDeckId, payload)
+        : await saveUserDeck(payload);
+
       if (savedDeck) {
-        // Update the deck name in the context
         setDeckName(name.trim());
         onSuccess(savedDeck.id);
       } else {
@@ -76,9 +80,9 @@ const SaveDeckDialog = ({ isOpen, onClose, onSuccess }: SaveDeckDialogProps) => 
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="bg-gray-900 text-white border border-gray-700 sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-xl font-semibold">Save Deck</DialogTitle>
+          <DialogTitle className="text-xl font-semibold">{isUpdate ? 'Update Deck' : 'Save Deck'}</DialogTitle>
           <DialogDescription className="text-gray-400">
-            Give your deck a name to save it to your profile.
+            {isUpdate ? 'Save your changes to this deck.' : 'Give your deck a name to save it to your profile.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -132,7 +136,7 @@ const SaveDeckDialog = ({ isOpen, onClose, onSuccess }: SaveDeckDialogProps) => 
             disabled={isSaving}
             className="bg-purple-600 hover:bg-purple-700 text-white"
           >
-            {isSaving ? 'Saving...' : 'Save Deck'}
+            {isSaving ? 'Saving...' : isUpdate ? 'Update Deck' : 'Save Deck'}
           </Button>
         </DialogFooter>
       </DialogContent>
