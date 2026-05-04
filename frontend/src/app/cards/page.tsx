@@ -171,7 +171,7 @@ export default function CardBrowser() {
       try {
         console.log('[Cards] Loading user collection...');
         const collection = await fetchUserCollection();
-        setUserCollection(new Set(collection.map(item => item.card_id)));
+        setUserCollection(new Set(collection.map(item => item.card.id)));
         console.log('[Cards] User collection loaded:', collection.length, 'cards');
       } catch (err) {
         console.error('[Cards] Error loading user collection:', err);

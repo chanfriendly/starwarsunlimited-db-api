@@ -21,11 +21,11 @@ router = APIRouter()
 # Deck routes
 @router.get("/", response_model=List[DeckListResponse])
 async def get_user_decks(
-    get_current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_app_db)]
 ):
     """Get all decks for the current user"""
-    # Query decks with card count 
+    # Query decks with card count
     decks_with_count = db.query(
         Deck,
         func.count(DeckCard.id).label("card_count")

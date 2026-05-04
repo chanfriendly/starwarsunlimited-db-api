@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = process.env.INTERNAL_API_URL || 'http://localhost:8000';
 
 // GET /api/decks/[id]
 export async function GET(
@@ -10,7 +10,7 @@ export async function GET(
 ) {
   try {
     const id = params.id;
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
     const token = cookieStore.get('auth_token');
 
     if (!token || !token.value) {
@@ -53,7 +53,7 @@ export async function PUT(
 ) {
   try {
     const id = params.id;
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
     const token = cookieStore.get('auth_token');
 
     if (!token || !token.value) {
@@ -101,7 +101,7 @@ export async function DELETE(
 ) {
   try {
     const id = params.id;
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
     const token = cookieStore.get('auth_token');
 
     if (!token || !token.value) {

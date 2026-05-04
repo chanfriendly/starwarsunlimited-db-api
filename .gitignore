@@ -10,8 +10,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# lib/ and lib64/ are Python build artifacts — scoped to root to avoid catching frontend/src/lib/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -80,3 +81,6 @@ CLEANUP.md
 test-*.html
 *.backup
 *.tmp
+
+# Environment files with real secrets — use .env.example as template
+.env.prod

@@ -6,7 +6,7 @@ const API_URL = process.env.INTERNAL_API_URL || 'http://localhost:8000';
 // GET /api/decks
 export async function GET(request: NextRequest) {
   try {
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
     const token = cookieStore.get('auth_token');
 
     if (!token || !token.value) {
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
 // POST /api/decks
 export async function POST(request: NextRequest) {
   try {
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
     const token = cookieStore.get('auth_token');
 
     if (!token || !token.value) {
