@@ -21,8 +21,12 @@ try:
 except Exception as e:
     logger.error(f"Failed to load cards router: {str(e)}")
 
-# decks.py intentionally disabled — deck CRUD is fully handled by me.py at /api/me/decks.
-# Frontend proxy routes (/api/decks/**) already forward to /api/me/decks on the backend.
+#try:
+ #   from src.routes.decks import router as decks_router
+  #  app.include_router(decks_router, prefix="/api/decks", tags=["decks"])
+   # logger.info("Successfully loaded decks router") 
+#except Exception as e:
+ #   logger.error(f"Failed to load decks router: {str(e)}")
 
 try:
     from src.auth.routes import router as auth_router

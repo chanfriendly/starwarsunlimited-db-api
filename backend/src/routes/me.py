@@ -470,6 +470,72 @@ async def delete_user_deck(
             detail="Failed to delete deck"
         )
 
+@router.put("/decks/{deck_id}")
+async def update_user_deck(
+    deck_id: str,
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_app_db)]
+):
+    """Update an existing deck for the logged-in user"""
+    try:
+        deck = db.query(Deck).filter(
+            Deck.id == deck_id,
+            Deck.user_id == current_user.id
+        ).first()
+
+        if not deck:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deck not found")
+
+        deck_data = await request.json()
+        deck_name = deck_data.get("name", deck.name)
+        leaders_ids = deck_data.get("leaders", [])
+        base_id = deck_data.get("base")
+        cards_data = deck_data.get("cards", [])
+
+        deck.name = deck_name
+
+        # Replace all deck cards
+        db.query(DeckCard).filter(DeckCard.deck_id == deck_id).delete()
+
+        for leader_id in leaders_ids:
+            db.add(DeckCard(deck_id=deck_id, card_id=leader_id, quantity=1, is_leader=True, is_base=False))
+
+        if base_id:
+            db.add(DeckCard(deck_id=deck_id, card_id=base_id, quantity=1, is_leader=False, is_base=True))
+
+        for card in cards_data:
+            db.add(DeckCard(
+                deck_id=deck_id,
+                card_id=card.get("card_id"),
+                quantity=card.get("quantity", 1),
+                is_leader=False,
+                is_base=False
+            ))
+
+        db.commit()
+        db.refresh(deck)
+
+        return {
+            "id": deck.id,
+            "name": deck.name,
+            "description": deck.description,
+            "user_id": deck.user_id,
+            "created_at": deck.created_at,
+            "updated_at": deck.updated_at,
+            "leaders": [{"id": lid} for lid in leaders_ids],
+            "base": {"id": base_id} if base_id else None,
+            "cards": [{"card": {"id": c["card_id"]}, "quantity": c["quantity"]} for c in cards_data]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating deck {deck_id}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update deck")
+
+
 @router.post("/collection", status_code=status.HTTP_200_OK)
 async def update_collection_item(
     request: Request,
