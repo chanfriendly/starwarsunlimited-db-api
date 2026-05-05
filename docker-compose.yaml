@@ -35,9 +35,9 @@ services:
       - "${BACKEND_PORT:-8000}:8000"
     environment:
       # Database configuration
-      - DB_DIR=${DB_DIR:-/data/.swu}
-      - DATABASE_URL=${DATABASE_URL:-sqlite:////data/.swu/swu_app.db}
-      - CARD_DATABASE_URL=${CARD_DATABASE_URL:-sqlite:////data/.swu/swu_cards.db}
+      - DB_DIR=${DB_DIR:-/data}
+      - DATABASE_URL=${DATABASE_URL:-sqlite:////data/swu_app.db}
+      - CARD_DATABASE_URL=${CARD_DATABASE_URL:-sqlite:////data/swu_cards.db}
       
       # Security
       - JWT_SECRET=${JWT_SECRET:-development_secret_change_in_production}

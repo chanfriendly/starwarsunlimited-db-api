@@ -47,6 +47,9 @@ data/db/*.db
 *.sqlite
 .swu/
 ~/.swu/
+# Keep the databases/ directory itself tracked
+!databases/
+!databases/.gitkeep
 
 # Logs - Application and development logs
 logs/

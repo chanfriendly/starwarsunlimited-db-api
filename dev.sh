@@ -14,6 +14,14 @@ else
     echo "⚠️  .env.dev not found, using defaults"
 fi
 
+# Override DB_DIR for native (non-Docker) development.
+# .env.dev carries Docker paths (/data); here we point to the repo-local databases/ dir.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export DB_DIR="$REPO_ROOT/databases"
+export DATABASE_URL="sqlite:///$REPO_ROOT/databases/swu_app.db"
+export CARD_DATABASE_URL="sqlite:///$REPO_ROOT/databases/swu_cards.db"
+mkdir -p "$DB_DIR"
+
 # Check if we're in the right directory
 if [ ! -d "backend" ] || [ ! -d "frontend" ]; then
     echo "❌ Error: Please run this script from the project root directory"
@@ -60,18 +68,16 @@ fi
 echo "🗃️  Checking database..."
 cd ..
 python3 -c "
-import sqlite3
-import os
-db_path = os.path.expanduser('~/.swu/swu_cards.db')
+import sqlite3, os, sys
+db_path = os.path.join(os.environ.get('DB_DIR', os.path.expanduser('~/.swu')), 'swu_cards.db')
 if os.path.exists(db_path):
     conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute('SELECT COUNT(*) FROM cards')
-    count = cursor.fetchone()[0]
-    print(f'  ✅ Database found with {count} cards')
+    count = conn.execute('SELECT COUNT(*) FROM cards').fetchone()[0]
+    print(f'  ✅ Database found at {db_path} ({count} cards)')
     conn.close()
 else:
-    print('  ⚠️  Database not found - run backend/scripts/build_database.py')
+    print(f'  ⚠️  Database not found at {db_path}')
+    print('     Run: DB_DIR=\$DB_DIR python backend/scripts/build_database.py')
 "
 
 echo ""

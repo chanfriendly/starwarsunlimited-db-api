@@ -207,6 +207,18 @@ export async function saveUserDeck(payload: SaveDeckPayload): Promise<SavedDeck 
   }
 }
 
+export async function updateUserDeck(deckId: string, payload: SaveDeckPayload): Promise<SavedDeck | null> {
+  try {
+    return await fetchWithAuth(`/api/decks/${deckId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    console.error('[api] updateUserDeck failed:', error);
+    return null;
+  }
+}
+
 // Returns true on success, throws on error — profile page checks `if (success)`
 export async function deleteUserDeck(deckId: string): Promise<boolean> {
   await fetchWithAuth(`/api/decks/${deckId}`, { method: 'DELETE' });

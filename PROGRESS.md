@@ -6,11 +6,24 @@
 
 ## Current Status
 
-*(2026-05-04)* **Production stack is fully operational.** JWT secret rotated. All containers running on TrueNAS (`192.168.1.124:4000`). Smoke test passed: 1398 cards loading, aspects/types/keywords/sets all return data, auth returns proper 401 for unauthenticated requests. Frontend rebuilt with route-handler proxy approach (removing the broken `localhost:8000` rewrite from the old image). Several production-side bugs discovered and fixed during smoke test (see CHANGELOG). The app is ready for a live login + deck test in the browser.
+*(2026-05-04)* **Repo integration complete.** `twin-suns-databases` merged into this repo: `backup_db.py` added to `backend/scripts/`, GitHub Actions workflow created at `.github/workflows/update_dbs.yaml`, `databases/` canonical directory established at repo root. All hardcoded `~/.swu` paths replaced with `DB_DIR` env var throughout scripts and `dev.sh`. Docker compose paths updated (`/data/.swu` → `/data`). `_cleanup_backup/` deleted. TypeScript clean. **`twin-suns-databases` repo can now be archived.**
+
+*(2026-05-04)* **Production stack is fully operational.** JWT secret rotated. All containers running on TrueNAS (`192.168.1.124:4000`). Smoke test passed: 1398 cards loading, aspects/types/keywords/sets all return data, auth returns proper 401 for unauthenticated requests.
 
 ---
 
 ## What's Done
+
+- [x] **[2026-05-04] Repo integration — twin-suns-databases merged in**
+  - `backup_db.py` → `backend/scripts/backup_db.py` (updated to use `DB_DIR`)
+  - `.github/workflows/update_dbs.yaml` created (Monday 2 AM card DB rebuild)
+  - `databases/` canonical directory at repo root (`.gitkeep` tracked, `.db` files gitignored)
+  - All hardcoded `~/.swu` paths eliminated — `DB_DIR` env var used everywhere
+  - `swu_api_client.py` bug fixed: `_get_db_connection` was overwriting `self.database_path`
+  - `docker-compose.yaml` paths updated: `/data/.swu` → `/data`
+  - `dev.sh` overrides `DB_DIR` to `./databases/` for native dev after loading `.env.dev`
+  - `_cleanup_backup/` deleted
+  - TypeScript compiles clean
 
 - [x] **[2026-05-04] Full production smoke test — stack operational at 192.168.1.124:4000**
 - [x] JWT secret rotated on production server; `.env.prod` removed from git and gitignored
@@ -42,6 +55,8 @@
 ## What's Next
 
 **Priority order — top item is immediately actionable:**
+
+0. **[IMMEDIATE] Start local dev server and smoke-test deck builder** — Run `./dev.sh`. First build `databases/swu_cards.db` if it doesn't exist: `DB_DIR=$(pwd)/databases python backend/scripts/build_database.py`. Then test the deck builder at `http://localhost:4000/deck-builder` — verify double-click adds cards from grid, and that selecting a Heroism leader filters out Villainy leaders.
 
 1. **[BROWSER TEST] Login + deck + collection test in browser** — Open `http://192.168.1.124:4000`. Test: login with real credentials, browse cards, double-click to add to collection, create/save a deck, visit profile to see saved decks. This is the next layer of validation — API works but client-side JS flows haven't been tested.
 

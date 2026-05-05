@@ -11,7 +11,7 @@ Deeper docs: `README.md` (setup/deploy), `PROGRESS.md` (current work state), `CH
 ## Quick Reference
 
 ```bash
-# Development (starts both frontend + backend via Docker or native)
+# Development — starts both frontend + backend natively, sets DB_DIR to ./databases/ automatically
 ./dev.sh
 
 # Backend only (native)
@@ -19,6 +19,12 @@ cd backend && source venv/bin/activate && uvicorn src.api.main:app --reload --ho
 
 # Frontend only (native)
 cd frontend && npm run dev   # runs on :3000 (proxied externally to :4000)
+
+# Build card database from the SWU API (uses DB_DIR env var)
+DB_DIR=$(pwd)/databases python backend/scripts/build_database.py
+
+# Back up both databases (uses DB_DIR env var)
+DB_DIR=$(pwd)/databases python backend/scripts/backup_db.py
 
 # Build + push Docker images for production
 ./deploy.sh
@@ -79,6 +85,18 @@ FastAPI Backend (:8000)
        ├─ swu_cards.db — static card data (Card, CardAspect, CardKeyword, CardTrait, CardArena)
        └─ swu_app.db — application data (User, Deck, DeckCard, UserCollection)
 
+Database scripts (backend/scripts/)
+  ├─ build_database.py   — fetch cards from SWU API → swu_cards.db
+  ├─ swu_api_client.py   — SWU API client used by build_database.py
+  ├─ backup_db.py        — integrity-check + timestamped backup of both DBs (keeps last 5)
+  └─ build_vector_db.py  — build Qdrant vector index (unused — see Principles)
+
+databases/               — SQLite files live here locally and in Docker dev
+  ├─ swu_cards.db        — gitignored; built by build_database.py
+  └─ swu_app.db          — gitignored; created automatically on first backend start
+
+.github/workflows/update_dbs.yaml — rebuilds swu_cards.db from SWU API every Monday
+
 Production:
   MacBook → ./deploy.sh → Docker Hub → TrueNAS Portainer stack (docker-compose.prod.yaml)
   Databases mounted at /mnt/volume1/docker/twinsuns/databases/
@@ -86,7 +104,9 @@ Production:
 
 **Key pattern**: The Next.js API routes (`src/app/api/**/route.ts`) are thin server-side proxies. They forward requests to the FastAPI backend using `INTERNAL_API_URL` (container-to-container). The browser never calls the FastAPI backend directly — all calls go through Next.js first. This is why two API URL env vars exist: `NEXT_PUBLIC_API_URL` (browser → Next.js) and `INTERNAL_API_URL` (Next.js server → FastAPI).
 
-**Card data flow**: Official SWU API → `scripts/import_swu_data.py` → `swu_cards.db`. Cards are static in the DB; the backend groups them by name+subtitle+type to merge art variants into single "card" entries.
+**DB_DIR is the single source of truth for database location.** All scripts (`build_database.py`, `backup_db.py`, `build_vector_db.py`) and the backend (`db.py`) resolve database paths from `DB_DIR`. `dev.sh` sets it to `./databases/` for native dev. Docker compose sets it to `/data` (mounted from `./databases/`). Production sets it to `/databases` (mounted from the TrueNAS path).
+
+**Card data flow**: Official SWU API → `backend/scripts/build_database.py` → `databases/swu_cards.db`. Cards are static in the DB; the backend groups them by name+subtitle+type to merge art variants into single "card" entries. The `twin-suns-databases` repo is now superseded — all scripts and the automated workflow live here.
 
 ---
 

@@ -361,7 +361,11 @@ export default function DeckBuilderClient() {
     const leadersShareAspects = useCallback((leader1: CardType, leader2: CardType): boolean => {
         const aspects1 = leader1.aspects?.map(a => a.aspect_name) || [];
         const aspects2 = leader2.aspects?.map(a => a.aspect_name) || [];
-        
+
+        // Heroism and Villainy cannot coexist in the same deck
+        if (aspects1.includes('Heroism') && aspects2.includes('Villainy')) return false;
+        if (aspects1.includes('Villainy') && aspects2.includes('Heroism')) return false;
+
         // Leaders must share at least one aspect in Twin Suns format
         return aspects1.some(aspect => aspects2.includes(aspect));
     }, []);
@@ -746,15 +750,12 @@ export default function DeckBuilderClient() {
                                     </div>
                                 ) : (
                                     <div className="max-h-[60vh] overflow-y-auto p-4">
-                                        <CardGrid 
-                                            key={`card-grid-${currentStage}-${searchQuery}-${cardTypeFilter}-${showAllCards}-${hideCardsInDeck}`} 
-                                            cards={displayedCards} 
+                                        <CardGrid
+                                            key={`card-grid-${currentStage}-${searchQuery}-${cardTypeFilter}-${showAllCards}-${hideCardsInDeck}`}
+                                            cards={displayedCards}
                                             onCardClickAction={handleCardClick}
-                                            // selectedCardId prop removed as it's not supported by CardGridProps
-                                            // isCompatible prop removed as it's not supported by CardGridProps
-                                            isInDeck={isCardIdInDeck} 
-                                            // currentStage prop removed as it's not supported by CardGridProps
-                                            // Removed onDoubleClickAction prop as it's not supported by CardGridProps
+                                            onDoubleClickAction={handleCardDoubleClick}
+                                            isInDeck={isCardIdInDeck}
                                         />
                                         {hasMoreCards && displayedCards.length > 0 && (
                                             <div ref={lastCardElementRef} style={{ height: '10px', background: 'transparent' }} />

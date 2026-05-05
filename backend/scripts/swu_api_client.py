@@ -58,33 +58,27 @@ class SWUApiClient:
 
     def _get_db_connection(self):
         """Get a database connection, creating it if necessary.
-        
+
         Returns:
             sqlite3.Connection: An active database connection.
         """
         if self._db_connection is None:
-            # Use the user's home directory for the database
-            home_dir = os.path.expanduser("~")
-            db_dir = os.path.join(home_dir, '.swu')
-            os.makedirs(db_dir, exist_ok=True)
-            
-            self.database_path = os.path.join(db_dir, 'swu_cards.db')
+            # Ensure parent directory exists
+            db_dir = os.path.dirname(self.database_path)
+            if db_dir:
+                os.makedirs(db_dir, exist_ok=True)
+
             logging.info(f"Using database at: {self.database_path}")
-            
+
             try:
-                # Create a new database connection
                 self._db_connection = sqlite3.connect(self.database_path)
                 self._db_connection.row_factory = sqlite3.Row
-                
-                # Set pragmas for better performance
                 self._db_connection.execute("PRAGMA foreign_keys = ON")
-                self._db_connection.execute("PRAGMA cache_size = -2000")  # Use 2MB cache
-                
+                self._db_connection.execute("PRAGMA cache_size = -2000")
             except sqlite3.Error as e:
                 logging.error(f"Error connecting to database: {e}")
-                logging.error(f"Database path: {self.database_path}")
                 raise
-                
+
         return self._db_connection
         
     def _close_db_connection(self):

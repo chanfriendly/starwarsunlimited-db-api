@@ -26,10 +26,10 @@ logger = logging.getLogger(__name__)
 
 async def get_all_cards() -> List[Dict]:
     """Fetch all cards from the SQLite database with their related data."""
-    # Get the database path from the user's home directory
-    home_dir = os.path.expanduser("~")
-    db_path = os.path.join(home_dir, '.swu', 'swu_cards.db')
-    
+    # Resolve database path: DB_DIR env var, then ~/.swu as fallback
+    db_dir = os.environ.get("DB_DIR", os.path.join(os.path.expanduser("~"), ".swu"))
+    db_path = os.path.join(db_dir, "swu_cards.db")
+
     if not os.path.exists(db_path):
         raise FileNotFoundError(f"Database not found at {db_path}")
     
