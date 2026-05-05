@@ -1,43 +1,86 @@
-/**
- * Authenticated fetch helper. Reads the JWT token from localStorage and:
- * 1. Syncs it to a browser cookie so Next.js server-side route handlers can
- *    read it via cookies() — they can't access localStorage.
- * 2. Also sends it as an Authorization header as a fallback.
- */
-export async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<any> {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+// frontend/src/lib/fetch-utils.ts
+// Utility functions for making authenticated API requests
 
-  // Sync token to cookie so server-side route handlers (cookies()) can read it
-  if (token && typeof document !== 'undefined') {
-    document.cookie = `auth_token=${token}; path=/; SameSite=Strict`;
+interface FetchOptions extends RequestInit {
+  body?: string;
+}
+
+/**
+ * Makes an authenticated API request using the stored JWT token
+ * @param url - The API endpoint URL (relative or absolute)
+ * @param options - Standard fetch options (method, body, etc.)
+ * @returns Promise that resolves to the parsed JSON response
+ * @throws Error if the request fails or response is not ok
+ */
+export async function fetchWithAuth(url: string, options: FetchOptions = {}): Promise<any> {
+  // Get the token from localStorage
+  const token = localStorage.getItem('auth_token');
+  
+  if (!token) {
+    throw new Error('No authentication token found. Please log in.');
   }
 
-  const headers: Record<string, string> = {
+  // Prepare headers
+  const headers: HeadersInit = {
     'Content-Type': 'application/json',
-    Accept: 'application/json',
-    ...(options.headers as Record<string, string> || {}),
+    'Authorization': `Bearer ${token}`,
+    ...options.headers,
   };
 
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
+  // Make the request
   const response = await fetch(url, {
     ...options,
     headers,
-    credentials: 'include',
   });
 
-  if (!response.ok) {
-    let errorDetail = `Request failed: ${response.status}`;
-    try {
-      const errorData = await response.json();
-      errorDetail = errorData.detail || JSON.stringify(errorData);
-    } catch {
-      try { errorDetail = await response.text() || errorDetail; } catch { /* ignore */ }
-    }
-    throw new Error(errorDetail);
+  // Handle authentication errors
+  if (response.status === 401) {
+    // Token is invalid or expired, clear it
+    localStorage.removeItem('auth_token');
+    throw new Error('Authentication expired. Please log in again.');
   }
 
-  return response.json();
+  // Handle other errors
+  if (!response.ok) {
+    let errorMessage = `Request failed: ${response.status} ${response.statusText}`;
+    try {
+      const errorData = await response.json();
+      errorMessage = errorData.detail || errorData.message || errorMessage;
+    } catch (e) {
+      // If we can't parse the error response, use the generic message
+    }
+    throw new Error(errorMessage);
+  }
+
+  // Parse and return the response
+  try {
+    return await response.json();
+  } catch (e) {
+    // If the response isn't JSON, return null or handle as needed
+    return null;
+  }
+}
+
+/**
+ * Checks if the user is currently authenticated
+ * @returns boolean indicating if a valid token exists
+ */
+export function isAuthenticated(): boolean {
+  const token = localStorage.getItem('auth_token');
+  return !!token;
+}
+
+/**
+ * Clears the authentication token
+ */
+export function clearAuth(): void {
+  localStorage.removeItem('auth_token');
+}
+
+/**
+ * Gets the current authentication token
+ * @returns The token string or null if not authenticated
+ */
+export function getAuthToken(): string | null {
+  return localStorage.getItem('auth_token');
 }

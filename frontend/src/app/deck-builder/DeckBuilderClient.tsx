@@ -187,7 +187,7 @@ export default function DeckBuilderClient() {
                     attempts++;
                     try {
                         console.log(`[API] Load Deck Attempt ${attempts} for deck: ${deckIdParam}`);
-                        const fetchedData = await fetchWithAuth(`/api/me/decks/${encodeURIComponent(deckIdParam)}`);
+                        const fetchedData = await fetchWithAuth(`/api/me/get-deck?id=${encodeURIComponent(deckIdParam)}`);
                         console.log('[DEBUG] loadExistingDeck: Received raw data:', JSON.stringify(fetchedData, null, 2));
 
                         // Validate the fetched data structure
@@ -834,6 +834,7 @@ export default function DeckBuilderClient() {
             <SaveDeckDialog
                 isOpen={showSaveDialog}
                 onClose={() => setShowSaveDialog(false)}
+                existingDeckId={deckIdParam || undefined}
                 onSuccess={(deckId) => {
                     setShowSaveDialog(false);
                     router.push(`/profile`);
