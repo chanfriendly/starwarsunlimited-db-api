@@ -13,6 +13,17 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Star Wars Unlimited API")
 
+@app.on_event("startup")
+async def startup_event():
+    """Ensure the app database schema exists on every startup."""
+    try:
+        import src.database.models  # registers all ORM models with Base.metadata
+        from src.database.db import init_app_db
+        init_app_db()
+        logger.info("App database initialized successfully.")
+    except Exception as e:
+        logger.error(f"Failed to initialize app database: {e}")
+
 # Import routers
 try:
     from src.routes.cards import router as cards_router
@@ -76,6 +87,13 @@ try:
     logger.info("Successfully loaded sets router")
 except Exception as e:
     logger.error(f"Failed to load sets router: {str(e)}")
+
+try:
+    from src.routes.traits import router as traits_router
+    app.include_router(traits_router, prefix="/api/traits", tags=["traits"])
+    logger.info("Successfully loaded traits router")
+except Exception as e:
+    logger.error(f"Failed to load traits router: {str(e)}")
 
 @app.get("/")
 async def root():

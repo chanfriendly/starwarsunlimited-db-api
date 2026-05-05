@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -17,6 +18,7 @@ interface SaveDeckDialogProps {
 
 const SaveDeckDialog = ({ isOpen, onClose, onSuccess, existingDeckId }: SaveDeckDialogProps) => {
   const { leaders, base, deckCards, deckName, setDeckName } = useDeckBuilder();
+  const router = useRouter();
   const [name, setName] = useState(deckName || '');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +72,11 @@ const SaveDeckDialog = ({ isOpen, onClose, onSuccess, existingDeckId }: SaveDeck
       }
     } catch (err) {
       console.error('Save deck error:', err);
+      if (err instanceof Error && err.message.includes('authentication token')) {
+        onClose();
+        router.push('/login?redirect=/deck-builder');
+        return;
+      }
       setError('An error occurred while saving the deck. Please check your connection and try again.');
     } finally {
       setIsSaving(false);

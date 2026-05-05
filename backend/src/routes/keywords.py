@@ -1,14 +1,14 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from src.database.db import get_app_db
+from src.database.db import get_card_db
 import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.get("/")
-async def get_keywords(db: Session = Depends(get_app_db)):
+async def get_keywords(db: Session = Depends(get_card_db)):
     """Get all distinct keywords from the database."""
     try:
         # Query for unique keywords

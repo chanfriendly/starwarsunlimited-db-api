@@ -85,6 +85,7 @@ async def get_cards(
     costMax: Optional[int] = Query(None, description="Maximum cost filter"),
     keyword: Optional[str] = Query(None, description="Filter by keywords (comma-separated)"),
     set: Optional[str] = Query(None, description="Filter by sets (comma-separated)"),
+    trait: Optional[str] = Query(None, description="Filter by traits (comma-separated)"),
     sort: Optional[str] = None,
     structured: Optional[bool] = None # Added to acknowledge frontend parameter
 ):
@@ -189,6 +190,17 @@ async def get_cards(
             if set_conditions:
                 conditions.append(f"({' OR '.join(set_conditions)})")
         
+        # Add trait filter
+        if trait:
+            trait_list = trait.split(',')
+            trait_conditions = []
+            for i, tr in enumerate(trait_list):
+                param_name = f"trait_{i}"
+                params[param_name] = tr.strip()
+                trait_conditions.append(f"c.id IN (SELECT card_id FROM card_traits WHERE trait = :{param_name})")
+            if trait_conditions:
+                conditions.append(f"({' OR '.join(trait_conditions)})")
+
         # Add WHERE conditions if any
         if conditions:
             base_sql += " AND " + " AND ".join(conditions)

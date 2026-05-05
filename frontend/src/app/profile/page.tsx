@@ -309,7 +309,7 @@ const UserProfilePage = () => {
           
           try {
             // Use the Next.js API routes (which will forward the cookies)
-            const fetchedDecks = await fetchWithAuth(`/api/me/decks`);
+            const fetchedDecks = await fetchWithAuth(`/api/decks`);
             
             // Directly use the returned data (it's already JSON)
             if (Array.isArray(fetchedDecks)) {

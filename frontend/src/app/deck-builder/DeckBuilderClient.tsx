@@ -11,11 +11,12 @@ import { LeaderSelection } from '@/components/LeaderSelection';
 import { DeckStats } from '@/components/DeckStats';
 import SaveDeckDialog from '@/components/SaveDeckDialog';
 import { useDeckBuilder } from '@/contexts/DeckBuilderContext';
-import { Card as CardType, FetchCardsParams, fetchCards, SavedDeck } from '@/lib/api';
+import { Card as CardType, FetchCardsParams, fetchCards, fetchAspects, fetchKeywords, fetchSets, fetchTraits, SavedDeck } from '@/lib/api';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { debounce } from 'lodash-es';
 import { fetchWithAuth } from '@/lib/fetch-utils';
+import { useAuth } from '@/contexts/AuthContext';
 
 // Type for individual items in the deck's card list from context/backend
 interface DeckCardItem {
@@ -36,6 +37,14 @@ export default function DeckBuilderClient() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const deckIdParam = searchParams.get('deckId');
+    const { isAuthenticated, isLoading: authLoading } = useAuth();
+
+    // Redirect unauthenticated users to login
+    useEffect(() => {
+        if (!authLoading && !isAuthenticated) {
+            router.push('/login?redirect=/deck-builder');
+        }
+    }, [authLoading, isAuthenticated, router]);
 
     // --- State ---
     const [isPotentialLoop, setIsPotentialLoop] = useState(false);
@@ -54,6 +63,20 @@ export default function DeckBuilderClient() {
     const [totalPages, setTotalPages] = useState(1);
     const [hasMoreCards, setHasMoreCards] = useState(true);
     const [deckLoaded, setDeckLoaded] = useState(false);
+
+    // --- Filter + Sort State (cards stage only) ---
+    const [filterAspects, setFilterAspects] = useState<string[]>([]);
+    const [filterKeywords, setFilterKeywords] = useState<string[]>([]);
+    const [filterTraits, setFilterTraits] = useState<string[]>([]);
+    const [filterSets, setFilterSets] = useState<string[]>([]);
+    const [sortBy, setSortBy] = useState('name_asc');
+    const [showFilters, setShowFilters] = useState(false);
+
+    // --- Filter option lists ---
+    const [availableAspects, setAvailableAspects] = useState<string[]>([]);
+    const [availableKeywords, setAvailableKeywords] = useState<string[]>([]);
+    const [availableTraits, setAvailableTraits] = useState<string[]>([]);
+    const [availableSets, setAvailableSets] = useState<string[]>([]);
 
     // --- Refs ---
     const loadingRef = useRef(false);
@@ -107,27 +130,56 @@ export default function DeckBuilderClient() {
         return () => clearTimeout(clearTimer);
     }, []);
 
+    // --- Load filter options when entering cards stage ---
+    useEffect(() => {
+        if (currentStage !== 'cards' || availableAspects.length > 0) return;
+        Promise.all([fetchAspects(), fetchKeywords(), fetchSets(), fetchTraits()])
+            .then(([asp, kw, sets, traits]) => {
+                setAvailableAspects(asp.map((a: any) => a.aspect_name).filter(Boolean));
+                setAvailableKeywords(kw.map((k: any) => k.keyword).filter(Boolean));
+                setAvailableSets(sets.map((s: any) => s.set_name).filter(Boolean));
+                setAvailableTraits(traits.map((t: any) => t.trait).filter(Boolean));
+            })
+            .catch(err => console.error('[DeckBuilder] Failed to load filter options:', err));
+    }, [currentStage, availableAspects.length]);
+
     // --- Load Cards Function ---
-    const loadCards = useCallback(async (page = 1, append = false, currentSearch = searchQuery) => {
+    const loadCards = useCallback(async (
+        page = 1,
+        append = false,
+        currentSearch = searchQuery,
+        aspects = filterAspects,
+        keywords = filterKeywords,
+        traits = filterTraits,
+        sets = filterSets,
+        sort = sortBy,
+    ) => {
         if (loadingRef.current || (append && !hasMoreCards)) return;
         loadingRef.current = true;
         setError(null);
-        
-        if (page === 1 && !append) setLoading(true); 
+
+        if (page === 1 && !append) setLoading(true);
         else if (append) setIsLoadingMore(true);
-        
+
         console.log(`[API] Fetching cards: Stage=${currentStage}, Page=${page}, Append=${append}, Search='${currentSearch}'`);
-        
-        const params: FetchCardsParams = { 
-        page: page.toString(), 
-        limit: CARDS_PER_PAGE.toString(), 
-        search: currentSearch || undefined 
-    };
-    
-    if (currentStage === 'leaders') params.type = 'Leader';
-    else if (currentStage === 'base') params.type = 'Base';
-    else if (currentStage === 'cards') params.type = 'Unit,Event,Upgrade'; // Only fetch main card types
-        
+
+        const params: FetchCardsParams = {
+            page: page.toString(),
+            limit: CARDS_PER_PAGE.toString(),
+            search: currentSearch || undefined,
+        };
+
+        if (currentStage === 'leaders') params.type = 'Leader';
+        else if (currentStage === 'base') params.type = 'Base';
+        else if (currentStage === 'cards') {
+            params.type = 'Unit,Event,Upgrade';
+            if (aspects.length) params.aspect = aspects.join(',');
+            if (keywords.length) params.keyword = keywords.join(',');
+            if (traits.length) params.trait = traits.join(',');
+            if (sets.length) params.set = sets.join(',');
+            params.sort = sort;
+        }
+
         try {
             const response = await fetchCards(params);
             const newCards = Array.isArray(response.data) ? response.data : [];
@@ -147,7 +199,7 @@ export default function DeckBuilderClient() {
             setIsLoadingMore(false);
             loadingRef.current = false;
         }
-    }, [currentStage, searchQuery, hasMoreCards]);
+    }, [currentStage, searchQuery, filterAspects, filterKeywords, filterTraits, filterSets, sortBy, hasMoreCards]);
 
     // --- Load Existing Deck Effect ---
     useEffect(() => {
@@ -291,18 +343,18 @@ export default function DeckBuilderClient() {
     // --- Load Cards Effect ---
     useEffect(() => {
         if (isPotentialLoop) return;
-        
-        const stageKey = `${currentStage}-${searchQuery}`;
+
+        const stageKey = `${currentStage}-${searchQuery}-${filterAspects.join(',')}-${filterKeywords.join(',')}-${filterTraits.join(',')}-${filterSets.join(',')}-${sortBy}`;
         if (cardLoadingStageRef.current === stageKey) return;
-        
+
         cardLoadingStageRef.current = stageKey;
         console.log(`[Cards] Loading cards for stage: ${currentStage}, search: "${searchQuery}"`);
-        
+
         setCards([]);
         setCurrentPage(1);
         setHasMoreCards(true);
-        loadCards(1, false, searchQuery);
-    }, [currentStage, searchQuery, loadCards, isPotentialLoop]);
+        loadCards(1, false, searchQuery, filterAspects, filterKeywords, filterTraits, filterSets, sortBy);
+    }, [currentStage, searchQuery, filterAspects, filterKeywords, filterTraits, filterSets, sortBy, loadCards, isPotentialLoop]);
 
     // --- Debounced Search ---
     const debouncedSearch = useMemo(
@@ -353,9 +405,9 @@ export default function DeckBuilderClient() {
 
     const loadMoreCardsHandler = useCallback(() => {
         if (hasMoreCards && !isLoadingMore) {
-            loadCards(currentPage + 1, true, searchQuery);
+            loadCards(currentPage + 1, true, searchQuery, filterAspects, filterKeywords, filterTraits, filterSets, sortBy);
         }
-    }, [hasMoreCards, isLoadingMore, currentPage, searchQuery, loadCards]);
+    }, [hasMoreCards, isLoadingMore, currentPage, searchQuery, filterAspects, filterKeywords, filterTraits, filterSets, sortBy, loadCards]);
 
     // --- Helper function to check if leaders share aspects ---
     const leadersShareAspects = useCallback((leader1: CardType, leader2: CardType): boolean => {
@@ -680,35 +732,148 @@ export default function DeckBuilderClient() {
                             <CardHeader className="border-b border-gray-800 p-4">
                                 <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
                                     <CardTitle className="text-xl">{stageInfo.title}</CardTitle>
-                                    
-                                    {/* Search and Filters */}
-                                    <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                                        {/* Search */}
-                                        <div className="relative">
-                                            <input
-                                                type="text"
-                                                placeholder="Search cards..."
-                                                className="w-full sm:w-64 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                                onChange={(e) => debouncedSearch(e.target.value)}
-                                            />
-                                        </div>
-                                        
-                                        {/* Type Filter */}
+
+                                    {/* Search + Filter toggle */}
+                                    <div className="flex gap-2 w-full sm:w-auto">
+                                        <input
+                                            type="text"
+                                            placeholder="Search cards..."
+                                            className="flex-1 sm:w-52 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                                            onChange={(e) => debouncedSearch(e.target.value)}
+                                        />
                                         {currentStage === 'cards' && (
-                                            <select
-                                                value={cardTypeFilter}
-                                                onChange={(e) => setCardTypeFilter(e.target.value)}
-                                                className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                            <button
+                                                onClick={() => setShowFilters(f => !f)}
+                                                className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${showFilters ? 'bg-purple-600 border-purple-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700'}`}
                                             >
-                                                <option value="">All Types</option>
-                                                <option value="Unit">Units</option>
-                                                <option value="Event">Events</option>
-                                                <option value="Upgrade">Upgrades</option>
-                                            </select>
+                                                Filters {(filterAspects.length + filterKeywords.length + filterTraits.length + filterSets.length) > 0 ? `(${filterAspects.length + filterKeywords.length + filterTraits.length + filterSets.length})` : ''}
+                                            </button>
                                         )}
                                     </div>
                                 </div>
-                                
+
+                                {/* Expanded filter panel — cards stage only */}
+                                {currentStage === 'cards' && showFilters && (
+                                    <div className="mt-4 pt-4 border-t border-gray-700 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        {/* Sort */}
+                                        <div>
+                                            <label className="block text-xs text-gray-400 mb-1">Sort by</label>
+                                            <select
+                                                value={sortBy}
+                                                onChange={e => setSortBy(e.target.value)}
+                                                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm"
+                                            >
+                                                <option value="name_asc">Name (A–Z)</option>
+                                                <option value="name_desc">Name (Z–A)</option>
+                                                <option value="cost_asc">Cost (Low → High)</option>
+                                                <option value="cost_desc">Cost (High → Low)</option>
+                                                <option value="type_asc">Type</option>
+                                                <option value="set_newest">Set (Newest)</option>
+                                                <option value="set_oldest">Set (Oldest)</option>
+                                                <option value="rarity_rare">Rarity (Rare → Common)</option>
+                                                <option value="rarity_common">Rarity (Common → Rare)</option>
+                                            </select>
+                                        </div>
+
+                                        {/* Type filter (kept as a quick select) */}
+                                        <div>
+                                            <label className="block text-xs text-gray-400 mb-1">Card type</label>
+                                            <select
+                                                value={cardTypeFilter}
+                                                onChange={(e) => setCardTypeFilter(e.target.value)}
+                                                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm"
+                                            >
+                                                <option value="">All types</option>
+                                                <option value="Unit">Unit</option>
+                                                <option value="Event">Event</option>
+                                                <option value="Upgrade">Upgrade</option>
+                                            </select>
+                                        </div>
+
+                                        {/* Set */}
+                                        <div>
+                                            <label className="block text-xs text-gray-400 mb-1">Set</label>
+                                            <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                                                {availableSets.map(s => (
+                                                    <label key={s} className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer hover:text-white">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={filterSets.includes(s)}
+                                                            onChange={e => setFilterSets(prev => e.target.checked ? [...prev, s] : prev.filter(x => x !== s))}
+                                                            className="accent-purple-500"
+                                                        />
+                                                        {s}
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Aspects */}
+                                        <div>
+                                            <label className="block text-xs text-gray-400 mb-1">Aspect</label>
+                                            <div className="flex flex-wrap gap-1">
+                                                {availableAspects.map(a => (
+                                                    <button
+                                                        key={a}
+                                                        onClick={() => setFilterAspects(prev => prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a])}
+                                                        className={`px-2 py-0.5 rounded text-xs font-medium border transition-colors ${filterAspects.includes(a) ? 'bg-purple-600 border-purple-500 text-white' : 'bg-gray-800 border-gray-600 text-gray-300 hover:border-gray-400'}`}
+                                                    >
+                                                        {a}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Keywords */}
+                                        <div>
+                                            <label className="block text-xs text-gray-400 mb-1">Keyword</label>
+                                            <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                                                {availableKeywords.map(k => (
+                                                    <label key={k} className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer hover:text-white">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={filterKeywords.includes(k)}
+                                                            onChange={e => setFilterKeywords(prev => e.target.checked ? [...prev, k] : prev.filter(x => x !== k))}
+                                                            className="accent-purple-500"
+                                                        />
+                                                        {k}
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Traits */}
+                                        <div>
+                                            <label className="block text-xs text-gray-400 mb-1">Trait</label>
+                                            <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                                                {availableTraits.map(t => (
+                                                    <label key={t} className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer hover:text-white">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={filterTraits.includes(t)}
+                                                            onChange={e => setFilterTraits(prev => e.target.checked ? [...prev, t] : prev.filter(x => x !== t))}
+                                                            className="accent-purple-500"
+                                                        />
+                                                        {t}
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Clear filters */}
+                                        {(filterAspects.length + filterKeywords.length + filterTraits.length + filterSets.length) > 0 && (
+                                            <div className="sm:col-span-2">
+                                                <button
+                                                    onClick={() => { setFilterAspects([]); setFilterKeywords([]); setFilterTraits([]); setFilterSets([]); setSortBy('name_asc'); }}
+                                                    className="text-xs text-red-400 hover:text-red-300 underline"
+                                                >
+                                                    Clear all filters
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
                                 {/* Stage Controls */}
                                 {currentStage === 'cards' && (
                                     <div className="flex flex-wrap gap-4 items-center mt-4">
@@ -751,7 +916,7 @@ export default function DeckBuilderClient() {
                                 ) : (
                                     <div className="max-h-[60vh] overflow-y-auto p-4">
                                         <CardGrid
-                                            key={`card-grid-${currentStage}-${searchQuery}-${cardTypeFilter}-${showAllCards}-${hideCardsInDeck}`}
+                                            key={`card-grid-${currentStage}-${searchQuery}-${cardTypeFilter}-${showAllCards}-${hideCardsInDeck}-${filterAspects.join(',')}-${filterKeywords.join(',')}-${filterTraits.join(',')}-${filterSets.join(',')}-${sortBy}`}
                                             cards={displayedCards}
                                             onCardClickAction={handleCardClick}
                                             onDoubleClickAction={handleCardDoubleClick}

@@ -152,6 +152,7 @@ export default function CardBrowser() {
       } catch (err) {
         console.error('[Cards] Error loading filter options:', err);
         if (!isUnmounted.current) {
+          setFilterOptionsLoaded(true); // unblock the spinner even on error
           setError('Failed to load filter options. Please refresh the page.');
         }
       }

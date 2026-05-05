@@ -114,6 +114,7 @@ export interface FetchCardsParams {
   costMax?: string | number;
   keyword?: string;
   set?: string;
+  trait?: string;
   sort?: string;
   structured?: boolean;
 }
@@ -165,6 +166,12 @@ export async function fetchKeywords(): Promise<any[]> {
 export async function fetchSets(): Promise<any[]> {
   const response = await fetch('/api/sets');
   if (!response.ok) throw new Error('Failed to fetch sets');
+  return response.json();
+}
+
+export async function fetchTraits(): Promise<any[]> {
+  const response = await fetch('/api/traits');
+  if (!response.ok) throw new Error('Failed to fetch traits');
   return response.json();
 }
 
