@@ -4,6 +4,20 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-05-06: Profile Page Design Pass + ML Dep Cleanup
+
+**What changed:**
+
+**Profile page — full design system rewrite** — The profile page (`profile/page.tsx`) was completely rewritten from the old Tailwind/shadcn purple theme to the Twin Suns `ts-*` design system. All shadcn imports removed: `Button`, `Card`/`CardContent`/`CardHeader`/`CardTitle`, `Badge`, `Avatar`/`AvatarFallback`/`AvatarImage`, `Tabs`/`TabsList`/`TabsTrigger`/`TabsContent` (only the last four are kept — the Radix Tabs primitives are kept for tab state management with `ts-tabs-list` / `ts-tab-trigger` CSS classes applied), `Input`, `Switch`, `Label`. `framer-motion` removed. Lucide icon imports removed. Logic layer (data loading, auth redirect, deck delete, collection add, wishlist remove) is unchanged.
+
+**Profile `handleAddToCollection` bug fixed** — Previously the function was defined as a module-level export outside the component and checked `response.ok` on the return value of `fetchWithAuth` — which returns parsed JSON, not a `Response` object, so `response.ok` was always `undefined` (falsy) and the collection never reloaded after adding a card. Fixed: moved the function inside the component as `handleAddToCollection`, use try/catch around `fetchWithAuth` (success = no throw), call `loadData()` on success.
+
+**`.env.dev` / `.env.prod` unstaged** — Both files were accidentally staged or in an unmerged state from a prior commit. Removed from git index with `git rm --cached`. Both are in `.gitignore` and should never be tracked.
+
+**ML deps split to `requirements-ml.txt`** — `torch`, `sentence-transformers`, `qdrant-client`, `transformers`, `numpy` moved from `requirements.txt` to `backend/requirements-ml.txt`. These are only needed for `build_vector_db.py` and `src/utils/vector_db.py`, neither of which is imported by any active route. Removing them from the core requirements reduces Docker build time significantly (torch alone is ~2 GB). Install with `pip install -r requirements-ml.txt` when AI features are being developed.
+
+---
+
 ### 2026-05-06: Twin Suns Design System + Wishlist Feature (PR #3)
 
 **What changed:**

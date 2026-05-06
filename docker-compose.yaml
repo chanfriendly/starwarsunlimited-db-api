@@ -16,7 +16,10 @@ services:
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - NEXT_TELEMETRY_DISABLED=${NEXT_TELEMETRY_DISABLED:-1}
-      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      # Client-side URL (browser → Next.js, exposed via the port mapping)
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+      # Server-side URL (Next.js container → backend container, via Docker network)
+      - INTERNAL_API_URL=${INTERNAL_API_URL:-http://backend:8000}
     restart: unless-stopped
     networks:
       - twinsuns_network

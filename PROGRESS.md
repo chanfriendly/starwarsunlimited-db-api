@@ -6,7 +6,9 @@
 
 ## Current Status
 
-*(2026-05-06)* **Twin Suns Imperial Field Manual design system fully implemented. Wishlist feature live (full stack).** PR #3 open against `development`. No regressions introduced; pre-existing TypeScript errors in `decks/[id]/route.ts` (Next.js params type) and `DeckBuilderClient.tsx` (`power`/`hp`) are unchanged. Backend `user_wishlist` table auto-creates on next startup via `create_all` — no migration script needed. Production deploy pending PR merge.
+*(2026-05-06 session 2)* **Profile page design pass complete. ML deps split out. Env file staging cleaned up.** Profile page fully on Twin Suns design system — all shadcn components, framer-motion, and purple Tailwind classes replaced with `ts-*` CSS vars and design system patterns. `handleAddToCollection` bug fixed (was checking `.ok` on JSON instead of using try/catch). `backend/requirements-ml.txt` created; torch/sentence-transformers/qdrant/transformers/numpy removed from core `requirements.txt`. `.env.dev` + `.env.prod` removed from git index. Pre-existing TypeScript errors in `DeckBuilderClient.tsx` (`power`/`hp`) unchanged.
+
+*(2026-05-06)* **Twin Suns Imperial Field Manual design system fully implemented. Wishlist feature live (full stack).** PR #3 merged into `development`. No regressions introduced; pre-existing TypeScript errors in `decks/[id]/route.ts` (Next.js params type) and `DeckBuilderClient.tsx` (`power`/`hp`) are unchanged. Backend `user_wishlist` table auto-creates on next startup via `create_all` — no migration script needed.
 
 *(2026-05-05)* **Production stack rebuilt and operational after cryptominer incident.** Both `twinsuns-backend:local` and `twinsuns-frontend:local` images rebuilt from `--no-cache` using rsynced clean local source. Stack started via `docker-compose.prod.yaml`. Smoke test passed: cards/aspects/types return data, collection/decks return 401 (correct). Stack healthy at `192.168.1.124:4000`.
 
@@ -19,6 +21,16 @@
 ---
 
 ## What's Done
+
+- [x] **[2026-05-06] Profile page — full Twin Suns design system rewrite**
+  - All shadcn components removed from `profile/page.tsx` (Avatar, Badge, Button, Card, Input, Switch, Tabs — Radix Tabs primitives kept for state, styled with `ts-tabs-list`/`ts-tab-trigger`)
+  - `framer-motion` and all Lucide icon imports removed
+  - `DeckCard`, `CollectionCard`, profile header, tab nav, all empty/loading/error states rewritten with `ts-*` CSS vars and design system patterns
+  - `handleAddToCollection` bug fixed: was checking `.ok` on parsed JSON (always false), now uses try/catch on `fetchWithAuth`
+- [x] **[2026-05-06] ML dependencies split to `requirements-ml.txt`**
+  - `torch`, `sentence-transformers`, `qdrant-client`, `transformers`, `numpy` removed from `requirements.txt`
+  - `backend/requirements-ml.txt` created — install separately when working on AI features
+- [x] **[2026-05-06] `.env.dev` / `.env.prod` unstaged from git index**
 
 - [x] **[2026-05-06] Twin Suns design system — Imperial Field Manual** (PR #3)
   - `globals.css` + `layout.tsx`: full `--ts-*` CSS custom property system; Cormorant Garamond (display), Spectral (body), JetBrains Mono (data/code) fonts
@@ -91,17 +103,13 @@
 
 **Priority order — top item is immediately actionable:**
 
-0. **[DEPLOY] Merge PR #3 and deploy to production** — PR open at https://github.com/chanfriendly/starwarsunlimited-db-api/pull/3. After merge: run `./deploy.sh` to build+push new images, pull+restart on TrueNAS. The new `user_wishlist` table auto-creates on first backend start — no migration needed.
+0. **[DEPLOY] Deploy current development branch to production** — Run `./deploy.sh` to build+push new frontend/backend images, then pull+restart on TrueNAS. Changes since last prod deploy: wishlist feature, full design system, profile page rewrite, ML dep split.
 
-1. **[BROWSER TEST] Login + deck + collection test in browser on production** — Open `http://192.168.1.124:4000`. Test: login with real credentials, browse cards, double-click to add to collection, create/save a deck, visit profile to see saved decks. Local dev is verified; production client-side JS flows haven't been tested.
+1. **[BROWSER TEST] Login + full flow test in browser on production** — Open `http://192.168.1.124:4000`. Test: login → cards page → double-click card to add to collection → deck builder → create deck → profile page (decks, collection, wishlist tabs). Local dev is verified; production client-side JS flows haven't been tested since the redesign.
 
-2. **[DESIGN] Finish profile page design pass** — The profile page header, decks tab, and collection tab still use the old Tailwind/shadcn purple theme (gray-900 backgrounds, purple badges, motion/framer-motion animations). The wishlist tab and collection completion stat are already on the new design system. A full profile rewrite to `ts-*` classes would complete the visual consistency.
+2. **[BROWSER TEST] Test double-click card add in deck builder** — The double-click handler exists (`handleCardDoubleClick`) and leader filtering logic is confirmed in code (`leadersShareAspects`), but hasn't been manually tested. Next time: double-click a leader, verify second leader grid filters to compatible aspects only, then proceed through base and cards stages.
 
-3. **[BROWSER TEST] Test double-click card add in deck builder** — The double-click handler exists (`handleCardDoubleClick`) and the leader filtering logic is confirmed in code (`leadersShareAspects`), but clicking couldn't be automated. Next time: manually double-click a leader, verify the second leader grid filters to compatible aspects only, then proceed through base and cards stages.
-
-4. **[CLEANUP] Review `requirements.txt` ML dependencies** — `torch`, `sentence-transformers`, `qdrant-client` are unused. They add significant Docker build time. Consider moving to `requirements-ml.txt` until AI features are actually built.
-
-5. **[ENHANCEMENT] Add meaningful test coverage** — Current tests don't use standard pytest patterns. Add at minimum: auth endpoint tests, card search tests, deck CRUD tests.
+3. **[ENHANCEMENT] Add meaningful test coverage** — Current tests don't use standard pytest patterns. Add at minimum: auth endpoint tests, card search tests, deck CRUD tests.
 
 ---
 

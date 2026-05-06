@@ -2,8 +2,8 @@
 
 import { NextResponse } from 'next/server';
 
-// The backend API URL
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+// Server-side URL: use INTERNAL_API_URL (Docker network) with fallback for native dev
+const API_URL = process.env.INTERNAL_API_URL || 'http://localhost:8000';
 
 export async function GET() {
   try {
