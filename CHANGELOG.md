@@ -4,6 +4,26 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-05-05: Local Dev Smoke Test + PORT Conflict Fix
+
+**What changed:**
+
+**`.env.dev` `PORT=8000` removed** — `dev.sh` loads `.env.dev` via `export $(...)`. The file had a bare `PORT=8000` line which Next.js (and many Node processes) automatically pick up as the port to listen on. When `npm run dev` started, it saw `PORT=8000` in the environment and bound to 8000 instead of the default 3000. Since uvicorn was already on 8000, the two processes raced for the same port — whichever started second would either crash or shadow the first. Fixed by removing the `PORT` line (the backend port is hardcoded in `dev.sh` via `uvicorn ... --port 8000`; Next.js defaults to 3000 without it). The `BACKEND_PORT=8000` and `FRONTEND_PORT=4000` named vars remain as documentation.
+
+**Root cause of the confusion:** `dev.sh` said "backend failed to start (port already in use)" then said "backend started successfully" (because the health check hit the still-running *old* uvicorn). Then the new Next.js inherited `PORT=8000` and started there, shadowing the old uvicorn. Result: `GET /health` returned Next.js HTML, all FastAPI endpoints unreachable.
+
+**Local dev smoke test results:**
+- Frontend: `http://localhost:3000` — 200 OK, all pages render
+- Backend: `http://localhost:8000` — all API endpoints healthy
+- Proxy pattern confirmed: browser calls go through `:3000/api/...`, Next.js forwards to `:8000/api/...`
+- Cards page: 2,360 cards, full filter sidebar (type, aspects, keywords, sets, cost range)
+- Deck builder: leaders grid loads, aspect compatibility filtering logic confirmed in code
+- Auth flow: register, login, JWT, protected routes all work
+- Deck CRUD: create/read/delete via `GET|POST|DELETE /api/me/decks` all return correct status codes
+- TypeScript: 0 errors
+
+---
+
 ### 2026-05-04: Session 0 Part 3 — JWT Rotation, Production Smoke Test, Full Stack Repair
 
 **What changed:**
