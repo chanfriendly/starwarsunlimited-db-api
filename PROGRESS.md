@@ -6,7 +6,7 @@
 
 ## Current Status
 
-*(2026-05-06 session 2)* **Profile page design pass complete. ML deps split out. Env file staging cleaned up.** Profile page fully on Twin Suns design system — all shadcn components, framer-motion, and purple Tailwind classes replaced with `ts-*` CSS vars and design system patterns. `handleAddToCollection` bug fixed (was checking `.ok` on JSON instead of using try/catch). `backend/requirements-ml.txt` created; torch/sentence-transformers/qdrant/transformers/numpy removed from core `requirements.txt`. `.env.dev` + `.env.prod` removed from git index. Pre-existing TypeScript errors in `DeckBuilderClient.tsx` (`power`/`hp`) unchanged.
+*(2026-05-06 session 2)* **Profile page design pass complete. ML deps split out. All TypeScript errors cleared.** Profile page fully on Twin Suns design system. `requirements-ml.txt` created. Fixed Docker `INTERNAL_API_URL` missing from dev compose (cards wouldn't load in Docker mode). Fixed `stats/route.ts` using wrong env var. Fixed `DeckBuilderClient` `power`/`hp` → `attack`/`health` — **frontend now compiles with zero TypeScript errors**. Production stack is down on TrueNAS (port 4000 connection refused, SSH 24 not responding) — needs manual restart via Portainer before `./deploy.sh` results are visible.
 
 *(2026-05-06)* **Twin Suns Imperial Field Manual design system fully implemented. Wishlist feature live (full stack).** PR #3 merged into `development`. No regressions introduced; pre-existing TypeScript errors in `decks/[id]/route.ts` (Next.js params type) and `DeckBuilderClient.tsx` (`power`/`hp`) are unchanged. Backend `user_wishlist` table auto-creates on next startup via `create_all` — no migration script needed.
 
@@ -22,6 +22,11 @@
 
 ## What's Done
 
+- [x] **[2026-05-06] DeckBuilderClient `power`/`hp` → `attack`/`health` — zero TypeScript errors**
+  - Frontend now compiles clean with no errors at all
+- [x] **[2026-05-06] Docker dev compose: add missing `INTERNAL_API_URL=http://backend:8000`**
+  - Without this, Next.js route handlers fall back to `localhost:8000` inside the container (wrong); cards/aspects/etc. all fail
+  - Also fixed `stats/route.ts` which used `NEXT_PUBLIC_API_URL` server-side instead of `INTERNAL_API_URL`
 - [x] **[2026-05-06] Profile page — full Twin Suns design system rewrite**
   - All shadcn components removed from `profile/page.tsx` (Avatar, Badge, Button, Card, Input, Switch, Tabs — Radix Tabs primitives kept for state, styled with `ts-tabs-list`/`ts-tab-trigger`)
   - `framer-motion` and all Lucide icon imports removed
@@ -103,11 +108,11 @@
 
 **Priority order — top item is immediately actionable:**
 
-0. **[DEPLOY] Deploy current development branch to production** — Run `./deploy.sh` to build+push new frontend/backend images, then pull+restart on TrueNAS. Changes since last prod deploy: wishlist feature, full design system, profile page rewrite, ML dep split.
+0. **[DEPLOY] Start Docker Desktop + run `./deploy.sh`** — Docker is not running on MacBook. Once started: `cd ~/projects/starwarsunlimited-db-api && ./deploy.sh` builds+pushes both images to Docker Hub. Then restart the stack on TrueNAS via Portainer (production is fully down — port 4000 + SSH 24 both not responding; host is reachable via ping so it's a container issue).
 
-1. **[BROWSER TEST] Login + full flow test in browser on production** — Open `http://192.168.1.124:4000`. Test: login → cards page → double-click card to add to collection → deck builder → create deck → profile page (decks, collection, wishlist tabs). Local dev is verified; production client-side JS flows haven't been tested since the redesign.
+1. **[BROWSER TEST] Login + full flow test on production after deploy** — `http://192.168.1.124:4000`. Test: login → cards page → double-click to add to collection → deck builder → create deck → profile page (decks, collection, wishlist tabs all redesigned). Local dev verified clean.
 
-2. **[BROWSER TEST] Test double-click card add in deck builder** — The double-click handler exists (`handleCardDoubleClick`) and leader filtering logic is confirmed in code (`leadersShareAspects`), but hasn't been manually tested. Next time: double-click a leader, verify second leader grid filters to compatible aspects only, then proceed through base and cards stages.
+2. **[BROWSER TEST] Test double-click card add in deck builder** — Double-click handler exists (`handleCardDoubleClick`), leader filtering logic confirmed in code (`leadersShareAspects`). Manually double-click a leader, verify second leader grid filters to compatible aspects, proceed through base and cards stages.
 
 3. **[ENHANCEMENT] Add meaningful test coverage** — Current tests don't use standard pytest patterns. Add at minimum: auth endpoint tests, card search tests, deck CRUD tests.
 
