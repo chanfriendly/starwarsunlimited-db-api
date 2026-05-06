@@ -24,6 +24,7 @@ class User(Base):
     
     decks = relationship("Deck", back_populates="user", cascade="all, delete-orphan")
     collection = relationship("UserCollection", back_populates="user", cascade="all, delete-orphan")
+    wishlist = relationship("UserWishlist", back_populates="user", cascade="all, delete-orphan")
 
 print(f"--- Defining Deck class in models.py using Base ID: {id(Base)} ---")
 
@@ -93,6 +94,7 @@ class Card(Base):
     price_history = relationship("PriceHistory", back_populates="card", cascade="all, delete-orphan")
     deck_entries = relationship("DeckCard", back_populates="card")
     collectors = relationship("UserCollection", back_populates="card")
+    wishlist_entries = relationship("UserWishlist", back_populates="card")
 
 class CardAspect(Base):
     __tablename__ = 'card_aspects'
@@ -144,13 +146,23 @@ class PriceHistory(Base):
 
 class UserCollection(Base):
     __tablename__ = 'user_collection'
-    
+
     user_id = Column(String, ForeignKey('users.id'), primary_key=True)
     card_id = Column(String, ForeignKey('cards.id'), primary_key=True)
     count = Column(Integer, nullable=False, default=1)
-    
+
     user = relationship("User", back_populates="collection")
     card = relationship("Card", back_populates="collectors")
+
+class UserWishlist(Base):
+    __tablename__ = 'user_wishlist'
+
+    user_id = Column(String, ForeignKey('users.id'), primary_key=True)
+    card_id = Column(String, ForeignKey('cards.id'), primary_key=True)
+    added_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    user = relationship("User", back_populates="wishlist")
+    card = relationship("Card", back_populates="wishlist_entries")
 
 print(f"--- Finished defining models in models.py ---")
 print(f"--- Tables known to models.Base.metadata: {list(Base.metadata.tables.keys())} ---")

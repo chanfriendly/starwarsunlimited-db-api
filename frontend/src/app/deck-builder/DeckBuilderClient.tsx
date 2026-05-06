@@ -3,1009 +3,1492 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { CardGrid } from '@/components/CardGrid';
-import { CardDetail } from '@/components/CardDetail';
-import { LeaderSelection } from '@/components/LeaderSelection';
-import { DeckStats } from '@/components/DeckStats';
-import SaveDeckDialog from '@/components/SaveDeckDialog';
 import { useDeckBuilder } from '@/contexts/DeckBuilderContext';
-import { Card as CardType, FetchCardsParams, fetchCards, fetchAspects, fetchKeywords, fetchSets, fetchTraits, SavedDeck } from '@/lib/api';
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
+import { Card as CardType, FetchCardsParams, fetchCards, fetchAspects, fetchSets, fetchTraits, SavedDeck } from '@/lib/api';
 import { debounce } from 'lodash-es';
 import { fetchWithAuth } from '@/lib/fetch-utils';
 import { useAuth } from '@/contexts/AuthContext';
+import SaveDeckDialog from '@/components/SaveDeckDialog';
+import { HandSimModal } from './HandSimModal';
 
-// Type for individual items in the deck's card list from context/backend
-interface DeckCardItem {
-    card: CardType;
-    quantity: number;
-}
-
-// Constants
+// ── Constants ──────────────────────────────────────────────
 const SEARCH_DEBOUNCE_MS = 400;
-const CARDS_PER_PAGE = 50;
+const CARDS_PER_PAGE = 60;
 const LOOP_CHECK_WINDOW_MS = 3000;
 const MAX_VISITS_IN_WINDOW = 10;
 
-// Memoized CardDetail component
-const MemoizedCardDetail = React.memo(CardDetail);
+// ── Aspect pip ─────────────────────────────────────────────
+function AspectPip({ aspect }: { aspect: string }) {
+  const initials: Record<string, string> = {
+    Command: 'C', Aggression: 'A', Cunning: 'U',
+    Heroism: 'H', Vigilance: 'V', Villainy: 'X',
+  };
+  return (
+    <span
+      className="ts-aspect-pip"
+      data-aspect={aspect}
+      title={aspect}
+      style={{ width: 18, height: 18, fontSize: 8 }}
+    >
+      {initials[aspect] ?? aspect[0]}
+    </span>
+  );
+}
 
-export default function DeckBuilderClient() {
-    const router = useRouter();
-    const searchParams = useSearchParams();
-    const deckIdParam = searchParams.get('deckId');
-    const { isAuthenticated, isLoading: authLoading } = useAuth();
+// ── Resource curve chart ───────────────────────────────────
+function ResourceCurveChart({ deckCards }: { deckCards: { card: CardType; quantity: number }[] }) {
+  const curve = Array(8).fill(0);
+  deckCards.forEach(({ card, quantity }) => {
+    const cost = card.cost ?? card.energy_cost ?? 0;
+    const i = Math.min(cost, 7);
+    curve[i] += quantity;
+  });
+  const maxBar = Math.max(...curve, 1);
+  const labels = ['0','1','2','3','4','5','6','7+'];
 
-    // Redirect unauthenticated users to login
-    useEffect(() => {
-        if (!authLoading && !isAuthenticated) {
-            router.push('/login?redirect=/deck-builder');
-        }
-    }, [authLoading, isAuthenticated, router]);
-
-    // --- State ---
-    const [isPotentialLoop, setIsPotentialLoop] = useState(false);
-    const [cards, setCards] = useState<CardType[]>([]);
-    const [selectedCard, setSelectedCard] = useState<CardType | null>(null);
-    const [loading, setLoading] = useState(!deckIdParam);
-    const [isLoadingMore, setIsLoadingMore] = useState(false);
-    const [loadingDeck, setLoadingDeck] = useState(!!deckIdParam);
-    const [error, setError] = useState<string | null>(null);
-    const [searchQuery, setSearchQuery] = useState<string>('');
-    const [cardTypeFilter, setCardTypeFilter] = useState<string>('');
-    const [showAllCards, setShowAllCards] = useState<boolean>(false);
-    const [hideCardsInDeck, setHideCardsInDeck] = useState(true);
-    const [showSaveDialog, setShowSaveDialog] = useState(false);
-    const [currentPage, setCurrentPage] = useState(1);
-    const [totalPages, setTotalPages] = useState(1);
-    const [hasMoreCards, setHasMoreCards] = useState(true);
-    const [deckLoaded, setDeckLoaded] = useState(false);
-
-    // --- Filter + Sort State (cards stage only) ---
-    const [filterAspects, setFilterAspects] = useState<string[]>([]);
-    const [filterKeywords, setFilterKeywords] = useState<string[]>([]);
-    const [filterTraits, setFilterTraits] = useState<string[]>([]);
-    const [filterSets, setFilterSets] = useState<string[]>([]);
-    const [sortBy, setSortBy] = useState('name_asc');
-    const [showFilters, setShowFilters] = useState(false);
-
-    // --- Filter option lists ---
-    const [availableAspects, setAvailableAspects] = useState<string[]>([]);
-    const [availableKeywords, setAvailableKeywords] = useState<string[]>([]);
-    const [availableTraits, setAvailableTraits] = useState<string[]>([]);
-    const [availableSets, setAvailableSets] = useState<string[]>([]);
-
-    // --- Refs ---
-    const loadingRef = useRef(false);
-    const observerRef = useRef<IntersectionObserver | null>(null);
-    const lastCardElementRef = useRef<HTMLDivElement | null>(null);
-    const cardLoadingStageRef = useRef<string | null>(null);
-
-    // --- Deck Builder Context ---
-    const {
-        currentStage, leaders, base, deckCards, deckName,
-        addLeader, removeLeader, setBase: setBaseContext, addCard, removeCard,
-        setDeckName, isCardInDeck: isCardIdInDeck, isCardInAspect, resetDeck,
-        setCurrentStage: contextSetCurrentStage
-    } = useDeckBuilder();
-
-    // --- Loop Detection Effect ---
-    useEffect(() => {
-        const visitTimestamp = Date.now();
-        let visitHistory: number[] = [];
-        try { 
-            visitHistory = JSON.parse(sessionStorage.getItem('deckBuilderVisitHistory') || '[]'); 
-        } catch (e) { 
-            console.error("Failed to parse deckBuilderVisitHistory, resetting.", e); 
-            visitHistory = []; 
-        }
-
-        const recentVisits = visitHistory.filter((ts: number) => visitTimestamp - ts < LOOP_CHECK_WINDOW_MS);
-        recentVisits.push(visitTimestamp);
-        sessionStorage.setItem('deckBuilderVisitHistory', JSON.stringify(recentVisits));
-
-        if (recentVisits.length > MAX_VISITS_IN_WINDOW) {
-            console.error(`[DEBUG] Potential Loop Detected: ${recentVisits.length} renders in ${LOOP_CHECK_WINDOW_MS}ms. Halting potentially problematic operations.`);
-            setIsPotentialLoop(true);
-            sessionStorage.removeItem('deckBuilderVisitHistory');
-            sessionStorage.removeItem('editingDeck');
-            sessionStorage.removeItem('lastEditAttempt');
-            sessionStorage.removeItem('processedDeckId');
-        }
-        
-        const clearTimer = setTimeout(() => {
-            let currentHistory: number[] = [];
-            try { 
-                currentHistory = JSON.parse(sessionStorage.getItem('deckBuilderVisitHistory') || '[]'); 
-            } catch {}
-            const lastVisit = currentHistory[currentHistory.length - 1];
-            if (lastVisit && Date.now() - lastVisit > LOOP_CHECK_WINDOW_MS) { 
-                sessionStorage.removeItem('deckBuilderVisitHistory'); 
-            }
-        }, LOOP_CHECK_WINDOW_MS + 2000);
-        
-        return () => clearTimeout(clearTimer);
-    }, []);
-
-    // --- Load filter options when entering cards stage ---
-    useEffect(() => {
-        if (currentStage !== 'cards' || availableAspects.length > 0) return;
-        Promise.all([fetchAspects(), fetchKeywords(), fetchSets(), fetchTraits()])
-            .then(([asp, kw, sets, traits]) => {
-                setAvailableAspects(asp.map((a: any) => a.aspect_name).filter(Boolean));
-                setAvailableKeywords(kw.map((k: any) => k.keyword).filter(Boolean));
-                setAvailableSets(sets.map((s: any) => s.set_name).filter(Boolean));
-                setAvailableTraits(traits.map((t: any) => t.trait).filter(Boolean));
-            })
-            .catch(err => console.error('[DeckBuilder] Failed to load filter options:', err));
-    }, [currentStage, availableAspects.length]);
-
-    // --- Load Cards Function ---
-    const loadCards = useCallback(async (
-        page = 1,
-        append = false,
-        currentSearch = searchQuery,
-        aspects = filterAspects,
-        keywords = filterKeywords,
-        traits = filterTraits,
-        sets = filterSets,
-        sort = sortBy,
-    ) => {
-        if (loadingRef.current || (append && !hasMoreCards)) return;
-        loadingRef.current = true;
-        setError(null);
-
-        if (page === 1 && !append) setLoading(true);
-        else if (append) setIsLoadingMore(true);
-
-        console.log(`[API] Fetching cards: Stage=${currentStage}, Page=${page}, Append=${append}, Search='${currentSearch}'`);
-
-        const params: FetchCardsParams = {
-            page: page.toString(),
-            limit: CARDS_PER_PAGE.toString(),
-            search: currentSearch || undefined,
-        };
-
-        if (currentStage === 'leaders') params.type = 'Leader';
-        else if (currentStage === 'base') params.type = 'Base';
-        else if (currentStage === 'cards') {
-            params.type = 'Unit,Event,Upgrade';
-            if (aspects.length) params.aspect = aspects.join(',');
-            if (keywords.length) params.keyword = keywords.join(',');
-            if (traits.length) params.trait = traits.join(',');
-            if (sets.length) params.set = sets.join(',');
-            params.sort = sort;
-        }
-
-        try {
-            const response = await fetchCards(params);
-            const newCards = Array.isArray(response.data) ? response.data : [];
-            const meta = response.meta || { pages: 1, total: newCards.length };
-            
-            setCards(prev => append ? [...prev, ...newCards] : newCards);
-            setTotalPages(meta.pages || 1);
-            setHasMoreCards((meta.pages || 1) > page);
-            setCurrentPage(page);
-            
-            console.log(`[API] Successfully loaded ${newCards.length} cards for stage '${currentStage}'`);
-        } catch (err) {
-            console.error(`[API] Failed to load cards:`, err);
-            setError(`Failed to load cards: ${err instanceof Error ? err.message : 'Unknown error'}`);
-        } finally {
-            setLoading(false);
-            setIsLoadingMore(false);
-            loadingRef.current = false;
-        }
-    }, [currentStage, searchQuery, filterAspects, filterKeywords, filterTraits, filterSets, sortBy, hasMoreCards]);
-
-    // --- Load Existing Deck Effect ---
-    useEffect(() => {
-        if (!deckIdParam || isPotentialLoop) { 
-            console.log('[DEBUG] loadExistingDeck Effect: No deckIdParam or potential loop detected. Skipping.'); 
-            setLoadingDeck(false); 
-            return; 
-        }
-        
-        const processedDeckId = sessionStorage.getItem('processedDeckId');
-        
-        if (processedDeckId && processedDeckId !== deckIdParam) {
-            console.log(`[DEBUG] New deck ID detected (${deckIdParam}). Clearing processed flag for ${processedDeckId}.`);
-            sessionStorage.removeItem('processedDeckId');
-        } else if (processedDeckId === deckIdParam) {
-            console.log('[DEBUG] loadExistingDeck Effect: Already processed this deck ID, skipping reload.');
-            setLoadingDeck(false);
-            if (currentStage !== 'cards') { 
-                contextSetCurrentStage('cards'); 
-            }
-            return;
-        }
-
-        console.log('[DEBUG] loadExistingDeck Effect: Starting load for deck ID:', deckIdParam);
-
-        const loadExistingDeck = async () => {
-            setLoadingDeck(true); 
-            setError(null);
-            
-            try {
-                sessionStorage.setItem('processedDeckId', deckIdParam);
-                let attempts = 0; 
-                const maxAttempts = 3; 
-                let deckData: SavedDeck | null = null;
-
-                while (attempts < maxAttempts && !deckData) {
-                    attempts++;
-                    try {
-                        console.log(`[API] Load Deck Attempt ${attempts} for deck: ${deckIdParam}`);
-                        const fetchedData = await fetchWithAuth(`/api/me/get-deck?id=${encodeURIComponent(deckIdParam)}`);
-                        console.log('[DEBUG] loadExistingDeck: Received raw data:', JSON.stringify(fetchedData, null, 2));
-
-                        // Validate the fetched data structure
-                        if (fetchedData && 
-                            typeof fetchedData === 'object' && 
-                            fetchedData.id === deckIdParam && 
-                            Array.isArray(fetchedData.leaders) && 
-                            Array.isArray(fetchedData.cards)) {
-                            deckData = fetchedData as SavedDeck;
-                            break;
-                        } else {
-                            throw new Error('Invalid or incomplete deck data received from server.');
-                        }
-                    } catch (fetchError: any) {
-                        console.error(`[Error] Fetch attempt ${attempts} failed:`, fetchError);
-                        if (attempts === maxAttempts) throw fetchError;
-                        await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
-                    }
-                }
-
-                // Process deckData if fetch succeeded
-                if (deckData) {
-                    console.log('[DEBUG] loadExistingDeck: Fetch successful. Updating context state...');
-                    console.log('[DEBUG] loadExistingDeck: Context state BEFORE:', { 
-                        name: deckName, 
-                        leaders: leaders.length, 
-                        base: !!base, 
-                        cards: deckCards.length, 
-                        stage: currentStage 
-                    });
-                    
-                    resetDeck();
-                    setDeckName(deckData.name || "Untitled Deck");
-                    
-                    // Add Leaders - deckData.leaders is already an array of Card objects
-                    if (Array.isArray(deckData.leaders)) {
-                        deckData.leaders.forEach((leader: CardType) => { 
-                            if (leader?.id) {
-                                addLeader(leader); 
-                            } else {
-                                console.error("[DEBUG] Invalid leader format:", leader); 
-                            }
-                        });
-                    }
-                    
-                    // Set Base - deckData.base is already a Card object or null
-                    if (deckData.base?.id) { 
-                        setBaseContext(deckData.base); 
-                    } else { 
-                        setBaseContext(null); 
-                    }
-                    
-                    // Add Cards - need to handle the backend format
-                    if (Array.isArray(deckData.cards)) {
-                        deckData.cards.forEach((cardItem: { card: CardType; quantity: number }) => {
-                            if (cardItem.card?.id) {
-                                addCard(cardItem.card);
-                            } else {
-                                console.error("[DEBUG] Invalid card format - missing card data:", cardItem);
-                            }
-                        });
-                    }
-                    
-                    contextSetCurrentStage('cards');
-                    console.log("[DEBUG] loadExistingDeck: Context updated and stage set to 'cards'");
-                    setDeckLoaded(true);
-                    
-                    setTimeout(() => { 
-                        console.log('[DEBUG] loadExistingDeck: Context state AFTER (delayed):', { 
-                            name: deckName, 
-                            leaders: leaders.length, 
-                            base: !!base, 
-                            cards: deckCards.length, 
-                            stage: currentStage 
-                        }); 
-                    }, 100);
-                } else {
-                    throw new Error("Failed to fetch valid deck data after multiple attempts.");
-                }
-            } catch (err) {
-                console.error('[DEBUG] Final error in loadExistingDeck process:', err);
-                if (err instanceof Error && err.message?.includes('(401)')) { 
-                    setError('Unauthorized loading deck. Please log in again.'); 
-                } else { 
-                    setError(`Failed to load deck: ${err instanceof Error ? err.message : 'Unknown error'}`); 
-                }
-                sessionStorage.removeItem('processedDeckId');
-                setDeckLoaded(false);
-            } finally {
-                setLoadingDeck(false);
-            }
-        };
-        
-        loadExistingDeck();
-
-        return () => { 
-            console.log('[DEBUG] Cleanup for loadExistingDeck effect'); 
-        };
-    }, [deckIdParam, isPotentialLoop, resetDeck, setDeckName, addLeader, setBaseContext, addCard, contextSetCurrentStage]);
-
-    // --- Load Cards Effect ---
-    useEffect(() => {
-        if (isPotentialLoop) return;
-
-        const stageKey = `${currentStage}-${searchQuery}-${filterAspects.join(',')}-${filterKeywords.join(',')}-${filterTraits.join(',')}-${filterSets.join(',')}-${sortBy}`;
-        if (cardLoadingStageRef.current === stageKey) return;
-
-        cardLoadingStageRef.current = stageKey;
-        console.log(`[Cards] Loading cards for stage: ${currentStage}, search: "${searchQuery}"`);
-
-        setCards([]);
-        setCurrentPage(1);
-        setHasMoreCards(true);
-        loadCards(1, false, searchQuery, filterAspects, filterKeywords, filterTraits, filterSets, sortBy);
-    }, [currentStage, searchQuery, filterAspects, filterKeywords, filterTraits, filterSets, sortBy, loadCards, isPotentialLoop]);
-
-    // --- Debounced Search ---
-    const debouncedSearch = useMemo(
-        () => debounce((query: string) => {
-            console.log(`[Search] Debounced search triggered: "${query}"`);
-            setSearchQuery(query);
-        }, SEARCH_DEBOUNCE_MS),
-        []
-    );
-
-    // --- Event Handlers ---
-    const handleCardClick = useCallback((card: CardType) => { 
-        setSelectedCard(card); 
-    }, []);
-
-    const handleCardDoubleClick = useCallback((card: CardType) => {
-        if (currentStage === 'leaders') { 
-            if (leaders.length < 2 && !leaders.some(l => l.id === card.id)) {
-                addLeader(card); 
-            }
-        } else if (currentStage === 'base') { 
-            if (card.type === 'Base' && !base) {
-                setBaseContext(card); 
-            }
-        } else if (currentStage === 'cards') { 
-            if (!isCardIdInDeck(card.id)) {
-                addCard(card); 
-            }
-        }
-    }, [currentStage, leaders, base, addLeader, setBaseContext, addCard, isCardIdInDeck]);
-
-    const handleAddToDeck = useCallback((card: CardType) => { 
-        handleCardDoubleClick(card); 
-    }, [handleCardDoubleClick]);
-
-    const handleRemoveFromDeck = useCallback((cardId: string) => {
-        if (leaders.some(l => l.id === cardId)) {
-            removeLeader(cardId);
-        } else if (base?.id === cardId) {
-            setBaseContext(null);
-        } else {
-            removeCard(cardId);
-        }
-        if (selectedCard?.id === cardId) {
-            setSelectedCard(null);
-        }
-    }, [leaders, base, removeLeader, setBaseContext, removeCard, selectedCard]);
-
-    const loadMoreCardsHandler = useCallback(() => {
-        if (hasMoreCards && !isLoadingMore) {
-            loadCards(currentPage + 1, true, searchQuery, filterAspects, filterKeywords, filterTraits, filterSets, sortBy);
-        }
-    }, [hasMoreCards, isLoadingMore, currentPage, searchQuery, filterAspects, filterKeywords, filterTraits, filterSets, sortBy, loadCards]);
-
-    // --- Helper function to check if leaders share aspects ---
-    const leadersShareAspects = useCallback((leader1: CardType, leader2: CardType): boolean => {
-        const aspects1 = leader1.aspects?.map(a => a.aspect_name) || [];
-        const aspects2 = leader2.aspects?.map(a => a.aspect_name) || [];
-
-        // Heroism and Villainy cannot coexist in the same deck
-        if (aspects1.includes('Heroism') && aspects2.includes('Villainy')) return false;
-        if (aspects1.includes('Villainy') && aspects2.includes('Heroism')) return false;
-
-        // Leaders must share at least one aspect in Twin Suns format
-        return aspects1.some(aspect => aspects2.includes(aspect));
-    }, []);
-
-
-    // --- Client-Side Filtering ---
-    const displayedCards = useMemo(() => {
-    let filtered = cards;
-    
-    // Filter leaders based on compatibility with first selected leader
-    if (currentStage === 'leaders' && leaders.length === 1) {
-        const firstLeader = leaders[0];
-        filtered = filtered.filter(card => {
-            // Don't show the already selected leader
-            if (card.id === firstLeader.id) return false;
-            
-            // Only show leaders that share at least one aspect with the first leader
-            return leadersShareAspects(firstLeader, card);
-        });
-    }
-    
-    // Filter out leaders that are already selected (when browsing all leaders)
-    if (currentStage === 'leaders') {
-        const selectedLeaderIds = new Set(leaders.map(l => l.id));
-        filtered = filtered.filter(card => !selectedLeaderIds.has(card.id));
-    }
-    
-    // Existing filtering logic
-    if (currentStage === 'cards' && hideCardsInDeck) { 
-        const deckCardIds = new Set(deckCards.map(dc => dc.card.id)); 
-        filtered = filtered.filter(card => !deckCardIds.has(card.id)); 
-    }
-    
-    if (currentStage === 'cards' && !showAllCards && leaders.length === 2 && base) { 
-        filtered = filtered.filter(card => isCardInAspect(card)); 
-    }
-    
-    if (cardTypeFilter && cardTypeFilter !== 'All') { 
-        filtered = filtered.filter(card => card.type?.toLowerCase() === cardTypeFilter.toLowerCase()); 
-    }
-    
-    return filtered;
-}, [cards, hideCardsInDeck, deckCards, currentStage, showAllCards, leaders, base, cardTypeFilter, isCardInAspect, leadersShareAspects]);
-
-    // --- UI Helper Functions ---
-    const getStageInfo = useCallback(() => {
-        switch (currentStage) {
-            case 'leaders': 
-                return { title: 'Select Leaders', description: 'Choose two leaders for your deck.' };
-            case 'base': 
-                return { title: 'Select Base', description: 'Choose a base for your deck.' };
-            case 'cards': 
-                return { title: 'Add Cards', description: 'Add cards to your deck.' };
-            default: 
-                return { title: 'Deck Builder', description: 'Build your deck.' };
-        }
-    }, [currentStage]);
-
-    // --- Render Functions ---
-    const renderLeaderSelectionArea = useCallback(() => (
-        <Card className="bg-gray-900 border-gray-800">
-            <CardHeader className="border-b border-gray-800 p-4">
-                <CardTitle className="text-xl">Your Leaders ({leaders.length}/2)</CardTitle>
-            </CardHeader>
-            <CardContent className="p-4">
-                {leaders.length > 0 ? (
-                    <div className="grid grid-cols-2 gap-4">
-                        {leaders.map((leader) => (
-                            <div key={`leader-${leader.id}`} className="relative max-w-xs group cursor-pointer" onClick={() => setSelectedCard(leader)}>
-                                <div className="aspect-[7/10] relative rounded-lg overflow-hidden border-2 border-purple-500 bg-gray-800">
-                                    <img 
-                                        src={leader.image_uri ?? '/placeholder-card.png'} 
-                                        alt={leader.name} 
-                                        className="w-full h-full object-contain" 
-                                        onError={(e) => { 
-                                            const target = e.target as HTMLImageElement; 
-                                            target.src = '/placeholder-card.png'; 
-                                        }}
-                                    />
-                                </div>
-                                <button 
-                                    className="absolute top-2 right-2 p-1 bg-red-600 hover:bg-red-700 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity z-10" 
-                                    onClick={(e) => { 
-                                        e.stopPropagation(); 
-                                        handleRemoveFromDeck(leader.id); 
-                                    }}
-                                >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                    </svg>
-                                </button>
-                                <div className="mt-2 text-center">
-                                    <h3 className="font-medium truncate" title={leader.name}>{leader.name}</h3>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                ) : (
-                    <div className="h-40 flex items-center justify-center text-gray-500">
-                        Select two leaders from the cards above.
-                    </div>
-                )}
-                <div className="mt-6 flex justify-between">
-                    <Button onClick={resetDeck} variant="destructive">Reset Deck</Button>
-                    <Button 
-                        onClick={() => contextSetCurrentStage('base')} 
-                        disabled={leaders.length !== 2} 
-                        className="bg-gradient-to-r from-purple-600 to-purple-400 text-white hover:opacity-90 disabled:opacity-50"
-                    >
-                        Next: Select Base
-                    </Button>
-                </div>
-            </CardContent>
-        </Card>
-    ), [leaders, handleRemoveFromDeck, resetDeck, contextSetCurrentStage, setSelectedCard]);
-
-    const renderBaseSelectionArea = useCallback(() => (
-        <Card className="bg-gray-900 border-gray-800">
-            <CardHeader className="border-b border-gray-800 p-4">
-                <CardTitle className="text-xl">Your Base</CardTitle>
-            </CardHeader>
-            <CardContent className="p-4">
-                <div className="flex justify-center">
-                    {base ? (
-                        <div className="relative max-w-xs group cursor-pointer" onClick={() => setSelectedCard(base)}>
-                            <div className="aspect-[7/10] relative rounded-lg overflow-hidden border-2 border-purple-500 bg-gray-800">
-                                <img 
-                                    src={base.image_uri ?? '/placeholder-card.png'} 
-                                    alt={base.name} 
-                                    className="w-full h-full object-contain" 
-                                    onError={(e) => { 
-                                        const target = e.target as HTMLImageElement; 
-                                        target.src = '/placeholder-card.png'; 
-                                    }}
-                                />
-                            </div>
-                            <button 
-                                className="absolute top-2 right-2 p-1 bg-red-600 hover:bg-red-700 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity z-10" 
-                                onClick={(e) => { 
-                                    e.stopPropagation(); 
-                                    handleRemoveFromDeck(base.id); 
-                                }}
-                            >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                            </button>
-                            <div className="mt-2 text-center">
-                                <h3 className="font-medium truncate" title={base.name}>{base.name}</h3>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="aspect-[7/10] rounded-lg border-2 border-dashed border-gray-700 flex items-center justify-center max-w-xs w-full text-gray-500">
-                            Select a Base
-                        </div>
-                    )}
-                </div>
-                <div className="mt-6 flex justify-between">
-                    <Button onClick={() => contextSetCurrentStage('leaders')} variant="outline">Back</Button>
-                    <Button onClick={resetDeck} variant="destructive">Reset Deck</Button>
-                    <Button 
-                        onClick={() => contextSetCurrentStage('cards')} 
-                        disabled={!base} 
-                        className="bg-gradient-to-r from-orange-600 to-orange-400 text-white hover:opacity-90 disabled:opacity-50"
-                    >
-                        Next: Add Cards
-                    </Button>
-                </div>
-            </CardContent>
-        </Card>
-    ), [base, handleRemoveFromDeck, resetDeck, contextSetCurrentStage, setSelectedCard]);
-
-    const renderCardsSelectionArea = useCallback(() => (
-        <Card className="bg-gray-900 border-gray-800">
-            <CardHeader className="border-b border-gray-800 p-4">
-                <CardTitle className="text-xl">Your Deck ({deckCards.length})</CardTitle>
-            </CardHeader>
-            <CardContent className="p-4">
-                {deckCards.length > 0 ? (
-                    <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-7 lg:grid-cols-8 xl:grid-cols-9 gap-2">
-                        {deckCards.map((item: DeckCardItem) => { 
-                            const card = item.card; 
-                            if (!card) return null; 
-                            return (
-                                <div key={`deck-${card.id}`} className="relative group cursor-pointer" onClick={() => setSelectedCard(card)}>
-                                    <div className="aspect-[7/10] relative rounded-lg overflow-hidden border border-gray-700 hover:border-purple-500 transition-colors bg-gray-800">
-                                        <img 
-                                            src={card.image_uri ?? '/placeholder-card.png'} 
-                                            alt={card.name} 
-                                            className="w-full h-full object-contain" 
-                                            onError={(e) => { 
-                                                const target = e.target as HTMLImageElement; 
-                                                target.src = '/placeholder-card.png'; 
-                                            }}
-                                        />
-                                        <button 
-                                            className="absolute top-1 right-1 p-1 bg-red-600 hover:bg-red-700 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity z-10" 
-                                            onClick={(e) => { 
-                                                e.stopPropagation(); 
-                                                handleRemoveFromDeck(card.id); 
-                                            }}
-                                        >
-                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                            </svg>
-                                        </button>
-                                        <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-xs p-1 truncate">
-                                            {card.name}
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                ) : (
-                    <div className="h-40 flex items-center justify-center text-gray-500">
-                        Add cards to your deck.
-                    </div>
-                )}
-                <div className="mt-6 flex flex-wrap justify-between items-start gap-4">
-                    <div>
-                        <Button onClick={() => contextSetCurrentStage('base')} variant="outline" className="mr-2">
-                            Back
-                        </Button>
-                        <Button onClick={resetDeck} variant="destructive">
-                            Reset Deck
-                        </Button>
-                    </div>
-                    <Button 
-                        onClick={() => setShowSaveDialog(true)} 
-                        className="bg-green-600 hover:bg-green-700 text-white" 
-                        disabled={leaders.length !== 2 || !base}
-                    >
-                        Save Deck
-                    </Button>
-                </div>
-                {(leaders.length > 0 || base || deckCards.length > 0) && (
-                    <div className="mt-6">
-                        <DeckStats />
-                    </div>
-                )}
-            </CardContent>
-        </Card>
-    ), [deckCards, handleRemoveFromDeck, resetDeck, contextSetCurrentStage, setSelectedCard, leaders, base]);
-
-    // --- Main Component Return ---
-    if (isPotentialLoop) {
-        return (
-            <div className="min-h-screen bg-black text-white flex items-center justify-center p-8">
-                <div className="text-center bg-red-900/50 border border-red-500 p-6 rounded-lg max-w-md">
-                    <h2 className="text-2xl text-red-300 mb-4">Potential Loop Detected</h2>
-                    <p className="text-red-200 mb-4">
-                        Too many rapid page renders occurred. Deck loading has been halted to prevent issues.
-                    </p>
-                    <Button 
-                        onClick={() => {
-                            sessionStorage.clear();
-                            window.location.reload();
-                        }} 
-                        variant="outline" 
-                        className="border-red-400 text-red-300 hover:bg-red-900/50"
-                    >
-                        Clear Cache & Reload
-                    </Button>
-                </div>
-            </div>
-        );
-    }
-
-    const stageInfo = getStageInfo();
-
-    return (
-        <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white">
-            <div className="container mx-auto px-4 py-6">
-                {/* Header */}
-                <div className="mb-6">
-                    <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-400 to-orange-400 bg-clip-text text-transparent">
-                        Twin Suns Deck Builder
-                    </h1>
-                    <p className="text-gray-400 mt-2">{stageInfo.description}</p>
-                    {error && (
-                        <div className="mt-4 p-4 bg-red-900/50 border border-red-500 rounded-lg">
-                            <p className="text-red-300">{error}</p>
-                            <Button 
-                                onClick={() => setError(null)} 
-                                variant="outline" 
-                                size="sm" 
-                                className="mt-2 border-red-400 text-red-300"
-                            >
-                                Dismiss
-                            </Button>
-                        </div>
-                    )}
-                </div>
-
-                {/* Loading Deck State */}
-                {loadingDeck && (
-                    <div className="mb-6 p-4 bg-purple-900/50 border border-purple-500 rounded-lg">
-                        <div className="flex items-center">
-                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-purple-400 mr-3"></div>
-                            <span className="text-purple-300">Loading deck...</span>
-                        </div>
-                    </div>
-                )}
-
-                {/* Main Content Grid */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* Left Column: Card Browser and Stage Selection */}
-                    <div className="lg:col-span-2 space-y-6">
-                        {/* Card Browser */}
-                        <Card className="bg-gray-900 border-gray-800">
-                            <CardHeader className="border-b border-gray-800 p-4">
-                                <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-                                    <CardTitle className="text-xl">{stageInfo.title}</CardTitle>
-
-                                    {/* Search + Filter toggle */}
-                                    <div className="flex gap-2 w-full sm:w-auto">
-                                        <input
-                                            type="text"
-                                            placeholder="Search cards..."
-                                            className="flex-1 sm:w-52 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
-                                            onChange={(e) => debouncedSearch(e.target.value)}
-                                        />
-                                        {currentStage === 'cards' && (
-                                            <button
-                                                onClick={() => setShowFilters(f => !f)}
-                                                className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${showFilters ? 'bg-purple-600 border-purple-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700'}`}
-                                            >
-                                                Filters {(filterAspects.length + filterKeywords.length + filterTraits.length + filterSets.length) > 0 ? `(${filterAspects.length + filterKeywords.length + filterTraits.length + filterSets.length})` : ''}
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-
-                                {/* Expanded filter panel — cards stage only */}
-                                {currentStage === 'cards' && showFilters && (
-                                    <div className="mt-4 pt-4 border-t border-gray-700 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                        {/* Sort */}
-                                        <div>
-                                            <label className="block text-xs text-gray-400 mb-1">Sort by</label>
-                                            <select
-                                                value={sortBy}
-                                                onChange={e => setSortBy(e.target.value)}
-                                                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm"
-                                            >
-                                                <option value="name_asc">Name (A–Z)</option>
-                                                <option value="name_desc">Name (Z–A)</option>
-                                                <option value="cost_asc">Cost (Low → High)</option>
-                                                <option value="cost_desc">Cost (High → Low)</option>
-                                                <option value="type_asc">Type</option>
-                                                <option value="set_newest">Set (Newest)</option>
-                                                <option value="set_oldest">Set (Oldest)</option>
-                                                <option value="rarity_rare">Rarity (Rare → Common)</option>
-                                                <option value="rarity_common">Rarity (Common → Rare)</option>
-                                            </select>
-                                        </div>
-
-                                        {/* Type filter (kept as a quick select) */}
-                                        <div>
-                                            <label className="block text-xs text-gray-400 mb-1">Card type</label>
-                                            <select
-                                                value={cardTypeFilter}
-                                                onChange={(e) => setCardTypeFilter(e.target.value)}
-                                                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm"
-                                            >
-                                                <option value="">All types</option>
-                                                <option value="Unit">Unit</option>
-                                                <option value="Event">Event</option>
-                                                <option value="Upgrade">Upgrade</option>
-                                            </select>
-                                        </div>
-
-                                        {/* Set */}
-                                        <div>
-                                            <label className="block text-xs text-gray-400 mb-1">Set</label>
-                                            <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
-                                                {availableSets.map(s => (
-                                                    <label key={s} className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer hover:text-white">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={filterSets.includes(s)}
-                                                            onChange={e => setFilterSets(prev => e.target.checked ? [...prev, s] : prev.filter(x => x !== s))}
-                                                            className="accent-purple-500"
-                                                        />
-                                                        {s}
-                                                    </label>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        {/* Aspects */}
-                                        <div>
-                                            <label className="block text-xs text-gray-400 mb-1">Aspect</label>
-                                            <div className="flex flex-wrap gap-1">
-                                                {availableAspects.map(a => (
-                                                    <button
-                                                        key={a}
-                                                        onClick={() => setFilterAspects(prev => prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a])}
-                                                        className={`px-2 py-0.5 rounded text-xs font-medium border transition-colors ${filterAspects.includes(a) ? 'bg-purple-600 border-purple-500 text-white' : 'bg-gray-800 border-gray-600 text-gray-300 hover:border-gray-400'}`}
-                                                    >
-                                                        {a}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        {/* Keywords */}
-                                        <div>
-                                            <label className="block text-xs text-gray-400 mb-1">Keyword</label>
-                                            <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
-                                                {availableKeywords.map(k => (
-                                                    <label key={k} className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer hover:text-white">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={filterKeywords.includes(k)}
-                                                            onChange={e => setFilterKeywords(prev => e.target.checked ? [...prev, k] : prev.filter(x => x !== k))}
-                                                            className="accent-purple-500"
-                                                        />
-                                                        {k}
-                                                    </label>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        {/* Traits */}
-                                        <div>
-                                            <label className="block text-xs text-gray-400 mb-1">Trait</label>
-                                            <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
-                                                {availableTraits.map(t => (
-                                                    <label key={t} className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer hover:text-white">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={filterTraits.includes(t)}
-                                                            onChange={e => setFilterTraits(prev => e.target.checked ? [...prev, t] : prev.filter(x => x !== t))}
-                                                            className="accent-purple-500"
-                                                        />
-                                                        {t}
-                                                    </label>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        {/* Clear filters */}
-                                        {(filterAspects.length + filterKeywords.length + filterTraits.length + filterSets.length) > 0 && (
-                                            <div className="sm:col-span-2">
-                                                <button
-                                                    onClick={() => { setFilterAspects([]); setFilterKeywords([]); setFilterTraits([]); setFilterSets([]); setSortBy('name_asc'); }}
-                                                    className="text-xs text-red-400 hover:text-red-300 underline"
-                                                >
-                                                    Clear all filters
-                                                </button>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-
-                                {/* Stage Controls */}
-                                {currentStage === 'cards' && (
-                                    <div className="flex flex-wrap gap-4 items-center mt-4">
-                                        <div className="flex items-center space-x-2">
-                                            <Switch
-                                                id="show-all-cards"
-                                                checked={showAllCards}
-                                                onCheckedChange={setShowAllCards}
-                                            />
-                                            <Label htmlFor="show-all-cards" className="text-sm text-gray-300">
-                                                Show all cards (ignore aspects)
-                                            </Label>
-                                        </div>
-                                        <div className="flex items-center space-x-2">
-                                            <Switch
-                                                id="hide-cards-in-deck"
-                                                checked={hideCardsInDeck}
-                                                onCheckedChange={setHideCardsInDeck}
-                                            />
-                                            <Label htmlFor="hide-cards-in-deck" className="text-sm text-gray-300">
-                                                Hide cards already in deck
-                                            </Label>
-                                        </div>
-                                    </div>
-                                )}
-                            </CardHeader>
-                            
-                            <CardContent className="p-0">
-                                {loading ? (
-                                    <div className="h-96 flex items-center justify-center text-purple-400">
-                                        Loading available cards...
-                                    </div>
-                                ) : displayedCards.length === 0 && !loading ? (
-                                    <div className="h-96 flex items-center justify-center text-gray-400 p-4 text-center">
-                                        {searchQuery ? 
-                                            `No cards found matching "${searchQuery}".` : 
-                                            `No ${currentStage === 'leaders' ? 'leaders' : currentStage === 'base' ? 'bases' : 'cards'} available for this stage.`
-                                        }
-                                    </div>
-                                ) : (
-                                    <div className="max-h-[60vh] overflow-y-auto p-4">
-                                        <CardGrid
-                                            key={`card-grid-${currentStage}-${searchQuery}-${cardTypeFilter}-${showAllCards}-${hideCardsInDeck}-${filterAspects.join(',')}-${filterKeywords.join(',')}-${filterTraits.join(',')}-${filterSets.join(',')}-${sortBy}`}
-                                            cards={displayedCards}
-                                            onCardClickAction={handleCardClick}
-                                            onDoubleClickAction={handleCardDoubleClick}
-                                            isInDeck={isCardIdInDeck}
-                                        />
-                                        {hasMoreCards && displayedCards.length > 0 && (
-                                            <div ref={lastCardElementRef} style={{ height: '10px', background: 'transparent' }} />
-                                        )}
-                                    </div>
-                                )}
-                                
-                                {hasMoreCards && !loading && displayedCards.length > 0 && (
-                                    <div className="p-4 flex justify-center border-t border-gray-800">
-                                        <Button 
-                                            onClick={loadMoreCardsHandler} 
-                                            variant="outline" 
-                                            disabled={isLoadingMore} 
-                                            className="bg-gray-800 hover:bg-gray-700 text-white"
-                                        >
-                                            {isLoadingMore ? (
-                                                <>
-                                                    <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
-                                                    Loading...
-                                                </>
-                                            ) : (
-                                                'Load More'
-                                            )}
-                                        </Button>
-                                    </div>
-                                )}
-                                
-                                {!loading && !hasMoreCards && cards.length > 0 && (
-                                    <div className="p-4 text-center text-gray-500 text-sm border-t border-gray-800">
-                                        End of results.
-                                    </div>
-                                )}
-                            </CardContent>
-                        </Card>
-
-                        {/* Stage-specific Selection Areas */}
-                        {currentStage === 'leaders' && renderLeaderSelectionArea()}
-                        {currentStage === 'base' && renderBaseSelectionArea()}
-                        {currentStage === 'cards' && renderCardsSelectionArea()}
-                    </div>
-
-                    {/* Right Column: Card Detail */}
-                    <div className="lg:col-span-1">
-                        <Card className="bg-gray-900 border-gray-800 h-full sticky top-24">
-                            <CardHeader className="border-b border-gray-800 p-4">
-                                <CardTitle className="text-xl">Card Details</CardTitle>
-                            </CardHeader>
-                            <CardContent className="p-0 max-h-[calc(100vh-10rem)] overflow-y-auto">
-                                {selectedCard ? (
-                                    <MemoizedCardDetail 
-                                        key={selectedCard.id} 
-                                        card={selectedCard} 
-                                        onAddToDeck={handleAddToDeck} 
-                                        onRemoveFromDeck={handleRemoveFromDeck} 
-                                        isInDeck={isCardIdInDeck(selectedCard.id)} 
-                                        isCompatible={currentStage === 'cards' ? isCardInAspect(selectedCard) : true}
-                                        currentStage={currentStage}
-                                    />
-                                ) : (
-                                    <div className="p-6 text-center text-gray-400">
-                                        <div className="w-16 h-16 mx-auto mb-4 bg-gray-800 rounded-full flex items-center justify-center">
-                                            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                            </svg>
-                                        </div>
-                                        <h3 className="text-lg font-medium mb-2">No Card Selected</h3>
-                                        <p>Click on a card to view its details</p>
-                                    </div>
-                                )}
-                            </CardContent>
-                        </Card>
-                    </div>
-                </div>
-            </div>
-
-            {/* Save Deck Dialog */}
-            <SaveDeckDialog
-                isOpen={showSaveDialog}
-                onClose={() => setShowSaveDialog(false)}
-                existingDeckId={deckIdParam || undefined}
-                onSuccess={(deckId) => {
-                    setShowSaveDialog(false);
-                    router.push(`/profile`);
-                }}
+  return (
+    <div>
+      <div
+        className="ts-eyebrow"
+        style={{ marginBottom: 12, paddingLeft: 0 }}
+      >
+        Resource Curve
+      </div>
+      <div className="ts-curve-chart" style={{ marginBottom: 28 }}>
+        {curve.map((n, i) => (
+          <div key={i} className="ts-curve-bar">
+            <div
+              className="ts-curve-bar-fill"
+              style={{ height: `${(n / maxBar) * 100}%` }}
             />
-        </div>
+            {n > 0 && (
+              <span
+                style={{
+                  position: 'absolute',
+                  top: -16,
+                  left: 0,
+                  right: 0,
+                  textAlign: 'center',
+                  fontFamily: 'var(--ts-font-mono)',
+                  fontSize: 10,
+                  color: 'var(--ts-ink)',
+                }}
+              >
+                {n}
+              </span>
+            )}
+            <span
+              style={{
+                position: 'absolute',
+                bottom: -18,
+                left: 0,
+                right: 0,
+                textAlign: 'center',
+                fontFamily: 'var(--ts-font-mono)',
+                fontSize: 9,
+                color: 'var(--ts-ink-3)',
+              }}
+            >
+              {labels[i]}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Composition bar ────────────────────────────────────────
+function CompositionBar({ deckCards }: { deckCards: { card: CardType; quantity: number }[] }) {
+  const counts = { Unit: 0, Event: 0, Upgrade: 0, Other: 0 };
+  deckCards.forEach(({ card, quantity }) => {
+    const t = card.type ?? '';
+    if (t.toLowerCase().includes('unit'))    counts.Unit    += quantity;
+    else if (t.toLowerCase().includes('event'))   counts.Event   += quantity;
+    else if (t.toLowerCase().includes('upgrade')) counts.Upgrade += quantity;
+    else counts.Other += quantity;
+  });
+  const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
+
+  const segments = [
+    { key: 'Unit',    color: 'var(--ts-amber)',  n: counts.Unit },
+    { key: 'Event',   color: 'var(--ts-blue)',   n: counts.Event },
+    { key: 'Upgrade', color: 'var(--ts-green)',  n: counts.Upgrade },
+  ].filter(s => s.n > 0);
+
+  if (segments.length === 0) return null;
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div className="ts-eyebrow" style={{ marginBottom: 10 }}>Composition</div>
+      <div style={{ height: 7, display: 'flex', border: '1px solid var(--ts-line-2)' }}>
+        {segments.map(s => (
+          <div
+            key={s.key}
+            style={{ width: `${(s.n / total) * 100}%`, background: s.color }}
+            title={`${s.key}: ${s.n}`}
+          />
+        ))}
+      </div>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          marginTop: 7,
+          fontFamily: 'var(--ts-font-mono)',
+          fontSize: 10,
+          color: 'var(--ts-ink-2)',
+        }}
+      >
+        {segments.map(s => (
+          <span key={s.key}>
+            <span style={{ display:'inline-block', width:7, height:7, background:s.color, marginRight:5 }} />
+            {s.key} {s.n}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Deck panel (right column) ──────────────────────────────
+function DeckPanel({
+  deckCards, leaders, base, deckName, setDeckName,
+  addCard, removeCard,
+  openHandSim, openMulligan,
+  onSave, totalCards,
+}: {
+  deckCards: { card: CardType; quantity: number }[];
+  leaders: CardType[];
+  base: CardType | null;
+  deckName: string;
+  setDeckName: (n: string) => void;
+  addCard: (c: CardType) => void;
+  removeCard: (id: string) => void;
+  openHandSim: () => void;
+  openMulligan: () => void;
+  onSave: () => void;
+  totalCards: number;
+}) {
+  const grouped = useMemo(() => {
+    const g: Record<string, { card: CardType; quantity: number }[]> = {
+      Unit: [], Event: [], Upgrade: [], Other: [],
+    };
+    deckCards.forEach(item => {
+      const t = item.card.type ?? '';
+      if (t.toLowerCase().includes('unit'))         g.Unit.push(item);
+      else if (t.toLowerCase().includes('event'))   g.Event.push(item);
+      else if (t.toLowerCase().includes('upgrade')) g.Upgrade.push(item);
+      else g.Other.push(item);
+    });
+    Object.values(g).forEach(arr =>
+      arr.sort((a, b) => {
+        const ca = a.card.cost ?? a.card.energy_cost ?? 0;
+        const cb = b.card.cost ?? b.card.energy_cost ?? 0;
+        return ca - cb || a.card.name.localeCompare(b.card.name);
+      })
     );
+    return g;
+  }, [deckCards]);
+
+  const avgCost = useMemo(() => {
+    const sum = deckCards.reduce((s, { card, quantity }) => s + (card.cost ?? card.energy_cost ?? 0) * quantity, 0);
+    return totalCards > 0 ? (sum / totalCards).toFixed(1) : '—';
+  }, [deckCards, totalCards]);
+
+  const leaderAspects = leaders.flatMap(l => l.aspects?.map(a => a.aspect_name) ?? []);
+
+  const sections = [
+    ['Units', grouped.Unit],
+    ['Events', grouped.Event],
+    ['Upgrades', grouped.Upgrade],
+    ['Other', grouped.Other],
+  ] as [string, { card: CardType; quantity: number }[]][];
+
+  const isTargetMet = totalCards >= 30;
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ paddingBottom: 14, borderBottom: '1px solid var(--ts-line)' }}>
+        <div className="ts-eyebrow" style={{ marginBottom: 6 }}>Working Deck</div>
+        <input
+          value={deckName}
+          onChange={e => setDeckName(e.target.value)}
+          style={{
+            fontFamily: 'var(--ts-font-display)',
+            fontSize: 22,
+            color: 'var(--ts-ink)',
+            background: 'transparent',
+            border: 'none',
+            outline: 'none',
+            width: '100%',
+            padding: '2px 0',
+          }}
+        />
+        {leaderAspects.length > 0 && (
+          <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
+            {leaderAspects.map((a, i) => <AspectPip key={i} aspect={a} />)}
+            {leaders[0] && (
+              <span
+                style={{
+                  fontFamily: 'var(--ts-font-mono)',
+                  fontSize: 10,
+                  color: 'var(--ts-ink-3)',
+                  letterSpacing: '0.12em',
+                  alignSelf: 'center',
+                }}
+              >
+                {leaders.map(l => l.name).join(' · ').toUpperCase()}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Stats row */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          borderBottom: '1px solid var(--ts-line)',
+        }}
+      >
+        {[
+          { l: 'Cards', v: totalCards, sub: '/ 30 min' },
+          { l: 'Avg Cost', v: avgCost },
+          { l: 'Stage', v: leaders.length === 2 && base ? 'Ready' : 'Setup', sub: leaders.length < 2 ? `${leaders.length}/2 leaders` : !base ? 'no base' : undefined },
+        ].map(s => (
+          <div key={s.l} style={{ padding: '12px 10px', borderRight: '1px solid var(--ts-line)' }}>
+            <div className="ts-eyebrow" style={{ marginBottom: 4 }}>{s.l}</div>
+            <div
+              style={{
+                fontFamily: 'var(--ts-font-display)',
+                fontSize: 22,
+                lineHeight: 1,
+                color: s.l === 'Cards' && isTargetMet ? 'var(--ts-green)' : 'var(--ts-ink)',
+              }}
+            >
+              {s.v}
+            </div>
+            {s.sub && (
+              <div
+                style={{
+                  fontFamily: 'var(--ts-font-mono)',
+                  fontSize: 9,
+                  color: 'var(--ts-ink-4)',
+                  marginTop: 2,
+                }}
+              >
+                {s.sub}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Curve + composition */}
+      <div style={{ padding: '20px 6px 6px' }}>
+        <ResourceCurveChart deckCards={deckCards} />
+        <CompositionBar deckCards={deckCards} />
+      </div>
+
+      {/* Sim buttons */}
+      {totalCards > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 14, padding: '0 2px' }}>
+          <button className="ts-btn ts-btn-sm ts-btn-blue" onClick={openHandSim}>◇ Hand Sim</button>
+          <button className="ts-btn ts-btn-sm ts-btn-blue" onClick={openMulligan}>◇ Mulligan</button>
+        </div>
+      )}
+
+      {/* Deck list */}
+      <div style={{ borderTop: '1px solid var(--ts-line)' }}>
+        {sections.map(([label, list]) =>
+          list.length > 0 ? (
+            <div key={label} style={{ paddingBottom: 4 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  padding: '10px 8px 5px',
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: 'var(--ts-font-mono)',
+                    fontSize: 9,
+                    letterSpacing: '0.2em',
+                    color: 'var(--ts-amber)',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  {label}
+                </span>
+                <span
+                  style={{
+                    fontFamily: 'var(--ts-font-mono)',
+                    fontSize: 9,
+                    color: 'var(--ts-ink-3)',
+                  }}
+                >
+                  {list.reduce((s, i) => s + i.quantity, 0)}
+                </span>
+              </div>
+              {list.map(({ card, quantity }) => (
+                <div key={card.id} className="ts-deck-row">
+                  <span
+                    style={{
+                      fontFamily: 'var(--ts-font-mono)',
+                      fontSize: 10,
+                      color: 'var(--ts-amber)',
+                    }}
+                  >
+                    ×{quantity}
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: 'var(--ts-font-mono)',
+                      fontSize: 10,
+                      color: 'var(--ts-ink-3)',
+                    }}
+                  >
+                    {card.cost ?? card.energy_cost ?? '—'}
+                  </span>
+                  <span style={{ fontSize: 13, color: 'var(--ts-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {card.name}
+                  </span>
+                  <button
+                    onClick={() => removeCard(card.id)}
+                    style={{
+                      background: 'transparent',
+                      border: '1px solid var(--ts-line-2)',
+                      color: 'var(--ts-ink-3)',
+                      width: 20,
+                      height: 20,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      fontFamily: 'var(--ts-font-mono)',
+                      fontSize: 12,
+                      padding: 0,
+                      flexShrink: 0,
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--ts-red)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--ts-red)'; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--ts-ink-3)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--ts-line-2)'; }}
+                  >
+                    −
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null
+        )}
+      </div>
+
+      {/* Footer actions */}
+      <div style={{ padding: '14px 2px 0', display: 'flex', flexDirection: 'column', gap: 7 }}>
+        <button
+          className="ts-btn ts-btn-primary ts-btn-sm"
+          style={{ width: '100%', justifyContent: 'center' }}
+          onClick={onSave}
+          disabled={leaders.length !== 2 || !base}
+        >
+          Save Deck
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Stage banner (leaders/base setup) ─────────────────────
+function StageBanner({
+  currentStage, leaders, base, resetDeck, setStage,
+  handleRemoveFromDeck,
+}: {
+  currentStage: string;
+  leaders: CardType[];
+  base: CardType | null;
+  resetDeck: () => void;
+  setStage: (s: 'leaders' | 'base' | 'cards') => void;
+  handleRemoveFromDeck: (id: string) => void;
+}) {
+  if (currentStage === 'cards') return null;
+
+  const isLeaders = currentStage === 'leaders';
+
+  return (
+    <div
+      style={{
+        background: 'var(--ts-panel)',
+        border: '1px solid var(--ts-line)',
+        padding: 20,
+        marginBottom: 0,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          marginBottom: 16,
+        }}
+      >
+        <div>
+          <div className="ts-eyebrow" style={{ marginBottom: 4 }}>
+            {isLeaders ? `Step 1 · Select Leaders` : `Step 2 · Select Base`}
+          </div>
+          <div
+            style={{ fontFamily: 'var(--ts-font-display)', fontSize: 20, color: 'var(--ts-ink)' }}
+          >
+            {isLeaders
+              ? `Choose two leaders (${leaders.length}/2)`
+              : 'Choose your base'}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {!isLeaders && (
+            <button
+              className="ts-btn ts-btn-sm"
+              onClick={() => setStage('leaders')}
+            >
+              ← Leaders
+            </button>
+          )}
+          <button
+            className="ts-btn ts-btn-sm"
+            onClick={resetDeck}
+            style={{ color: 'var(--ts-red)', borderColor: 'var(--ts-red)' }}
+          >
+            Reset
+          </button>
+          {isLeaders && leaders.length === 2 && (
+            <button
+              className="ts-btn ts-btn-sm ts-btn-primary"
+              onClick={() => setStage('base')}
+            >
+              Next: Base →
+            </button>
+          )}
+          {!isLeaders && base && (
+            <button
+              className="ts-btn ts-btn-sm ts-btn-primary"
+              onClick={() => setStage('cards')}
+            >
+              Build Deck →
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        {isLeaders
+          ? leaders.map(leader => (
+              <div
+                key={leader.id}
+                style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 10 }}
+              >
+                <div
+                  style={{
+                    width: 44,
+                    height: 44,
+                    overflow: 'hidden',
+                    border: '1px solid var(--ts-amber)',
+                    flexShrink: 0,
+                  }}
+                >
+                  <img
+                    src={leader.image_uri ?? '/placeholder-card.png'}
+                    alt={leader.name}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: '50% 20%' }}
+                    onError={e => { (e.target as HTMLImageElement).src = '/placeholder-card.png'; }}
+                  />
+                </div>
+                <div>
+                  <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 15, color: 'var(--ts-ink)' }}>{leader.name}</div>
+                  <div style={{ display: 'flex', gap: 4, marginTop: 3 }}>
+                    {leader.aspects?.map(a => <AspectPip key={a.aspect_name} aspect={a.aspect_name} />)}
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleRemoveFromDeck(leader.id)}
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--ts-line-2)',
+                    color: 'var(--ts-ink-3)',
+                    width: 18,
+                    height: 18,
+                    cursor: 'pointer',
+                    fontSize: 10,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: 0,
+                    alignSelf: 'flex-start',
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            ))
+          : base ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div
+                style={{
+                  width: 44,
+                  height: 44,
+                  overflow: 'hidden',
+                  border: '1px solid var(--ts-amber)',
+                }}
+              >
+                <img
+                  src={base.image_uri ?? '/placeholder-card.png'}
+                  alt={base.name}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: '50% 20%' }}
+                  onError={e => { (e.target as HTMLImageElement).src = '/placeholder-card.png'; }}
+                />
+              </div>
+              <div>
+                <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 15, color: 'var(--ts-ink)' }}>{base.name}</div>
+                <div style={{ display: 'flex', gap: 4, marginTop: 3 }}>
+                  {base.aspects?.map(a => <AspectPip key={a.aspect_name} aspect={a.aspect_name} />)}
+                </div>
+              </div>
+              <button
+                onClick={() => handleRemoveFromDeck(base.id)}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid var(--ts-line-2)',
+                  color: 'var(--ts-ink-3)',
+                  width: 18,
+                  height: 18,
+                  cursor: 'pointer',
+                  fontSize: 10,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 0,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ) : null}
+      </div>
+    </div>
+  );
+}
+
+// ── Filter sidebar ──────────────────────────────────────────
+function FilterSidebar({
+  filterAspects, setFilterAspects,
+  filterTraits, setFilterTraits,
+  filterSets, setFilterSets,
+  cardTypeFilter, setCardTypeFilter,
+  availableAspects, availableTraits, availableSets,
+  showAllCards, setShowAllCards,
+  hideCardsInDeck, setHideCardsInDeck,
+  currentStage,
+}: {
+  filterAspects: string[];
+  setFilterAspects: React.Dispatch<React.SetStateAction<string[]>>;
+  filterTraits: string[];
+  setFilterTraits: React.Dispatch<React.SetStateAction<string[]>>;
+  filterSets: string[];
+  setFilterSets: React.Dispatch<React.SetStateAction<string[]>>;
+  cardTypeFilter: string;
+  setCardTypeFilter: React.Dispatch<React.SetStateAction<string>>;
+  availableAspects: string[];
+  availableTraits: string[];
+  availableSets: string[];
+  showAllCards: boolean;
+  setShowAllCards: React.Dispatch<React.SetStateAction<boolean>>;
+  hideCardsInDeck: boolean;
+  setHideCardsInDeck: React.Dispatch<React.SetStateAction<boolean>>;
+  currentStage: string;
+}) {
+  const toggle = (arr: string[], val: string, set: React.Dispatch<React.SetStateAction<string[]>>) => {
+    set(arr.includes(val) ? arr.filter(v => v !== val) : [...arr, val]);
+  };
+
+  const ASPECTS = ['Command', 'Aggression', 'Cunning', 'Heroism', 'Vigilance', 'Villainy'];
+  const TYPES = ['Unit', 'Event', 'Upgrade'];
+
+  if (currentStage !== 'cards') return null;
+
+  return (
+    <aside
+      style={{
+        borderRight: '1px solid var(--ts-line)',
+        background: 'var(--ts-panel)',
+        padding: '18px 16px',
+        overflowY: 'auto',
+        height: '100%',
+      }}
+    >
+      {/* Aspect */}
+      <div style={{ borderBottom: '1px solid var(--ts-line)', paddingBottom: 16, marginBottom: 0 }}>
+        <div className="ts-eyebrow" style={{ marginBottom: 10 }}>Aspect</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
+          {ASPECTS.map(a => (
+            <button
+              key={a}
+              className={'ts-filter-pill' + (filterAspects.includes(a) ? ' is-active' : '')}
+              onClick={() => toggle(filterAspects, a, setFilterAspects)}
+              style={{ justifyContent: 'flex-start', gap: 5 }}
+            >
+              <AspectPip aspect={a} />
+              <span style={{ fontSize: 9, letterSpacing: '0.1em' }}>{a.toUpperCase()}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Card Type */}
+      <div style={{ borderBottom: '1px solid var(--ts-line)', padding: '14px 0' }}>
+        <div className="ts-eyebrow" style={{ marginBottom: 10 }}>Card Type</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+          {TYPES.map(t => (
+            <button
+              key={t}
+              className={'ts-filter-pill' + (cardTypeFilter === t ? ' is-active' : '')}
+              onClick={() => setCardTypeFilter(prev => prev === t ? '' : t)}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Set */}
+      {availableSets.length > 0 && (
+        <div style={{ borderBottom: '1px solid var(--ts-line)', padding: '14px 0' }}>
+          <div className="ts-eyebrow" style={{ marginBottom: 10 }}>Set</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {availableSets.slice(0, 8).map(s => (
+              <label
+                key={s}
+                style={{
+                  display: 'flex',
+                  gap: 8,
+                  alignItems: 'center',
+                  fontSize: 11,
+                  color: 'var(--ts-ink-2)',
+                  cursor: 'pointer',
+                  fontFamily: 'var(--ts-font-mono)',
+                  letterSpacing: '0.08em',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={filterSets.includes(s)}
+                  onChange={e =>
+                    setFilterSets(prev =>
+                      e.target.checked ? [...prev, s] : prev.filter(x => x !== s)
+                    )
+                  }
+                  style={{ accentColor: 'var(--ts-amber)' }}
+                />
+                {s}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Traits */}
+      {availableTraits.length > 0 && (
+        <div style={{ borderBottom: '1px solid var(--ts-line)', padding: '14px 0' }}>
+          <div className="ts-eyebrow" style={{ marginBottom: 10 }}>Trait</div>
+          <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
+            {availableTraits.slice(0, 20).map(t => (
+              <label
+                key={t}
+                style={{
+                  display: 'flex',
+                  gap: 8,
+                  alignItems: 'center',
+                  fontSize: 11,
+                  color: 'var(--ts-ink-2)',
+                  cursor: 'pointer',
+                  fontFamily: 'var(--ts-font-mono)',
+                  letterSpacing: '0.08em',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={filterTraits.includes(t)}
+                  onChange={e =>
+                    setFilterTraits(prev =>
+                      e.target.checked ? [...prev, t] : prev.filter(x => x !== t)
+                    )
+                  }
+                  style={{ accentColor: 'var(--ts-amber)' }}
+                />
+                {t}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Smart filters */}
+      <div style={{ padding: '14px 0' }}>
+        <div className="ts-eyebrow" style={{ marginBottom: 10 }}>Smart Filters</div>
+        <label
+          style={{
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center',
+            fontSize: 12,
+            color: 'var(--ts-ink-2)',
+            cursor: 'pointer',
+            marginBottom: 10,
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={hideCardsInDeck}
+            onChange={e => setHideCardsInDeck(e.target.checked)}
+            style={{ accentColor: 'var(--ts-amber)' }}
+          />
+          Hide cards in deck
+        </label>
+        <label
+          style={{
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center',
+            fontSize: 12,
+            color: 'var(--ts-ink-2)',
+            cursor: 'pointer',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={showAllCards}
+            onChange={e => setShowAllCards(e.target.checked)}
+            style={{ accentColor: 'var(--ts-amber)' }}
+          />
+          Show all aspects
+        </label>
+      </div>
+
+      {/* Clear */}
+      {(filterAspects.length + filterTraits.length + filterSets.length) > 0 && (
+        <button
+          onClick={() => { setFilterAspects([]); setFilterTraits([]); setFilterSets([]); setCardTypeFilter(''); }}
+          style={{
+            fontFamily: 'var(--ts-font-mono)',
+            fontSize: 9,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            color: 'var(--ts-red)',
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            padding: '4px 0',
+          }}
+        >
+          Clear All Filters
+        </button>
+      )}
+    </aside>
+  );
+}
+
+// ── Card list (middle column) ──────────────────────────────
+function CardListView({
+  cards, deck, addCard, removeCard,
+  loading, hasMoreCards, isLoadingMore, loadMore,
+  isCardInDeck,
+}: {
+  cards: CardType[];
+  deck: { cards: { card: CardType; quantity: number }[] };
+  addCard: (c: CardType) => void;
+  removeCard: (id: string) => void;
+  loading: boolean;
+  hasMoreCards: boolean;
+  isLoadingMore: boolean;
+  loadMore: () => void;
+  isCardInDeck: (id: string) => boolean;
+}) {
+  if (loading) {
+    return (
+      <div
+        style={{
+          height: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: 'var(--ts-ink-3)',
+          fontFamily: 'var(--ts-font-mono)',
+          fontSize: 11,
+          letterSpacing: '0.16em',
+        }}
+      >
+        Loading cards…
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {/* Column headers */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '28px 1fr auto 88px',
+          gap: 8,
+          padding: '8px 12px',
+          background: 'var(--ts-bg-2)',
+          borderBottom: '1px solid var(--ts-line)',
+          fontFamily: 'var(--ts-font-mono)',
+          fontSize: 9,
+          letterSpacing: '0.2em',
+          textTransform: 'uppercase',
+          color: 'var(--ts-ink-3)',
+          flexShrink: 0,
+        }}
+      >
+        <span>#</span>
+        <span>Card · Type</span>
+        <span>Aspects</span>
+        <span style={{ textAlign: 'right' }}>Action</span>
+      </div>
+
+      {/* Card rows */}
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {cards.length === 0 ? (
+          <div
+            style={{
+              padding: 40,
+              textAlign: 'center',
+              color: 'var(--ts-ink-3)',
+              fontFamily: 'var(--ts-font-mono)',
+              fontSize: 11,
+              letterSpacing: '0.14em',
+            }}
+          >
+            No cards found
+          </div>
+        ) : (
+          cards.map(card => {
+            const inDeck = isCardInDeck(card.id);
+            const cost = card.cost ?? card.energy_cost ?? '—';
+            return (
+              <div key={card.id} className="ts-card-row">
+                <span
+                  style={{
+                    fontFamily: 'var(--ts-font-mono)',
+                    fontSize: 12,
+                    color: 'var(--ts-ink)',
+                    fontWeight: 600,
+                  }}
+                >
+                  {cost}
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontFamily: 'var(--ts-font-display)',
+                      fontSize: 14,
+                      color: 'var(--ts-ink)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {card.name}
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: 'var(--ts-font-mono)',
+                      fontSize: 9,
+                      color: 'var(--ts-ink-3)',
+                      letterSpacing: '0.14em',
+                      marginTop: 1,
+                    }}
+                  >
+                    {card.type}
+                    {card.power !== undefined && card.hp !== undefined
+                      ? ` · ${card.power}/${card.hp}`
+                      : ''}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 3 }}>
+                  {card.aspects?.map(a => (
+                    <AspectPip key={a.aspect_name} aspect={a.aspect_name} />
+                  ))}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  {inDeck ? (
+                    <button
+                      className="ts-filter-pill is-active"
+                      style={{
+                        padding: '4px 10px',
+                        background: 'var(--ts-green)',
+                        borderColor: 'var(--ts-green)',
+                        color: '#0e1410',
+                        fontSize: 9,
+                      }}
+                      onClick={() => removeCard(card.id)}
+                    >
+                      ✓ IN DECK
+                    </button>
+                  ) : (
+                    <button
+                      className="ts-filter-pill"
+                      style={{ padding: '4px 10px', fontSize: 9 }}
+                      onClick={() => addCard(card)}
+                    >
+                      + ADD
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
+
+        {hasMoreCards && !isLoadingMore && cards.length > 0 && (
+          <div style={{ padding: 16, textAlign: 'center' }}>
+            <button
+              className="ts-btn ts-btn-sm"
+              onClick={loadMore}
+            >
+              Load More
+            </button>
+          </div>
+        )}
+        {isLoadingMore && (
+          <div
+            style={{
+              padding: 16,
+              textAlign: 'center',
+              fontFamily: 'var(--ts-font-mono)',
+              fontSize: 10,
+              color: 'var(--ts-ink-3)',
+            }}
+          >
+            Loading…
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Main component ─────────────────────────────────────────
+export default function DeckBuilderClient() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const deckIdParam = searchParams.get('deckId');
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      router.push('/login?redirect=/deck-builder');
+    }
+  }, [authLoading, isAuthenticated, router]);
+
+  // State
+  const [isPotentialLoop, setIsPotentialLoop] = useState(false);
+  const [cards, setCards] = useState<CardType[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [loadingDeck, setLoadingDeck] = useState(!!deckIdParam);
+  const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [cardTypeFilter, setCardTypeFilter] = useState('');
+  const [showAllCards, setShowAllCards] = useState(false);
+  const [hideCardsInDeck, setHideCardsInDeck] = useState(true);
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [hasMoreCards, setHasMoreCards] = useState(true);
+  const [handSimMode, setHandSimMode] = useState<'sim' | 'mulligan' | null>(null);
+
+  // Filter state
+  const [filterAspects, setFilterAspects] = useState<string[]>([]);
+  const [filterTraits, setFilterTraits] = useState<string[]>([]);
+  const [filterSets, setFilterSets] = useState<string[]>([]);
+  const [availableAspects, setAvailableAspects] = useState<string[]>([]);
+  const [availableTraits, setAvailableTraits] = useState<string[]>([]);
+  const [availableSets, setAvailableSets] = useState<string[]>([]);
+
+  const loadingRef = useRef(false);
+  const cardLoadingStageRef = useRef<string | null>(null);
+
+  // Context
+  const {
+    currentStage, leaders, base, deckCards, deckName,
+    addLeader, removeLeader, setBase: setBaseContext, addCard, removeCard,
+    setDeckName, isCardInDeck: isCardIdInDeck, isCardInAspect, resetDeck,
+    setCurrentStage: contextSetCurrentStage, totalCards,
+  } = useDeckBuilder();
+
+  // Loop detection
+  useEffect(() => {
+    const visitTimestamp = Date.now();
+    let visitHistory: number[] = [];
+    try { visitHistory = JSON.parse(sessionStorage.getItem('deckBuilderVisitHistory') || '[]'); }
+    catch { visitHistory = []; }
+    const recentVisits = visitHistory.filter(ts => visitTimestamp - ts < LOOP_CHECK_WINDOW_MS);
+    recentVisits.push(visitTimestamp);
+    sessionStorage.setItem('deckBuilderVisitHistory', JSON.stringify(recentVisits));
+    if (recentVisits.length > MAX_VISITS_IN_WINDOW) {
+      setIsPotentialLoop(true);
+      sessionStorage.clear();
+    }
+    const timer = setTimeout(() => sessionStorage.removeItem('deckBuilderVisitHistory'), LOOP_CHECK_WINDOW_MS + 2000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Load filter options
+  useEffect(() => {
+    if (currentStage !== 'cards' || availableAspects.length > 0) return;
+    Promise.all([fetchAspects(), fetchSets(), fetchTraits()])
+      .then(([asp, sets, traits]) => {
+        setAvailableAspects(asp.map((a: any) => a.aspect_name).filter(Boolean));
+        setAvailableSets(sets.map((s: any) => s.set_name).filter(Boolean));
+        setAvailableTraits(traits.map((t: any) => t.trait).filter(Boolean));
+      })
+      .catch(err => console.error('[DeckBuilder] filter options:', err));
+  }, [currentStage, availableAspects.length]);
+
+  // Load cards
+  const loadCards = useCallback(async (page = 1, append = false) => {
+    if (loadingRef.current || (append && !hasMoreCards)) return;
+    loadingRef.current = true;
+    if (page === 1 && !append) setLoading(true);
+    else if (append) setIsLoadingMore(true);
+
+    const params: FetchCardsParams = {
+      page: page.toString(),
+      limit: CARDS_PER_PAGE.toString(),
+      search: searchQuery || undefined,
+    };
+
+    if (currentStage === 'leaders') params.type = 'Leader';
+    else if (currentStage === 'base') params.type = 'Base';
+    else {
+      params.type = cardTypeFilter
+        ? cardTypeFilter
+        : 'Unit,Event,Upgrade';
+      if (filterAspects.length) params.aspect = filterAspects.join(',');
+      if (filterTraits.length) params.trait = filterTraits.join(',');
+      if (filterSets.length) params.set = filterSets.join(',');
+    }
+
+    try {
+      const response = await fetchCards(params);
+      const newCards = Array.isArray(response.data) ? response.data : [];
+      const meta = response.meta || { pages: 1 };
+      setCards(prev => append ? [...prev, ...newCards] : newCards);
+      setHasMoreCards((meta.pages || 1) > page);
+      setCurrentPage(page);
+    } catch (err) {
+      setError(`Failed to load cards: ${err instanceof Error ? err.message : 'Unknown'}`);
+    } finally {
+      setLoading(false);
+      setIsLoadingMore(false);
+      loadingRef.current = false;
+    }
+  }, [currentStage, searchQuery, filterAspects, filterTraits, filterSets, cardTypeFilter, hasMoreCards]);
+
+  // Load existing deck
+  useEffect(() => {
+    if (!deckIdParam || isPotentialLoop) { setLoadingDeck(false); return; }
+    const processedId = sessionStorage.getItem('processedDeckId');
+    if (processedId === deckIdParam) { setLoadingDeck(false); if (currentStage !== 'cards') contextSetCurrentStage('cards'); return; }
+
+    const load = async () => {
+      setLoadingDeck(true);
+      try {
+        sessionStorage.setItem('processedDeckId', deckIdParam);
+        const data = await fetchWithAuth(`/api/me/get-deck?id=${encodeURIComponent(deckIdParam)}`);
+        if (!data?.id) throw new Error('Invalid deck data');
+        resetDeck();
+        setDeckName(data.name || 'Untitled Deck');
+        data.leaders?.forEach((l: CardType) => l?.id && addLeader(l));
+        if (data.base?.id) setBaseContext(data.base);
+        data.cards?.forEach((item: { card: CardType; quantity: number }) => item.card?.id && addCard(item.card));
+        contextSetCurrentStage('cards');
+      } catch (err) {
+        setError(`Failed to load deck: ${err instanceof Error ? err.message : 'Unknown'}`);
+        sessionStorage.removeItem('processedDeckId');
+      } finally { setLoadingDeck(false); }
+    };
+    load();
+  }, [deckIdParam, isPotentialLoop]);
+
+  // Reload cards when stage/filters change
+  useEffect(() => {
+    if (isPotentialLoop) return;
+    const key = `${currentStage}-${searchQuery}-${filterAspects.join(',')}-${filterTraits.join(',')}-${filterSets.join(',')}-${cardTypeFilter}`;
+    if (cardLoadingStageRef.current === key) return;
+    cardLoadingStageRef.current = key;
+    setCards([]);
+    setCurrentPage(1);
+    setHasMoreCards(true);
+    loadCards(1, false);
+  }, [currentStage, searchQuery, filterAspects, filterTraits, filterSets, cardTypeFilter, loadCards, isPotentialLoop]);
+
+  const debouncedSearch = useMemo(
+    () => debounce((q: string) => setSearchQuery(q), SEARCH_DEBOUNCE_MS),
+    []
+  );
+
+  // Client-side filtering
+  const displayedCards = useMemo(() => {
+    let filtered = cards;
+
+    if (currentStage === 'leaders' && leaders.length === 1) {
+      const first = leaders[0];
+      const firstAspects = first.aspects?.map(a => a.aspect_name) ?? [];
+      filtered = filtered.filter(card => {
+        if (card.id === first.id) return false;
+        const cardAspects = card.aspects?.map(a => a.aspect_name) ?? [];
+        if (firstAspects.includes('Heroism') && cardAspects.includes('Villainy')) return false;
+        if (firstAspects.includes('Villainy') && cardAspects.includes('Heroism')) return false;
+        return firstAspects.some(a => cardAspects.includes(a));
+      });
+    }
+    if (currentStage === 'leaders') {
+      const ids = new Set(leaders.map(l => l.id));
+      filtered = filtered.filter(c => !ids.has(c.id));
+    }
+    if (currentStage === 'cards' && hideCardsInDeck) {
+      const deckIds = new Set(deckCards.map(dc => dc.card.id));
+      filtered = filtered.filter(c => !deckIds.has(c.id));
+    }
+    if (currentStage === 'cards' && !showAllCards && leaders.length === 2 && base) {
+      filtered = filtered.filter(c => isCardInAspect(c));
+    }
+    return filtered;
+  }, [cards, currentStage, leaders, base, hideCardsInDeck, showAllCards, deckCards, isCardInAspect]);
+
+  const handleAddCard = useCallback((card: CardType) => {
+    if (currentStage === 'leaders') {
+      if (leaders.length < 2 && !leaders.some(l => l.id === card.id)) addLeader(card);
+    } else if (currentStage === 'base') {
+      if (card.type === 'Base' && !base) setBaseContext(card);
+    } else {
+      if (!isCardIdInDeck(card.id)) addCard(card);
+    }
+  }, [currentStage, leaders, base, addLeader, setBaseContext, addCard, isCardIdInDeck]);
+
+  const handleRemoveFromDeck = useCallback((id: string) => {
+    if (leaders.some(l => l.id === id)) removeLeader(id);
+    else if (base?.id === id) setBaseContext(null);
+    else removeCard(id);
+  }, [leaders, base, removeLeader, setBaseContext, removeCard]);
+
+  if (isPotentialLoop) {
+    return (
+      <div style={{ minHeight: '100vh', background: 'var(--ts-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center', border: '1px solid var(--ts-red)', padding: 32, maxWidth: 400 }}>
+          <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 28, color: 'var(--ts-red)', marginBottom: 12 }}>Loop Detected</div>
+          <p style={{ color: 'var(--ts-ink-2)', marginBottom: 16 }}>Too many rapid renders. Deck loading halted.</p>
+          <button
+            className="ts-btn ts-btn-sm"
+            onClick={() => { sessionStorage.clear(); window.location.reload(); }}
+            style={{ borderColor: 'var(--ts-red)', color: 'var(--ts-red)' }}
+          >
+            Clear & Reload
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const colHeight = 'calc(100vh - 90px)'; // nav (60) + status strip (30)
+
+  return (
+    <div style={{ background: 'var(--ts-bg)', minHeight: '100vh' }}>
+      {/* Top toolbar */}
+      <div
+        style={{
+          padding: '10px 24px',
+          background: 'var(--ts-panel)',
+          borderBottom: '1px solid var(--ts-line)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+        }}
+      >
+        <div className="ts-eyebrow">Atelier · Construction</div>
+        <div style={{ width: 1, height: 18, background: 'var(--ts-line)' }} />
+        <div style={{ flex: 1, position: 'relative', maxWidth: 520 }}>
+          <svg
+            width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--ts-ink-3)' }}
+          >
+            <circle cx="11" cy="11" r="7" />
+            <path d="m21 21-4.3-4.3" />
+          </svg>
+          <input
+            className="ts-input"
+            placeholder="Search cards…"
+            onChange={e => debouncedSearch(e.target.value)}
+            style={{ paddingLeft: 32, fontSize: 13 }}
+          />
+        </div>
+
+        {/* Stage selector */}
+        <div style={{ display: 'flex', gap: 0, border: '1px solid var(--ts-line-2)' }}>
+          {(['leaders', 'base', 'cards'] as const).map(stage => (
+            <button
+              key={stage}
+              onClick={() => contextSetCurrentStage(stage)}
+              style={{
+                padding: '5px 14px',
+                fontFamily: 'var(--ts-font-mono)',
+                fontSize: 9,
+                letterSpacing: '0.18em',
+                textTransform: 'uppercase',
+                background: currentStage === stage ? 'var(--ts-amber)' : 'transparent',
+                color: currentStage === stage ? '#1a1611' : 'var(--ts-ink-3)',
+                border: 'none',
+                borderRight: stage !== 'cards' ? '1px solid var(--ts-line-2)' : 'none',
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+              }}
+            >
+              {stage.charAt(0).toUpperCase() + stage.slice(1)}
+            </button>
+          ))}
+        </div>
+
+        <span
+          style={{
+            fontFamily: 'var(--ts-font-mono)',
+            fontSize: 11,
+            letterSpacing: '0.14em',
+            color: totalCards >= 30 ? 'var(--ts-green)' : 'var(--ts-amber)',
+          }}
+        >
+          ◉ {totalCards} / 30 CARDS
+        </span>
+      </div>
+
+      {/* Error banner */}
+      {error && (
+        <div
+          style={{
+            padding: '10px 24px',
+            background: 'rgba(255,61,46,0.1)',
+            borderBottom: '1px solid var(--ts-red)',
+            display: 'flex',
+            gap: 12,
+            alignItems: 'center',
+          }}
+        >
+          <span style={{ color: 'var(--ts-red)', fontFamily: 'var(--ts-font-mono)', fontSize: 11 }}>{error}</span>
+          <button
+            className="ts-btn ts-btn-sm"
+            onClick={() => setError(null)}
+            style={{ borderColor: 'var(--ts-red)', color: 'var(--ts-red)' }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Stage banner (leaders / base) */}
+      {currentStage !== 'cards' && (
+        <div style={{ padding: '0 0' }}>
+          <StageBanner
+            currentStage={currentStage}
+            leaders={leaders}
+            base={base}
+            resetDeck={resetDeck}
+            setStage={contextSetCurrentStage}
+            handleRemoveFromDeck={handleRemoveFromDeck}
+          />
+        </div>
+      )}
+
+      {/* 3-column builder grid */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: currentStage === 'cards' ? '260px 1fr 340px' : '1fr',
+          borderTop: '1px solid var(--ts-line)',
+          height: currentStage === 'cards' ? colHeight : undefined,
+          minHeight: currentStage !== 'cards' ? '60vh' : undefined,
+        }}
+      >
+        {/* Left: filters */}
+        {currentStage === 'cards' && (
+          <FilterSidebar
+            filterAspects={filterAspects} setFilterAspects={setFilterAspects}
+            filterTraits={filterTraits} setFilterTraits={setFilterTraits}
+            filterSets={filterSets} setFilterSets={setFilterSets}
+            cardTypeFilter={cardTypeFilter} setCardTypeFilter={setCardTypeFilter}
+            availableAspects={availableAspects}
+            availableTraits={availableTraits}
+            availableSets={availableSets}
+            showAllCards={showAllCards} setShowAllCards={setShowAllCards}
+            hideCardsInDeck={hideCardsInDeck} setHideCardsInDeck={setHideCardsInDeck}
+            currentStage={currentStage}
+          />
+        )}
+
+        {/* Middle: card list (always shown) */}
+        <div
+          style={{
+            background: 'var(--ts-bg)',
+            borderRight: '1px solid var(--ts-line)',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          {currentStage === 'cards' ? (
+            <CardListView
+              cards={displayedCards}
+              deck={{ cards: deckCards }}
+              addCard={handleAddCard}
+              removeCard={handleRemoveFromDeck}
+              loading={loading}
+              hasMoreCards={hasMoreCards}
+              isLoadingMore={isLoadingMore}
+              loadMore={() => loadCards(currentPage + 1, true)}
+              isCardInDeck={isCardIdInDeck}
+            />
+          ) : (
+            /* Leaders / base: grid of card images */
+            <div style={{ padding: 16, overflowY: 'auto' }}>
+              {loading ? (
+                <div
+                  style={{
+                    height: 200,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--ts-ink-3)',
+                    fontFamily: 'var(--ts-font-mono)',
+                    fontSize: 11,
+                  }}
+                >
+                  Loading…
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+                    gap: 10,
+                  }}
+                >
+                  {displayedCards.map(card => (
+                    <div
+                      key={card.id}
+                      onClick={() => handleAddCard(card)}
+                      style={{
+                        cursor: 'pointer',
+                        border: '1px solid var(--ts-line)',
+                        overflow: 'hidden',
+                        transition: 'border-color 0.15s',
+                        position: 'relative',
+                      }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--ts-amber)'; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--ts-line)'; }}
+                    >
+                      <div style={{ aspectRatio: '7/10' }}>
+                        <img
+                          src={card.image_uri ?? '/placeholder-card.png'}
+                          alt={card.name}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          onError={e => { (e.target as HTMLImageElement).src = '/placeholder-card.png'; }}
+                        />
+                      </div>
+                      <div
+                        style={{
+                          padding: '5px 6px',
+                          background: 'var(--ts-panel)',
+                          borderTop: '1px solid var(--ts-line)',
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontFamily: 'var(--ts-font-display)',
+                            fontSize: 12,
+                            color: 'var(--ts-ink)',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {card.name}
+                        </div>
+                        <div style={{ display: 'flex', gap: 3, marginTop: 3 }}>
+                          {card.aspects?.map(a => (
+                            <AspectPip key={a.aspect_name} aspect={a.aspect_name} />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {hasMoreCards && !loading && displayedCards.length > 0 && (
+                <div style={{ textAlign: 'center', marginTop: 16 }}>
+                  <button
+                    className="ts-btn ts-btn-sm"
+                    onClick={() => loadCards(currentPage + 1, true)}
+                    disabled={isLoadingMore}
+                  >
+                    {isLoadingMore ? 'Loading…' : 'Load More'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Right: deck panel */}
+        {currentStage === 'cards' && (
+          <div
+            style={{
+              background: 'var(--ts-panel)',
+              padding: '18px 14px',
+              overflowY: 'auto',
+            }}
+          >
+            <DeckPanel
+              deckCards={deckCards}
+              leaders={leaders}
+              base={base}
+              deckName={deckName}
+              setDeckName={setDeckName}
+              addCard={addCard}
+              removeCard={handleRemoveFromDeck}
+              openHandSim={() => setHandSimMode('sim')}
+              openMulligan={() => setHandSimMode('mulligan')}
+              onSave={() => setShowSaveDialog(true)}
+              totalCards={totalCards}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Modals */}
+      <SaveDeckDialog
+        isOpen={showSaveDialog}
+        onClose={() => setShowSaveDialog(false)}
+        existingDeckId={deckIdParam || undefined}
+        onSuccess={() => { setShowSaveDialog(false); router.push('/profile'); }}
+      />
+
+      {handSimMode && (
+        <HandSimModal
+          deckCards={deckCards}
+          mode={handSimMode}
+          onClose={() => setHandSimMode(null)}
+        />
+      )}
+    </div>
+  );
 }

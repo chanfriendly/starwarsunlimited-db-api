@@ -1,124 +1,463 @@
 /* src/app/globals.css */
 @import "tailwindcss";
 
-/* Force dark theme regardless of system preferences */
+/* ============================================================
+   Twin Suns — design tokens
+   "Imperial Field Manual" — desert tan parchment + saber accents
+   ============================================================ */
 :root {
-  --background: #0a0a0a;
-  --foreground: #ededed;
+  /* Palette: desert (default) */
+  --ts-bg: #1a1611;
+  --ts-bg-2: #221c14;
+  --ts-bg-3: #2a2419;
+  --ts-panel: #1f1a12;
+  --ts-panel-2: #2c251a;
+  --ts-line: #3d3527;
+  --ts-line-2: #4d4332;
+  --ts-ink: #e8dcc4;
+  --ts-ink-2: #c9b896;
+  --ts-ink-3: #8a7a5d;
+  --ts-ink-4: #5a4f3c;
+  --ts-paper: #d9c9a8;
+
+  /* Lightsaber accents */
+  --ts-red: #ff3d2e;
+  --ts-red-glow: rgba(255, 61, 46, 0.45);
+  --ts-blue: #4eb6ff;
+  --ts-blue-glow: rgba(78, 182, 255, 0.45);
+  --ts-green: #6ee36b;
+  --ts-green-glow: rgba(110, 227, 107, 0.45);
+  --ts-amber: #ffb454;
+
+  /* Aspect colors — faded-stamp */
+  --ts-aspect-command: #c2453a;
+  --ts-aspect-aggression: #d96f2d;
+  --ts-aspect-cunning: #e2b342;
+  --ts-aspect-heroism: #ead7a8;
+  --ts-aspect-vigilance: #4a90c4;
+  --ts-aspect-villainy: #4a4038;
+
+  /* Typography */
+  --ts-font-display: 'Cormorant Garamond', 'Cormorant', Georgia, serif;
+  --ts-font-body: 'Spectral', 'EB Garamond', Georgia, serif;
+  --ts-font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, monospace;
+
+  /* Texture */
+  --ts-grain-opacity: 0.14;
+  --ts-scanline-opacity: 0.0;
+
+  /* Tailwind compat */
+  --background: #1a1611;
+  --foreground: #e8dcc4;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
 }
 
-/* Remove the media query that was causing the light mode default */
-/* This ensures the app is always in dark mode */
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--ts-bg);
+  color: var(--ts-ink);
+  font-family: var(--ts-font-body);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
 }
 
-/* Twin Suns Gradient Definition */
+/* Paper-grain overlay */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9998;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.6  0 0 0 0 0.5  0 0 0 0 0.35  0 0 0 0.6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.5'/></svg>");
+  opacity: var(--ts-grain-opacity);
+  mix-blend-mode: overlay;
+}
+
+/* ============================================================
+   Typography
+   ============================================================ */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--ts-font-display);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  margin: 0;
+  color: var(--ts-ink);
+}
+
+h1 { font-size: clamp(36px, 5vw, 64px); line-height: 1.05; }
+h2 { font-size: clamp(24px, 3vw, 38px); line-height: 1.1; }
+h3 { font-size: 20px; line-height: 1.2; }
+
+a { color: inherit; }
+
+/* ============================================================
+   Twin Suns shared utilities
+   ============================================================ */
+.ts-eyebrow {
+  font-family: var(--ts-font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--ts-ink-3);
+}
+.ts-mono { font-family: var(--ts-font-mono); }
+.ts-display { font-family: var(--ts-font-display); }
+
+.ts-panel {
+  background: var(--ts-panel);
+  border: 1px solid var(--ts-line);
+}
+
+/* Hairline rule */
+.ts-rule {
+  height: 1px;
+  background: var(--ts-line);
+  border: 0;
+  margin: 0;
+}
+
+.ts-rule-double {
+  height: 5px;
+  border-top: 1px solid var(--ts-line);
+  border-bottom: 1px solid var(--ts-line);
+  margin: 0;
+}
+
+/* Saber glow line */
+.ts-saber-line {
+  height: 2px;
+  background: linear-gradient(to right, transparent, var(--ts-amber), transparent);
+  box-shadow: 0 0 8px var(--ts-amber);
+  border: 0;
+  margin: 0;
+}
+
+/* Aspect pip — hexagonal stamp */
+.ts-aspect-pip {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--ts-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: #1a1611;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+  flex-shrink: 0;
+}
+.ts-aspect-pip[data-aspect="Command"]    { background: var(--ts-aspect-command); color: #fff; }
+.ts-aspect-pip[data-aspect="Aggression"] { background: var(--ts-aspect-aggression); }
+.ts-aspect-pip[data-aspect="Cunning"]    { background: var(--ts-aspect-cunning); }
+.ts-aspect-pip[data-aspect="Heroism"]    { background: var(--ts-aspect-heroism); }
+.ts-aspect-pip[data-aspect="Vigilance"]  { background: var(--ts-aspect-vigilance); color: #fff; }
+.ts-aspect-pip[data-aspect="Villainy"]   { background: var(--ts-aspect-villainy); color: var(--ts-ink-2); border: 1px solid var(--ts-line-2); }
+
+/* Filter pill */
+.ts-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--ts-line-2);
+  font-family: var(--ts-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  background: transparent;
+  color: var(--ts-ink-2);
+  transition: all 0.15s;
+}
+.ts-filter-pill:hover { border-color: var(--ts-amber); color: var(--ts-amber); }
+.ts-filter-pill.is-active {
+  background: var(--ts-amber);
+  color: #1a1611;
+  border-color: var(--ts-amber);
+}
+
+/* Dotted leader line */
+.ts-leader-line {
+  flex: 1;
+  border-bottom: 1px dotted var(--ts-line-2);
+  margin: 0 8px 4px;
+  min-width: 12px;
+}
+
+/* Chip */
+.ts-chip {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--ts-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border: 1px solid var(--ts-line-2);
+  color: var(--ts-ink-2);
+  background: transparent;
+  white-space: nowrap;
+}
+
+/* Stamp badge */
+.ts-stamp {
+  display: inline-block;
+  font-family: var(--ts-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ts-red);
+  border: 1.5px solid var(--ts-red);
+  padding: 3px 8px;
+  transform: rotate(-2deg);
+  opacity: 0.85;
+}
+
+/* Buttons */
+.ts-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 18px;
+  font-family: var(--ts-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  border: 1px solid var(--ts-line-2);
+  background: transparent;
+  color: var(--ts-ink);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-decoration: none;
+  border-radius: 0;
+}
+.ts-btn:hover {
+  border-color: var(--ts-amber);
+  color: var(--ts-amber);
+}
+.ts-btn-primary {
+  background: var(--ts-amber);
+  color: #1a1611;
+  border-color: var(--ts-amber);
+}
+.ts-btn-primary:hover {
+  background: #ffc870;
+  color: #1a1611;
+  border-color: #ffc870;
+  box-shadow: 0 0 20px rgba(255, 180, 84, 0.4);
+}
+.ts-btn-sm { padding: 5px 12px; font-size: 9px; letter-spacing: 0.16em; }
+.ts-btn-blue {
+  border-color: var(--ts-blue);
+  color: var(--ts-blue);
+}
+.ts-btn-blue:hover {
+  background: var(--ts-blue);
+  color: #08111c;
+  box-shadow: 0 0 16px var(--ts-blue-glow);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--ts-bg); }
+::-webkit-scrollbar-thumb { background: var(--ts-line-2); }
+::-webkit-scrollbar-thumb:hover { background: var(--ts-ink-4); }
+
+/* Selection */
+::selection { background: var(--ts-amber); color: #1a1611; }
+
+/* Focus */
+:focus-visible {
+  outline: 2px solid var(--ts-amber);
+  outline-offset: 2px;
+}
+
+/* ============================================================
+   Inputs
+   ============================================================ */
+.ts-input {
+  background: var(--ts-panel);
+  border: 1px solid var(--ts-line);
+  color: var(--ts-ink);
+  padding: 9px 13px;
+  font-family: var(--ts-font-body);
+  font-size: 14px;
+  width: 100%;
+  outline: none;
+}
+.ts-input:focus { border-color: var(--ts-amber); }
+.ts-input::placeholder { color: var(--ts-ink-4); }
+
+/* ============================================================
+   Status marquee animation
+   ============================================================ */
+@keyframes ts-marquee {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.ts-marquee-track { animation: ts-marquee 70s linear infinite; }
+
+/* ============================================================
+   Coming Soon overlay
+   ============================================================ */
+.ts-coming-soon {
+  position: relative;
+  overflow: hidden;
+}
+.ts-coming-soon-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(26, 22, 17, 0.88);
+  backdrop-filter: blur(2px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  border: 1px solid var(--ts-line-2);
+}
+
+/* ============================================================
+   Curve chart
+   ============================================================ */
+.ts-curve-chart {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  height: 80px;
+  align-items: end;
+  border-bottom: 1px solid var(--ts-line-2);
+  padding-bottom: 4px;
+}
+.ts-curve-bar {
+  background: var(--ts-panel-2);
+  border: 1px solid var(--ts-line-2);
+  position: relative;
+  min-height: 4px;
+}
+.ts-curve-bar-fill {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  background: var(--ts-amber);
+  transition: height 0.25s;
+}
+
+/* ============================================================
+   Tabs — override Radix styles to use Twin Suns aesthetic
+   ============================================================ */
+.ts-tabs-list {
+  display: flex;
+  border-bottom: 1px solid var(--ts-line);
+  background: transparent;
+  gap: 0;
+  height: auto;
+  padding: 0;
+}
+.ts-tab-trigger {
+  padding: 11px 18px;
+  font-family: var(--ts-font-mono) !important;
+  font-size: 10px !important;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ts-ink-3);
+  border: 0;
+  background: transparent;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border-radius: 0;
+  height: auto;
+}
+.ts-tab-trigger:hover { color: var(--ts-ink-2); }
+.ts-tab-trigger[data-state="active"] {
+  color: var(--ts-amber) !important;
+  border-bottom-color: var(--ts-amber);
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Card row in deck builder middle column */
+.ts-card-row {
+  display: grid;
+  grid-template-columns: 28px 1fr auto 88px;
+  gap: 8px;
+  padding: 7px 12px;
+  align-items: center;
+  border-bottom: 1px solid var(--ts-line);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.ts-card-row:hover { background: var(--ts-panel-2); }
+.ts-card-row:last-child { border-bottom: 0; }
+
+/* Deck card row in right panel */
+.ts-deck-row {
+  display: grid;
+  grid-template-columns: 22px 22px 1fr auto;
+  gap: 6px;
+  padding: 5px 8px;
+  align-items: center;
+  transition: background 0.1s;
+}
+.ts-deck-row:hover { background: var(--ts-panel-2); }
+
+/* Hand sim modal */
+.ts-hand-zone {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  padding: 28px 16px;
+  min-height: 260px;
+  align-items: center;
+  background: radial-gradient(ellipse at center bottom, rgba(255,180,84,0.05), transparent 60%), var(--ts-bg-2);
+  border: 1px solid var(--ts-line);
+}
+.ts-mini-card {
+  transition: transform 0.25s ease;
+  flex-shrink: 0;
+}
+.ts-mini-card:hover { transform: translateY(-10px); }
+
+/* Modal */
+.ts-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 8, 5, 0.88);
+  backdrop-filter: blur(4px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.ts-modal {
+  background: var(--ts-bg);
+  border: 1px solid var(--ts-line-2);
+  width: 100%;
+  max-width: 1060px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+/* ============================================================
+   Tailwind-compatible legacy overrides
+   (kept so existing Tailwind classes still work on non-builder pages)
+   ============================================================ */
 .twin-suns-gradient {
-  background-image: linear-gradient(to right, #a855f7, #ec4899, #f97316);
+  background-image: linear-gradient(to right, var(--ts-amber), var(--ts-red));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
   color: transparent;
   display: inline;
-  background-color: transparent !important;
-}
-
-/* Ensure the gradient is always applied with high specificity */
-h1 .twin-suns-gradient,
-h2 .twin-suns-gradient,
-.navbar .twin-suns-gradient,
-span.twin-suns-gradient {
-  background-image: linear-gradient(to right, #a855f7, #ec4899, #f97316) !important;
-  -webkit-background-clip: text !important;
-  -webkit-text-fill-color: transparent !important;
-  background-clip: text !important;
-  color: transparent !important;
-}
-
-/* Custom utility classes for text contrast - Tailwind-friendly */
-.section-heading {
-  @apply text-white font-medium;
-}
-
-.filter-label {
-  @apply text-gray-300 font-medium;
-}
-
-.stats-label {
-  @apply text-gray-300 font-medium;
-}
-
-/* Ensure specific headings have proper contrast */
-.card-browser-heading {
-  @apply text-white;
-}
-
-.deck-builder-heading {
-  @apply text-white;
-}
-
-.card-type-heading {
-  @apply text-white;
-}
-
-.aspects-heading {
-  @apply text-white;
-}
-
-.resource-cost-heading {
-  @apply text-white;
-}
-
-.energy-cost-heading {
-  @apply text-white;
-}
-
-.your-deck-heading {
-  @apply text-white;
-}
-
-.deck-stats-heading {
-  @apply text-white;
-}
-
-.card-count-heading {
-  @apply text-white;
-}
-
-/* Additional CSS for better contrast across the site */
-h1, h2, h3, h4, h5, h6 {
-  @apply text-white;
-}
-
-span, p, div {
-  @apply text-gray-300;
-}
-
-button, a {
-  @apply text-white;
-}
-
-/* Override for any text that still has contrast issues */
-.text-fix {
-  @apply text-white;
-}
-
-/* Force visible text on dark backgrounds */
-.dark-bg-text {
-  color: white !important; 
-}
-
-/* For any sections that were previously problematic */
-.force-visible {
-  color: white !important;
 }
