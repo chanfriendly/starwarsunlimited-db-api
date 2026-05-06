@@ -83,3 +83,10 @@ CLEANUP.md
 test-*.html
 *.backup
 *.tmp
+
+# Environment files with real secrets
+.env.dev
+.env.prod
+
+# Claude Code worktrees (local session working copies, not source files)
+.claude/worktrees/
