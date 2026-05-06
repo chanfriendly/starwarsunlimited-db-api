@@ -88,8 +88,7 @@ FastAPI Backend (:8000)
 Database scripts (backend/scripts/)
   ├─ build_database.py   — fetch cards from SWU API → swu_cards.db
   ├─ swu_api_client.py   — SWU API client used by build_database.py
-  ├─ backup_db.py        — integrity-check + timestamped backup of both DBs (keeps last 5)
-  └─ build_vector_db.py  — build Qdrant vector index (unused — see Principles)
+  └─ backup_db.py        — integrity-check + timestamped backup of both DBs (keeps last 5)
 
 databases/               — SQLite files live here locally and in Docker dev
   ├─ swu_cards.db        — gitignored; built by build_database.py
@@ -104,7 +103,7 @@ Production:
 
 **Key pattern**: The Next.js API routes (`src/app/api/**/route.ts`) are thin server-side proxies. They forward requests to the FastAPI backend using `INTERNAL_API_URL` (container-to-container). The browser never calls the FastAPI backend directly — all calls go through Next.js first. This is why two API URL env vars exist: `NEXT_PUBLIC_API_URL` (browser → Next.js) and `INTERNAL_API_URL` (Next.js server → FastAPI).
 
-**DB_DIR is the single source of truth for database location.** All scripts (`build_database.py`, `backup_db.py`, `build_vector_db.py`) and the backend (`db.py`) resolve database paths from `DB_DIR`. `dev.sh` sets it to `./databases/` for native dev. Docker compose sets it to `/data` (mounted from `./databases/`). Production sets it to `/databases` (mounted from the TrueNAS path).
+**DB_DIR is the single source of truth for database location.** All scripts (`build_database.py`, `backup_db.py`) and the backend (`db.py`) resolve database paths from `DB_DIR`. `dev.sh` sets it to `./databases/` for native dev. Docker compose sets it to `/data` (mounted from `./databases/`). Production sets it to `/databases` (mounted from the TrueNAS path).
 
 **Card data flow**: Official SWU API → `backend/scripts/build_database.py` → `databases/swu_cards.db`. Cards are static in the DB; the backend groups them by name+subtitle+type to merge art variants into single "card" entries. The `twin-suns-databases` repo is now superseded — all scripts and the automated workflow live here.
 
@@ -120,7 +119,7 @@ Production:
 
 **The decks router must be explicitly enabled or explicitly disabled — never left ambiguous.** It is currently commented out in `main.py`. If you enable it, fix the variable bug in `decks.py` first. If you leave it disabled, document the reason in PROGRESS.md.
 
-**Don't add AI features yet.** The `src/utils/vector_db.py` and `build_vector_db.py` are stubbed for future use. `qdrant-client`, `sentence-transformers`, and `torch` are in requirements.txt but not actively used. Don't wire them up without a clear spec — the dependency weight is already high.
+**Don't add AI features yet.** `requirements-ml.txt` lists the ML deps (`qdrant-client`, `sentence-transformers`, `torch`) but they are not wired into the app. Don't implement vector search or AI features without a clear spec — the dependency weight is significant.
 
 **Environment files are configuration, not secrets storage.** `.env.prod` currently contains the live JWT secret — this is a known security issue logged in PROGRESS.md. Never add new secrets to committed files.
 

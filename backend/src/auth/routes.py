@@ -1,9 +1,11 @@
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from typing import Annotated
 import logging
+import time
+from collections import defaultdict
 from src.utils.model_helpers import model_to_dict
 
 from src.database.db import get_app_db
@@ -19,6 +21,20 @@ from src.auth.auth import (
     get_password_hash
 )
 
+# Strict rate limiter for auth endpoints: 10 attempts per minute per IP.
+# Keyed by direct connection IP only — X-Forwarded-For is not trusted.
+_auth_attempts: dict = defaultdict(list)
+_AUTH_LIMIT = 10
+_AUTH_WINDOW = 60
+
+def _check_auth_rate_limit(request: Request):
+    ip = request.client.host if request.client else "unknown"
+    now = time.time()
+    _auth_attempts[ip] = [t for t in _auth_attempts[ip] if now - t < _AUTH_WINDOW]
+    if len(_auth_attempts[ip]) >= _AUTH_LIMIT:
+        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+    _auth_attempts[ip].append(now)
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
@@ -28,7 +44,8 @@ router = APIRouter(tags=["auth"])
 @router.post("/token", response_model=Token)
 async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
-    db: Annotated[Session, Depends(get_app_db)]
+    db: Annotated[Session, Depends(get_app_db)],
+    _: None = Depends(_check_auth_rate_limit),
 ):
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
@@ -47,7 +64,8 @@ async def login_for_access_token(
 @router.post("/register", response_model=UserResponse)
 async def register_user(
     user_data: UserCreate,
-    db: Annotated[Session, Depends(get_app_db)]
+    db: Annotated[Session, Depends(get_app_db)],
+    _: None = Depends(_check_auth_rate_limit),
 ):
     logger.info(f"Attempting to register user: {user_data.username}")
     try:
@@ -121,41 +139,3 @@ async def read_users_me(
     }
     return user_dict
 
-@router.get("/create-test-user")
-async def create_test_user_endpoint(db: Annotated[Session, Depends(get_app_db)]):
-    """Create a test user with known credentials"""
-    from src.auth.auth import get_user, get_password_hash, UserCreate
-    
-    # Check if test user exists
-    test_user = db.query(User).filter(User.username == "testuser").first()
-    if not test_user:
-        # Create a test user
-        test_user = User(
-            username="testuser",
-            email="test@example.com",
-            password_hash=get_password_hash("password123")
-        )
-        db.add(test_user)
-        db.commit()
-        db.refresh(test_user)
-        return {"message": "Test user created", "username": "testuser"}
-    return {"message": "Test user already exists", "username": "testuser"}
-
-@router.get("/debug-login")
-async def debug_login():
-    """Debug login functionality with simple direct test"""
-    from src.auth.auth import get_password_hash, verify_password
-    
-    # 1. Create a simple password hash
-    test_password = "password123"
-    password_hash = get_password_hash(test_password)
-    
-    # 2. Try to verify it immediately
-    is_valid = verify_password(test_password, password_hash)
-    
-    return {
-        "password": test_password,
-        "hash": password_hash,
-        "verification_result": is_valid,
-        "message": "Password verification is working" if is_valid else "PASSWORD VERIFICATION IS BROKEN"
-    }

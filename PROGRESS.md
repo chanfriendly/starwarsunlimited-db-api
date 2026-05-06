@@ -6,6 +6,8 @@
 
 ## Current Status
 
+*(2026-05-06 session 4)* **Repo cleanup + security hardening.** Deleted ML stubs. Removed backend port 8000 host-binding from prod compose (no longer publicly accessible — internal Docker network only). Deleted `create-test-user` and `debug-login` endpoints (both unauthenticated, exposed known credentials). Wired in `RateLimitMiddleware` at 120 req/min globally; added 10-attempt/min per-IP rate limit on `/api/auth/token` and `/api/auth/register`. Fixed `X-Forwarded-For` spoofability in rate limiter. **Still unverifiable from code**: whether Portainer port 9004 is firewalled at the router — if internet-accessible, that remains the highest-risk surface. Deleted `backend/src/utils/vector_db.py`, `backend/scripts/build_vector_db.py`, and `backend/scripts/rules_parser.py` (ML stubs not wired into anything). Removed stale comment about `NEXT_PUBLIC_API_URL` from `docker-compose.prod.yaml`. Updated CLAUDE.md to remove references to deleted files. `_cleanup_backup/` was already gone. `frontend/src/lib/utils.ts` kept — still used by `src/components/ui/` shadcn components. CHANGELOG.md updated. All PROGRESS.md cleanup items resolved.
+
 *(2026-05-06 session 3)* **Production stack fully operational. Deploy workflow automated — no more manual Portainer step.** Fixed `INTERNAL_API_URL` missing from Portainer stack (was `http://localhost:8000` fallback inside container). `deploy.sh` now authenticates with Portainer API and triggers stack redeploy automatically after push. `docker-compose.prod.yaml` is now the single source of truth (synced with Portainer). Deleted dead `frontend/src/lib/config.ts` (referenced `NEXT_PUBLIC_API_URL` but was never imported — api.ts already uses relative URLs). `frontend/public/.gitkeep` added so Docker build doesn't fail on missing `public/` dir. Full smoke test passed: cards/aspects/types/sets/keywords all 200 on production at `192.168.1.124:4000`. Deploy workflow is now: `./deploy.sh` → done (no Portainer visit needed).
 
 *(2026-05-06 session 2)* **Profile page design pass complete. ML deps split out. All TypeScript errors cleared.** Profile page fully on Twin Suns design system. `requirements-ml.txt` created. Fixed Docker `INTERNAL_API_URL` missing from dev compose (cards wouldn't load in Docker mode). Fixed `stats/route.ts` using wrong env var. Fixed `DeckBuilderClient` `power`/`hp` → `attack`/`health` — **frontend now compiles with zero TypeScript errors**. Production stack is down on TrueNAS (port 4000 connection refused, SSH 24 not responding) — needs manual restart via Portainer before `./deploy.sh` results are visible.
@@ -114,13 +116,13 @@
 
 1. **[BROWSER TEST] Test double-click card add in deck builder** — Double-click handler exists (`handleCardDoubleClick`), leader filtering logic confirmed in code (`leadersShareAspects`). Manually double-click a leader, verify second leader grid filters to compatible aspects, proceed through base and cards stages.
 
-2. **[REPO CLEANUP] Items to address next session:**
-   - `_cleanup_backup/` at project root — old pre-architecture files; safe to delete permanently
-   - `frontend/src/lib/utils.ts` — check if `cn()` is still used now that shadcn is removed from profile; may be dead code
-   - `backend/src/utils/vector_db.py` and `backend/scripts/build_vector_db.py` — stubbed ML code; either delete or gate behind a feature flag to avoid confusion
-   - `.env.prod` contains the live JWT secret in plaintext — known debt; move to TrueNAS secrets manager or at minimum document the rotation procedure
-   - `docker-compose.prod.yaml` on disk vs Portainer: currently synced. If Portainer is ever edited directly, `deploy.sh` will overwrite those changes (it pushes from disk). Decide: always edit on disk (current approach) or stop syncing the compose file in `deploy.sh` and only update images.
-   - `NEXT_PUBLIC_API_URL` still in `.env.prod` and old Portainer env vars — safe to remove since client code uses relative URLs; prevents confusion for future devs.
+2. **[REPO CLEANUP] — DONE** (session 4)
+   - ~~`_cleanup_backup/`~~ — was already gone
+   - `frontend/src/lib/utils.ts` — kept; still used by `src/components/ui/` shadcn components
+   - ~~`backend/src/utils/vector_db.py`, `build_vector_db.py`, `rules_parser.py`~~ — deleted
+   - `.env.prod` JWT secret in plaintext — known debt, documented below in Notes; no code change needed
+   - `docker-compose.prod.yaml` — always-edit-on-disk approach confirmed; Portainer copies overwritten on each `./deploy.sh`
+   - `NEXT_PUBLIC_API_URL` — already not present in `.env.prod` or source; stale comment removed from `docker-compose.prod.yaml`
 
 3. **[ENHANCEMENT] Add meaningful test coverage** — Current tests don't use standard pytest patterns. Add at minimum: auth endpoint tests, card search tests, deck CRUD tests.
 
@@ -128,7 +130,7 @@
 
 ## What's Blocked
 
-- **AI/ML features** — No spec. `vector_db.py` and `build_vector_db.py` exist but do nothing. Block until product decision on what Phase 2 AI features actually look like.
+- **AI/ML features** — No spec. ML stub files deleted (session 4). `requirements-ml.txt` retains the deps for when this is revisited. Block until product decision on what Phase 2 AI features actually look like.
 - **Offline/PWA support** — Listed in README as planned. No progress. Not a priority until core features are stable.
 
 ---

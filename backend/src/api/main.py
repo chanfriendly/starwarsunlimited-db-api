@@ -1,6 +1,7 @@
 # backend/src/api/main.py
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from src.utils.rate_limiter import RateLimitMiddleware
 import logging
 import os
 
@@ -99,19 +100,6 @@ except Exception as e:
 async def root():
     return {"message": "Star Wars Unlimited API is running"}
 
-# Debug endpoint to help test the API
-@app.get("/debug-routes")
-async def debug_routes():
-    """List all registered routes for debugging"""
-    routes = []
-    for route in app.routes:
-        routes.append({
-            "path": route.path,
-            "name": route.name,
-            "methods": [method for method in route.methods] if hasattr(route, "methods") else None
-        })
-    return {"routes": routes}
-
 # Health check endpoint - accepts both GET and HEAD
 @app.get("/health")
 @app.head("/health")
@@ -120,7 +108,7 @@ async def health():
 
 # Get allowed origins from environment variable or use defaults
 allowed_origins = os.environ.get(
-    "CORS_ALLOWED_ORIGINS", 
+    "CORS_ALLOWED_ORIGINS",
     "http://localhost:3000,https://twinsuns.chanfriendly.duckdns.org"
 ).split(",")
 
@@ -131,11 +119,15 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=[
-        "Content-Type", 
-        "Set-Cookie", 
-        "Access-Control-Allow-Headers", 
+        "Content-Type",
+        "Set-Cookie",
+        "Access-Control-Allow-Headers",
         "Access-Control-Allow-Origin",
         "Authorization"
     ],
-    max_age=86400,  # Cache preflight requests for 1 day
+    max_age=86400,
 )
+
+# Rate limiting: 120 requests/minute per IP across all endpoints.
+# Auth endpoints get a separate stricter limit via the auth router dependency.
+app.add_middleware(RateLimitMiddleware, requests_per_minute=120)

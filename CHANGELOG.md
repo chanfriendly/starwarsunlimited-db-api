@@ -4,6 +4,34 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-05-06: Security hardening — close cryptominer follow-up gaps
+
+**What changed:**
+
+**Backend port 8000 unexposed in prod** — Removed `ports: "8000:8000"` from `docker-compose.prod.yaml`. The backend is reachable by the frontend container over the internal Docker network (`http://backend:8000`) — it never needed to be host-bound. Exposing it meant FastAPI was directly reachable on the host, bypassing the Next.js proxy and all application-level controls. Only port 4000 (frontend) is now host-exposed.
+
+**Debug/test endpoints deleted** — `GET /api/auth/create-test-user` (created `testuser`/`password123` with no auth) and `GET /api/auth/debug-login` (returned a bcrypt hash of `password123` in plain text) were both publicly accessible with no authentication. Both removed from `auth/routes.py`.
+
+**Rate limiter activated** — `RateLimitMiddleware` (in `src/utils/rate_limiter.py`) was never wired in despite existing. Added to `main.py` at 120 req/min per IP across all endpoints. Additionally added a stricter in-route dependency (`_check_auth_rate_limit`) on `/api/auth/token` and `/api/auth/register` at 10 attempts/60s per IP. The middleware's `X-Forwarded-For` trust was also removed — only the direct connection IP is used, since that header is attacker-controlled with no trusted upstream proxy.
+
+**`/debug-routes` removed** — Endpoint that listed all registered API routes. Unnecessary info disclosure.
+
+**Note: Portainer (port 9004) firewall state unknown** — If 9004 is internet-accessible, that remains the highest-risk item (anyone with the Portainer password can spin up any container). Must be verified at the router/firewall level — not addressable in this codebase.
+
+---
+
+### 2026-05-06: Repo Cleanup — ML stubs deleted, stale docs updated
+
+**What changed:**
+
+**ML stub files deleted** — `backend/src/utils/vector_db.py`, `backend/scripts/build_vector_db.py`, and `backend/scripts/rules_parser.py` removed. None of these were imported by any active route or referenced in the running app. `requirements-ml.txt` retains the deps for the future; its comment updated to not reference the deleted files. CLAUDE.md updated to match.
+
+**`docker-compose.prod.yaml` comment removed** — Stale comment about `NEXT_PUBLIC_API_URL` removed from the frontend service env block. The var is not needed at runtime (client code uses relative URLs; confirmed not present in any source file or env config).
+
+**`frontend/src/lib/utils.ts` kept** — Verified still used by `src/components/ui/` shadcn components (`cn()` called in label, card, dialog, tabs, select, alert, switch, button, badge, avatar, slider, input, checkbox).
+
+---
+
 ### 2026-05-06: Profile Page Design Pass + ML Dep Cleanup
 
 **What changed:**

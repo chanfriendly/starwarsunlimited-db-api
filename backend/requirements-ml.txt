@@ -1,6 +1,6 @@
 # ML/AI dependencies — not needed for the core app
 # Install with: pip install -r requirements-ml.txt
-# Required only for build_vector_db.py and src/utils/vector_db.py
+# Required only when building vector search features (not yet implemented)
 qdrant-client==1.13.2
 sentence-transformers==3.4.1
 numpy==2.2.3

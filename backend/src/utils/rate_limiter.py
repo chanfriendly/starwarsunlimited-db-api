@@ -21,11 +21,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.request_history: Dict[str, list] = {}  # IP address -> list of timestamps
     
     async def dispatch(self, request: Request, call_next) -> Response:
-        # Get client IP (accounting for possible proxies)
-        client_ip = request.client.host
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            client_ip = forwarded_for.split(",")[0].strip()
+        # Use the direct connection IP only — X-Forwarded-For is not trusted
+        # because it is attacker-controlled when there is no trusted upstream proxy.
+        client_ip = request.client.host if request.client else "unknown"
         
         # Rate limit check
         current_time = time.time()

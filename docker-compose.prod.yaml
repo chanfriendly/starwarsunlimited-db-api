@@ -20,9 +20,6 @@ services:
       - "4000:3000"
     environment:
       - NODE_ENV=production
-      # NEXT_PUBLIC_API_URL is baked at build time and not needed at runtime.
-      # Client-side code uses relative URLs (/api/...) exclusively.
-      # Server-side route handlers use INTERNAL_API_URL for container-to-container calls.
       - INTERNAL_API_URL=http://backend:8000
     networks:
       - twinsuns
@@ -39,8 +36,6 @@ services:
     container_name: twinsuns-backend
     platform: linux/amd64
     restart: unless-stopped
-    ports:
-      - "8000:8000"
     volumes:
       - /mnt/volume1/docker/twinsuns/databases:/databases
     environment:
