@@ -6,6 +6,8 @@
 
 ## Current Status
 
+*(2026-05-06 session 3)* **Production stack fully operational. Deploy workflow automated — no more manual Portainer step.** Fixed `INTERNAL_API_URL` missing from Portainer stack (was `http://localhost:8000` fallback inside container). `deploy.sh` now authenticates with Portainer API and triggers stack redeploy automatically after push. `docker-compose.prod.yaml` is now the single source of truth (synced with Portainer). Deleted dead `frontend/src/lib/config.ts` (referenced `NEXT_PUBLIC_API_URL` but was never imported — api.ts already uses relative URLs). `frontend/public/.gitkeep` added so Docker build doesn't fail on missing `public/` dir. Full smoke test passed: cards/aspects/types/sets/keywords all 200 on production at `192.168.1.124:4000`. Deploy workflow is now: `./deploy.sh` → done (no Portainer visit needed).
+
 *(2026-05-06 session 2)* **Profile page design pass complete. ML deps split out. All TypeScript errors cleared.** Profile page fully on Twin Suns design system. `requirements-ml.txt` created. Fixed Docker `INTERNAL_API_URL` missing from dev compose (cards wouldn't load in Docker mode). Fixed `stats/route.ts` using wrong env var. Fixed `DeckBuilderClient` `power`/`hp` → `attack`/`health` — **frontend now compiles with zero TypeScript errors**. Production stack is down on TrueNAS (port 4000 connection refused, SSH 24 not responding) — needs manual restart via Portainer before `./deploy.sh` results are visible.
 
 *(2026-05-06)* **Twin Suns Imperial Field Manual design system fully implemented. Wishlist feature live (full stack).** PR #3 merged into `development`. No regressions introduced; pre-existing TypeScript errors in `decks/[id]/route.ts` (Next.js params type) and `DeckBuilderClient.tsx` (`power`/`hp`) are unchanged. Backend `user_wishlist` table auto-creates on next startup via `create_all` — no migration script needed.
@@ -108,11 +110,17 @@
 
 **Priority order — top item is immediately actionable:**
 
-0. **[DEPLOY] Start Docker Desktop + run `./deploy.sh`** — Docker is not running on MacBook. Once started: `cd ~/projects/starwarsunlimited-db-api && ./deploy.sh` builds+pushes both images to Docker Hub. Then restart the stack on TrueNAS via Portainer (production is fully down — port 4000 + SSH 24 both not responding; host is reachable via ping so it's a container issue).
+0. **[BROWSER TEST] Login + full flow test on production** — `http://192.168.1.124:4000`. Test: login → cards page → double-click to add to collection → deck builder → create deck → profile page (decks, collection, wishlist tabs). Production API smoke test passed via curl; needs real browser login flow verified.
 
-1. **[BROWSER TEST] Login + full flow test on production after deploy** — `http://192.168.1.124:4000`. Test: login → cards page → double-click to add to collection → deck builder → create deck → profile page (decks, collection, wishlist tabs all redesigned). Local dev verified clean.
+1. **[BROWSER TEST] Test double-click card add in deck builder** — Double-click handler exists (`handleCardDoubleClick`), leader filtering logic confirmed in code (`leadersShareAspects`). Manually double-click a leader, verify second leader grid filters to compatible aspects, proceed through base and cards stages.
 
-2. **[BROWSER TEST] Test double-click card add in deck builder** — Double-click handler exists (`handleCardDoubleClick`), leader filtering logic confirmed in code (`leadersShareAspects`). Manually double-click a leader, verify second leader grid filters to compatible aspects, proceed through base and cards stages.
+2. **[REPO CLEANUP] Items to address next session:**
+   - `_cleanup_backup/` at project root — old pre-architecture files; safe to delete permanently
+   - `frontend/src/lib/utils.ts` — check if `cn()` is still used now that shadcn is removed from profile; may be dead code
+   - `backend/src/utils/vector_db.py` and `backend/scripts/build_vector_db.py` — stubbed ML code; either delete or gate behind a feature flag to avoid confusion
+   - `.env.prod` contains the live JWT secret in plaintext — known debt; move to TrueNAS secrets manager or at minimum document the rotation procedure
+   - `docker-compose.prod.yaml` on disk vs Portainer: currently synced. If Portainer is ever edited directly, `deploy.sh` will overwrite those changes (it pushes from disk). Decide: always edit on disk (current approach) or stop syncing the compose file in `deploy.sh` and only update images.
+   - `NEXT_PUBLIC_API_URL` still in `.env.prod` and old Portainer env vars — safe to remove since client code uses relative URLs; prevents confusion for future devs.
 
 3. **[ENHANCEMENT] Add meaningful test coverage** — Current tests don't use standard pytest patterns. Add at minimum: auth endpoint tests, card search tests, deck CRUD tests.
 
@@ -134,7 +142,10 @@
 
 ## Notes for Next Session
 
-- Check `git log --all --diff-filter=D -- 'frontend/src/lib/*'` first — the lib/ files may be recoverable from git history without having to reconstruct them.
-- The `_cleanup_backup/` directory at project root contains old files from a past cleanup. Don't restore from there — it has an old requirements.txt and run.py that predate the current architecture.
-- `.env.prod` has real secrets. Do not `cat` it in a shared screen or paste its contents anywhere.
-- When testing decks, use the Swagger UI at `:8000/docs` to test backend directly before testing via the frontend proxy — easier to isolate which layer has a bug.
+- **Deploy is now fully automated**: `./deploy.sh` builds, pushes to Docker Hub, and triggers Portainer redeploy. No manual steps. Portainer credentials are in `.env.prod`.
+- **Production Portainer stack** is ID 94, endpointId 3, at `https://192.168.1.124:9004`. The compose file in Portainer is now synced with `docker-compose.prod.yaml` on disk. `deploy.sh` overwrites the Portainer compose on every deploy — so always edit on disk, not in the Portainer UI.
+- **Portainer stack env vars** (set in Portainer UI, not the compose file): `JWT_SECRET`, `DATABASE_PATH`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `CORS_ALLOWED_ORIGINS`. These are preserved by `deploy.sh` (fetched via API and re-submitted). Don't add new required vars here without updating `deploy.sh` or the compose defaults.
+- **Database layout on TrueNAS**: `swu_app.db` lives at `/mnt/volume1/docker/twinsuns/databases/app_db/swu_app.db`, card DB at `.../cards_db/swu_cards.db`. These paths are hardcoded in `docker-compose.prod.yaml` since they're TrueNAS-specific.
+- `.env.prod` has real secrets (JWT secret, Portainer password). Do not `cat` in a shared screen.
+- When testing decks, use Swagger at `:8000/docs` to test backend directly before testing via the frontend proxy.
+- The `_cleanup_backup/` directory at project root is safe to delete — old pre-architecture files, nothing recoverable.
