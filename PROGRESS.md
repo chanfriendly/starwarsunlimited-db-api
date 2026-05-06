@@ -6,6 +6,8 @@
 
 ## Current Status
 
+*(2026-05-06)* **Twin Suns Imperial Field Manual design system fully implemented. Wishlist feature live (full stack).** PR #3 open against `development`. No regressions introduced; pre-existing TypeScript errors in `decks/[id]/route.ts` (Next.js params type) and `DeckBuilderClient.tsx` (`power`/`hp`) are unchanged. Backend `user_wishlist` table auto-creates on next startup via `create_all` — no migration script needed. Production deploy pending PR merge.
+
 *(2026-05-05)* **Production stack rebuilt and operational after cryptominer incident.** Both `twinsuns-backend:local` and `twinsuns-frontend:local` images rebuilt from `--no-cache` using rsynced clean local source. Stack started via `docker-compose.prod.yaml`. Smoke test passed: cards/aspects/types return data, collection/decks return 401 (correct). Stack healthy at `192.168.1.124:4000`.
 
 *(2026-05-05)* **Local dev smoke test complete.** Fixed `PORT=8000` bug in `.env.dev` that caused Next.js to start on port 8000 (conflicting with uvicorn). Local dev environment is stable: frontend on `:3000`, backend on `:8000`. Full end-to-end flow verified: login → deck builder renders → leaders load (2,360 total cards) → aspect filtering logic confirmed → deck CRUD works via API → cards page works with all filters. No console errors.
@@ -17,6 +19,26 @@
 ---
 
 ## What's Done
+
+- [x] **[2026-05-06] Twin Suns design system — Imperial Field Manual** (PR #3)
+  - `globals.css` + `layout.tsx`: full `--ts-*` CSS custom property system; Cormorant Garamond (display), Spectral (body), JetBrains Mono (data/code) fonts
+  - `page.tsx`: hero rewrite with absolute-positioned twin suns (radial gradient circles), scanlines overlay (`repeating-linear-gradient`), left vignette, correct copy, Deck of the Cycle spotlight, Pilot Training rank tracks
+  - `Navbar.tsx`: full redesign with Twin Suns branding
+  - `login/page.tsx` + `signup/page.tsx`: removed all shadcn/lucide; restyled with `ts-*` classes, Callsign/Security Code/Comm Channel labels, amber CTA buttons, red/green error/success panels
+  - `DeckBuilderClient.tsx`: design system integration
+  - `icon.svg`: twin suns favicon (amber + red circles); served automatically by Next.js App Router
+  - `HandSimModal.tsx`: extracted as standalone component; mulligan mode adds editable opponent leader name input (`<input>` with borderBottom-only style)
+
+- [x] **[2026-05-06] Profile — collection completion % stat**
+  - `profile/page.tsx`: `completionPct` computed from `collection` state when `showAllCards=true` data is loaded; amber stat chip rendered in profile header showing `XX.X% · N / M cards`
+
+- [x] **[2026-05-06] Wishlist — full stack** (PR #3)
+  - `backend/src/database/models.py`: `UserWishlist` model (`user_id` PK, `card_id` PK, `added_at`); relationships on `User.wishlist` and `Card.wishlist_entries`
+  - `backend/src/routes/me.py`: `GET /me/wishlist`, `POST /me/wishlist` (idempotent), `DELETE /me/wishlist/{card_id}`; returns enriched card data
+  - `frontend/src/app/api/me/wishlist/route.ts`: GET + POST Next.js proxy
+  - `frontend/src/app/api/me/wishlist/[cardId]/route.ts`: DELETE proxy (correct Next.js 15 `Promise<params>` pattern)
+  - `profile/page.tsx` Wishlist tab: replaced Coming Soon panel with live card grid (`WishlistCard` mini-cards with aspect-gradient backgrounds, ✕ remove button, empty state + Browse CTA)
+  - `CardDetailDialog.tsx`: "☆ Add to Wishlist" / "★ On Wishlist" toggle button in dialog footer
 
 - [x] **[2026-05-04] Repo integration — twin-suns-databases merged in**
   - `backup_db.py` → `backend/scripts/backup_db.py` (updated to use `DB_DIR`)
@@ -69,15 +91,17 @@
 
 **Priority order — top item is immediately actionable:**
 
-0. **[BROWSER TEST] Login + deck + collection test in browser on production** — Open `http://192.168.1.124:4000`. Test: login with real credentials, browse cards, double-click to add to collection, create/save a deck, visit profile to see saved decks. Local dev is verified; production client-side JS flows haven't been tested.
+0. **[DEPLOY] Merge PR #3 and deploy to production** — PR open at https://github.com/chanfriendly/starwarsunlimited-db-api/pull/3. After merge: run `./deploy.sh` to build+push new images, pull+restart on TrueNAS. The new `user_wishlist` table auto-creates on first backend start — no migration needed.
 
-1. **[BROWSER TEST] Test double-click card add in deck builder** — The double-click handler exists (`handleCardDoubleClick`) and the leader filtering logic is confirmed in code (`leadersShareAspects`), but clicking couldn't be automated in this session. Next time: manually double-click a leader to select it, verify the second leader grid filters to compatible aspects only, then proceed through base and cards stages.
+1. **[BROWSER TEST] Login + deck + collection test in browser on production** — Open `http://192.168.1.124:4000`. Test: login with real credentials, browse cards, double-click to add to collection, create/save a deck, visit profile to see saved decks. Local dev is verified; production client-side JS flows haven't been tested.
 
-2. ~~**[REBUILD] Rebuild backend image on TrueNAS**~~ — DONE 2026-05-05. Both images rebuilt `--no-cache` from clean rsynced source after cryptominer incident. Stack running on prod compose.
+2. **[DESIGN] Finish profile page design pass** — The profile page header, decks tab, and collection tab still use the old Tailwind/shadcn purple theme (gray-900 backgrounds, purple badges, motion/framer-motion animations). The wishlist tab and collection completion stat are already on the new design system. A full profile rewrite to `ts-*` classes would complete the visual consistency.
 
-3. **[CLEANUP] Review `requirements.txt` ML dependencies** — `torch`, `sentence-transformers`, `qdrant-client` are unused in the current app. They add significant Docker build time. Consider moving to a separate `requirements-ml.txt` until the AI features are actually built.
+3. **[BROWSER TEST] Test double-click card add in deck builder** — The double-click handler exists (`handleCardDoubleClick`) and the leader filtering logic is confirmed in code (`leadersShareAspects`), but clicking couldn't be automated. Next time: manually double-click a leader, verify the second leader grid filters to compatible aspects only, then proceed through base and cards stages.
 
-4. **[ENHANCEMENT] Add meaningful test coverage** — Current tests don't use standard pytest patterns. Add at minimum: auth endpoint tests, card search tests, deck CRUD tests.
+4. **[CLEANUP] Review `requirements.txt` ML dependencies** — `torch`, `sentence-transformers`, `qdrant-client` are unused. They add significant Docker build time. Consider moving to `requirements-ml.txt` until AI features are actually built.
+
+5. **[ENHANCEMENT] Add meaningful test coverage** — Current tests don't use standard pytest patterns. Add at minimum: auth endpoint tests, card search tests, deck CRUD tests.
 
 ---
 

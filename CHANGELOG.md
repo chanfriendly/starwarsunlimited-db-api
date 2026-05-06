@@ -4,6 +4,33 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-05-06: Twin Suns Design System + Wishlist Feature (PR #3)
+
+**What changed:**
+
+**Full design system replacement** — The original Tailwind/shadcn purple theme was replaced with the "Imperial Field Manual" Twin Suns visual identity. Root motivation: the prior design used generic shadcn components (Card, Button, Badge, Avatar, Tabs, etc.) with a gray-950/purple-600 palette that had no relation to the Star Wars Unlimited aesthetic. The new system is built on `--ts-*` CSS custom properties with three custom font stacks (Cormorant Garamond for display headers, Spectral for body copy, JetBrains Mono for data/labels), all loaded via Google Fonts in `layout.tsx`. This means zero reliance on Tailwind utility classes for the redesigned pages — components use inline `style` props against the CSS vars instead.
+
+**Hero section layering approach** — The twin suns are implemented as `position: absolute` radial-gradient `<div>` elements (not SVG or images) bleeding off the top-right of the hero section at z-index 1–2. Scanlines (`repeating-linear-gradient`) sit at z-index 3, the left vignette (`linear-gradient` to right) at z-index 4, and the content grid at z-index 5. This avoids a separate image asset and makes the suns purely CSS. The left vignette starts opaque at 38% and fades to transparent at 75%, keeping the left-side copy legible without blocking the suns on the right.
+
+**Favicon** — `frontend/src/app/icon.svg` is the twin suns mark (amber circle + red circle). Next.js App Router automatically serves any `icon.*` file in `src/app/` as the browser tab favicon — no manual `<link rel="icon">` needed.
+
+**Login/Signup pages** — Both pages were rebuilt from scratch (removed all shadcn imports: Button, Card, Input, Label, Alert, AlertTriangle, lucide-react icons). All auth logic (`login`, `register`, validation, error handling, redirect on success) was preserved exactly. The decision to do a full rewrite rather than patch the existing components was driven by the depth of shadcn dependency — the component tree was so intertwined that incremental edits would have left orphan imports.
+
+**HandSimModal extracted** — The hand simulator was inlined inside `DeckBuilderClient.tsx`. Extracted to `frontend/src/app/deck-builder/HandSimModal.tsx` to keep the deck builder file manageable. Added `useState` for opponent leader name with a controlled `<input>` styled as borderBottom-only (no background/border box) so it reads as an inline editable label rather than a form field.
+
+**Wishlist — backend design decisions:**
+- `UserWishlist` uses a composite primary key (`user_id` + `card_id`) rather than a separate autoincrement `id`. This enforces uniqueness at the DB level and the `POST /me/wishlist` route does an idempotent add (check → skip if exists) rather than relying solely on a DB unique constraint, which would surface as a 500 error to the client.
+- No `count` column — unlike `UserCollection`, you either want a card or you don't. This could change if "want N copies" is ever needed, but the simpler model is correct for now.
+- SQLAlchemy `create_all` auto-creates the table on first backend start. No Alembic migration needed because the app DB schema is managed this way throughout (no migration framework is in use).
+
+**Wishlist — frontend proxy pattern:**
+- `wishlist/[cardId]/route.ts` uses `Promise<{ cardId: string }>` for the `params` type — the correct Next.js 15 pattern. The existing `decks/[id]/route.ts` does NOT use this pattern (pre-existing issue, not introduced here).
+- The wishlist fetch in `profile/page.tsx` uses plain `fetch('/api/me/wishlist')` (not `fetchWithAuth`) — the route handler reads from the cookie just like the collection route does.
+
+**Profile page — partial design update** — The wishlist tab and collection completion stat chip are on the new design system. The rest of the profile page (header, decks tab, collection tab) still uses the old Tailwind/shadcn purple theme. A full profile rewrite was scoped out of this session to avoid a massive single-session PR. The mixed state is intentional and documented in What's Next.
+
+---
+
 ### 2026-05-05: Local Dev Smoke Test + PORT Conflict Fix
 
 **What changed:**
