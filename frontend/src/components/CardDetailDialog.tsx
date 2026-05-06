@@ -21,6 +21,8 @@ export function CardDetailDialog({ card, onClose }: CardDetailDialogProps) {
   const [addedToCollection, setAddedToCollection] = useState(false);
   const [isInCollection, setIsInCollection] = useState(false);
   const [addMessage, setAddMessage] = useState('');
+  const [onWishlist, setOnWishlist] = useState(false);
+  const [wishlistLoading, setWishlistLoading] = useState(false);
 
   // Only allow flipping for cards with a back side (mainly Leaders)
   const canFlip = card?.image_back_uri !== undefined && card?.image_back_uri !== null;
@@ -34,6 +36,28 @@ export function CardDetailDialog({ card, onClose }: CardDetailDialogProps) {
     } else {
       // For non-leaders, we'll need to select a leader first
       router.push('/deck-builder');
+    }
+  };
+
+  const handleToggleWishlist = async () => {
+    try {
+      setWishlistLoading(true);
+      if (onWishlist) {
+        await fetch(`/api/me/wishlist/${card.id}`, { method: 'DELETE', credentials: 'include' });
+        setOnWishlist(false);
+      } else {
+        await fetch('/api/me/wishlist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ card_id: card.id }),
+        });
+        setOnWishlist(true);
+      }
+    } catch (err) {
+      console.error('Error toggling wishlist:', err);
+    } finally {
+      setWishlistLoading(false);
     }
   };
 
@@ -255,6 +279,15 @@ export function CardDetailDialog({ card, onClose }: CardDetailDialogProps) {
           )}
         </Button>
         
+        <Button
+          onClick={handleToggleWishlist}
+          disabled={wishlistLoading}
+          variant="outline"
+          className={`border-amber-700 text-amber-400 hover:bg-amber-900/30 ${onWishlist ? 'bg-amber-900/30' : ''}`}
+        >
+          {onWishlist ? '★ On Wishlist' : '☆ Add to Wishlist'}
+        </Button>
+
         <Button
           onClick={onClose}
           variant="outline"

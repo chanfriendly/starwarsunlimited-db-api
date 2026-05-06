@@ -252,6 +252,145 @@ const CollectionCard = ({
     );
 };
 
+// ── Coming Soon placeholder panel ─────────────────────────
+function ComingSoonPanel({
+    title,
+    description,
+    features,
+}: {
+    title: string;
+    description: string;
+    features: string[];
+}) {
+    return (
+        <div
+            style={{
+                position: 'relative',
+                minHeight: 400,
+                border: '1px solid var(--ts-line)',
+                background: 'var(--ts-panel)',
+                overflow: 'hidden',
+            }}
+        >
+            {/* Ghost preview content */}
+            <div style={{ padding: 32, opacity: 0.15, pointerEvents: 'none', userSelect: 'none' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+                    {[1, 2, 3, 4, 5, 6].map(i => (
+                        <div
+                            key={i}
+                            style={{
+                                height: 96,
+                                background: 'var(--ts-panel-2)',
+                                border: '1px solid var(--ts-line-2)',
+                            }}
+                        />
+                    ))}
+                </div>
+            </div>
+
+            {/* Overlay */}
+            <div
+                style={{
+                    position: 'absolute',
+                    inset: 0,
+                    background: 'rgba(26,22,17,0.90)',
+                    backdropFilter: 'blur(3px)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: 40,
+                    textAlign: 'center',
+                }}
+            >
+                {/* Stamp */}
+                <div
+                    style={{
+                        fontFamily: 'var(--ts-font-mono)',
+                        fontSize: 10,
+                        letterSpacing: '0.28em',
+                        textTransform: 'uppercase',
+                        color: 'var(--ts-amber)',
+                        border: '1.5px solid var(--ts-amber)',
+                        padding: '4px 14px',
+                        marginBottom: 24,
+                        transform: 'rotate(-1deg)',
+                        opacity: 0.9,
+                    }}
+                >
+                    Coming Soon
+                </div>
+
+                <div
+                    style={{
+                        fontFamily: 'var(--ts-font-display)',
+                        fontSize: 32,
+                        color: 'var(--ts-ink)',
+                        marginBottom: 12,
+                        letterSpacing: '0.02em',
+                    }}
+                >
+                    {title}
+                </div>
+
+                <p
+                    style={{
+                        color: 'var(--ts-ink-2)',
+                        fontSize: 14,
+                        lineHeight: 1.7,
+                        maxWidth: 540,
+                        margin: '0 0 28px',
+                    }}
+                >
+                    {description}
+                </p>
+
+                {/* Feature list */}
+                <div
+                    style={{
+                        border: '1px solid var(--ts-line-2)',
+                        padding: '16px 24px',
+                        textAlign: 'left',
+                        maxWidth: 480,
+                        width: '100%',
+                    }}
+                >
+                    <div
+                        style={{
+                            fontFamily: 'var(--ts-font-mono)',
+                            fontSize: 9,
+                            letterSpacing: '0.2em',
+                            textTransform: 'uppercase',
+                            color: 'var(--ts-ink-3)',
+                            marginBottom: 12,
+                        }}
+                    >
+                        Planned Features
+                    </div>
+                    {features.map(f => (
+                        <div
+                            key={f}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                gap: 10,
+                                marginBottom: 8,
+                                fontFamily: 'var(--ts-font-mono)',
+                                fontSize: 11,
+                                color: 'var(--ts-ink-2)',
+                                lineHeight: 1.5,
+                            }}
+                        >
+                            <span style={{ color: 'var(--ts-amber)', flexShrink: 0, marginTop: 1 }}>◈</span>
+                            {f}
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 const ErrorMessage = ({ message, retryFn }: { message: string, retryFn: () => void }) => (
     <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 text-center">
         <div className="flex justify-center mb-2">
@@ -271,14 +410,133 @@ interface UserProfileData {
     createdAt: string;
 }
 
+interface WishlistItem {
+    card: {
+        id: string;
+        name: string;
+        type?: string;
+        image_uri?: string;
+        energy_cost?: number;
+        set_name?: string;
+        aspects?: Array<{ aspect_name: string; aspect_color?: string }>;
+    };
+    added_at: string | null;
+}
+
+const ASPECT_COLORS: Record<string, string> = {
+    Command: '#c2453a', Aggression: '#d96f2d', Cunning: '#e2b342',
+    Heroism: '#ead7a8', Vigilance: '#4a90c4', Villainy: '#2c2a26',
+};
+
+function WishlistCard({ item, onRemove }: { item: WishlistItem; onRemove: (cardId: string) => void }) {
+    const { card } = item;
+    const aspects = card.aspects ?? [];
+    const bg =
+        aspects.length === 1
+            ? `linear-gradient(155deg, ${ASPECT_COLORS[aspects[0].aspect_name] ?? '#2c251a'}, #2c251a)`
+            : aspects.length >= 2
+            ? `linear-gradient(155deg, ${aspects.map(a => ASPECT_COLORS[a.aspect_name] ?? '#2c251a').join(', ')})`
+            : 'linear-gradient(155deg, #2c251a, #1f1a12)';
+
+    return (
+        <div
+            style={{
+                background: bg,
+                border: '1px solid var(--ts-line-2)',
+                display: 'flex',
+                flexDirection: 'column',
+                position: 'relative',
+                boxShadow: '0 4px 14px rgba(0,0,0,0.35)',
+            }}
+        >
+            {/* Card art / placeholder */}
+            <div style={{ aspectRatio: '5/7', position: 'relative', overflow: 'hidden' }}>
+                {card.image_uri ? (
+                    <img
+                        src={card.image_uri}
+                        alt={card.name}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                    />
+                ) : (
+                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span style={{ fontFamily: 'var(--ts-font-display)', fontSize: 28, color: 'rgba(255,255,255,0.15)' }}>
+                            {card.name[0]}
+                        </span>
+                    </div>
+                )}
+                {/* Remove button */}
+                <button
+                    onClick={() => onRemove(card.id)}
+                    style={{
+                        position: 'absolute',
+                        top: 6,
+                        right: 6,
+                        width: 22,
+                        height: 22,
+                        background: 'rgba(10,8,4,0.82)',
+                        border: '1px solid rgba(255,255,255,0.2)',
+                        color: 'var(--ts-red)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: 12,
+                        lineHeight: 1,
+                    }}
+                    title="Remove from wishlist"
+                >
+                    ✕
+                </button>
+            </div>
+
+            {/* Name plate */}
+            <div
+                style={{
+                    padding: '6px 8px',
+                    background: 'rgba(20,16,10,0.92)',
+                    borderTop: '1px solid rgba(255,255,255,0.1)',
+                }}
+            >
+                <div
+                    style={{
+                        fontFamily: 'var(--ts-font-display)',
+                        fontSize: 11,
+                        color: '#e8dcc4',
+                        overflow: 'hidden',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        lineHeight: 1.3,
+                    }}
+                >
+                    {card.name}
+                </div>
+                <div
+                    style={{
+                        fontFamily: 'var(--ts-font-mono)',
+                        fontSize: 8,
+                        color: 'rgba(255,255,255,0.4)',
+                        letterSpacing: '0.1em',
+                        textTransform: 'uppercase',
+                        marginTop: 2,
+                    }}
+                >
+                    {card.type}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 const UserProfilePage = () => {
     const router = useRouter();
     const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-    
+
     // State
     const [decks, setDecks] = useState<SavedDeck[]>([]);
     const [collection, setCollection] = useState<CollectionItem[]>([]);
-    const [isPageLoading, setIsPageLoading] = useState(true);  
+    const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
+    const [isPageLoading, setIsPageLoading] = useState(true);
     const [userProfile, setUserProfile] = useState<UserProfileData>(user ? {
         id: user.id,
         username: user.username,
@@ -345,8 +603,19 @@ const UserProfilePage = () => {
             console.error('[Profile] Error fetching collection:', collectionError);
           }
           
+          let wishlistData: WishlistItem[] = [];
+          try {
+            const wishlistResponse = await fetch('/api/me/wishlist');
+            if (wishlistResponse.ok) {
+              wishlistData = await wishlistResponse.json();
+            }
+          } catch (wishlistError) {
+            console.error('[Profile] Error fetching wishlist:', wishlistError);
+          }
+
           setDecks(decksData);
           setCollection(collectionData);
+          setWishlist(wishlistData);
         } catch (err) {
           console.error('[Profile] Error loading profile data:', err);
           setError('Failed to load profile data. Please check your connection and try again.');
@@ -441,10 +710,26 @@ const UserProfilePage = () => {
         });
     };
 
+    const handleRemoveFromWishlist = async (cardId: string) => {
+        try {
+            const res = await fetch(`/api/me/wishlist/${cardId}`, { method: 'DELETE' });
+            if (res.ok || res.status === 204) {
+                setWishlist(prev => prev.filter(item => item.card.id !== cardId));
+            }
+        } catch (err) {
+            console.error('Error removing from wishlist:', err);
+        }
+    };
+
     // Filtered collection based on search
     const filteredCollection = collection.filter((item) =>
         item.card.name.toLowerCase().includes(searchTerm.toLowerCase())
     );
+
+    // Collection completion stats (available when showAllCards=true)
+    const ownedCount = collection.filter(item => item.in_collection).length;
+    const totalCount = collection.length;
+    const completionPct = totalCount > 0 ? ((ownedCount / totalCount) * 100).toFixed(1) : null;
 
     return (
         <div className="min-h-screen bg-gray-950 text-white">
@@ -475,6 +760,20 @@ const UserProfilePage = () => {
                                 </span>
                             </div>
                         </div>
+                        {/* Collection completion stat */}
+                        {completionPct !== null && (
+                            <div style={{ marginLeft: 24, padding: '10px 18px', background: 'var(--ts-bg-2)', border: '1px solid var(--ts-line)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 8, letterSpacing: '0.2em', color: 'var(--ts-ink-4)', textTransform: 'uppercase' }}>
+                                    Collection
+                                </div>
+                                <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 22, color: 'var(--ts-amber)', lineHeight: 1 }}>
+                                    {completionPct}%
+                                </div>
+                                <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 8, color: 'var(--ts-ink-4)', letterSpacing: '0.1em' }}>
+                                    {ownedCount} / {totalCount} cards
+                                </div>
+                            </div>
+                        )}
                     </div>
                     {isEditing ? (
                         <div className="flex gap-2">
@@ -506,7 +805,7 @@ const UserProfilePage = () => {
             {/* Main Content */}
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
                 <Tabs defaultValue="decks" className="w-full" onValueChange={setSelectedTab}>
-                    <TabsList className="grid w-full grid-cols-2 mb-8 bg-gray-900 border-b border-gray-800">
+                    <TabsList className="grid w-full grid-cols-5 mb-8 bg-gray-900 border-b border-gray-800">
                         <TabsTrigger
                             value="decks"
                             className={cn(
@@ -530,6 +829,39 @@ const UserProfilePage = () => {
                         >
                             <Library className="w-5 h-5" />
                             My Collection
+                        </TabsTrigger>
+                        <TabsTrigger
+                            value="achievements"
+                            className={cn(
+                                "text-lg font-semibold data-[state=active]:text-white data-[state=active]:bg-gray-800",
+                                "data-[state=inactive]:text-gray-400 data-[state=inactive]:hover:text-white",
+                                "transition-colors duration-200 py-4 px-6",
+                                "flex items-center gap-2"
+                            )}
+                        >
+                            Achievements
+                        </TabsTrigger>
+                        <TabsTrigger
+                            value="tournaments"
+                            className={cn(
+                                "text-lg font-semibold data-[state=active]:text-white data-[state=active]:bg-gray-800",
+                                "data-[state=inactive]:text-gray-400 data-[state=inactive]:hover:text-white",
+                                "transition-colors duration-200 py-4 px-6",
+                                "flex items-center gap-2"
+                            )}
+                        >
+                            Tournaments
+                        </TabsTrigger>
+                        <TabsTrigger
+                            value="wishlist"
+                            className={cn(
+                                "text-lg font-semibold data-[state=active]:text-white data-[state=active]:bg-gray-800",
+                                "data-[state=inactive]:text-gray-400 data-[state=inactive]:hover:text-white",
+                                "transition-colors duration-200 py-4 px-6",
+                                "flex items-center gap-2"
+                            )}
+                        >
+                            Wishlist
                         </TabsTrigger>
                     </TabsList>
                     <TabsContent value="decks">
@@ -651,6 +983,105 @@ const UserProfilePage = () => {
                                         </Button>
                                     </>
                                 )}
+                            </div>
+                        )}
+                    </TabsContent>
+
+                    {/* ── Achievements — Coming Soon ─────────────────────── */}
+                    <TabsContent value="achievements">
+                        <ComingSoonPanel
+                            title="Achievements & Pilot Training"
+                            description="Earn badges for deck-building milestones, tournament finishes, and collection goals. Pilot Training will guide new players through Twin Suns fundamentals with guided challenges."
+                            features={[
+                                'Milestone badges (first deck, first win, 100-card collection…)',
+                                'Pilot Training — guided challenges for new Twin Suns players',
+                                'Seasonal achievement tracks',
+                                'Badge showcase on your public profile',
+                            ]}
+                        />
+                    </TabsContent>
+
+                    {/* ── Tournament History — Coming Soon ──────────────── */}
+                    <TabsContent value="tournaments">
+                        <ComingSoonPanel
+                            title="Tournament History"
+                            description="Track your event results, ELO rating, and head-to-head records. Requires a tournament-reporting integration — planned for a future release."
+                            features={[
+                                'Event results with placement and record',
+                                'ELO / ranking history over time',
+                                'Head-to-head records vs opponents',
+                                'Deck used per event with performance breakdown',
+                            ]}
+                        />
+                    </TabsContent>
+
+                    {/* ── Wishlist ─────────────────────────────────────── */}
+                    <TabsContent value="wishlist">
+                        <div style={{ marginBottom: 28, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                                <div className="ts-eyebrow" style={{ marginBottom: 4 }}>Acquisition List</div>
+                                <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 28, color: 'var(--ts-ink)' }}>
+                                    Wishlist
+                                </div>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                {wishlist.length > 0 && (
+                                    <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 10, color: 'var(--ts-ink-3)', letterSpacing: '0.14em' }}>
+                                        {wishlist.length} {wishlist.length === 1 ? 'card' : 'cards'}
+                                    </div>
+                                )}
+                                <a
+                                    href="/cards"
+                                    className="ts-btn ts-btn-primary ts-btn-sm"
+                                    style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                                >
+                                    + Browse Cards
+                                </a>
+                            </div>
+                        </div>
+
+                        {isPageLoading ? (
+                            <div style={{ textAlign: 'center', padding: '64px 0', color: 'var(--ts-ink-3)', fontFamily: 'var(--ts-font-mono)', fontSize: 11, letterSpacing: '0.16em' }}>
+                                LOADING…
+                            </div>
+                        ) : wishlist.length === 0 ? (
+                            <div
+                                style={{
+                                    border: '1px solid var(--ts-line)',
+                                    padding: '64px 32px',
+                                    textAlign: 'center',
+                                    background: 'var(--ts-bg-2)',
+                                }}
+                            >
+                                <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 28, color: 'var(--ts-ink-3)', marginBottom: 12 }}>
+                                    Nothing on the list yet.
+                                </div>
+                                <p style={{ color: 'var(--ts-ink-3)', fontSize: 13, lineHeight: 1.7, maxWidth: 400, margin: '0 auto 24px' }}>
+                                    Browse the card catalogue and add cards you're hunting to your wishlist.
+                                </p>
+                                <a
+                                    href="/cards"
+                                    className="ts-btn ts-btn-primary"
+                                    style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                                >
+                                    Browse Cards →
+                                </a>
+                            </div>
+                        ) : (
+                            <div
+                                style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+                                    gap: 12,
+                                }}
+                            >
+                                {wishlist.map(item => (
+                                    <WishlistCard
+                                        key={item.card.id}
+                                        item={item}
+                                        onRemove={handleRemoveFromWishlist}
+                                    />
+                                ))}
                             </div>
                         )}
                     </TabsContent>

@@ -4,7 +4,7 @@ from sqlalchemy import func, text
 from typing import List, Annotated
 import uuid
 from src.database.db import get_app_db, get_card_db
-from src.database.models import User, Deck, DeckCard, Card, UserCollection
+from src.database.models import User, Deck, DeckCard, Card, UserCollection, UserWishlist
 from src.auth.auth import get_current_user
 import logging
 
@@ -728,4 +728,101 @@ async def get_user_collection(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch collection"
+        )
+
+@router.get("/wishlist")
+async def get_user_wishlist(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_app_db)]
+):
+    """Get the wishlist for the logged-in user"""
+    try:
+        items = db.query(UserWishlist).filter(
+            UserWishlist.user_id == current_user.id
+        ).order_by(UserWishlist.added_at.desc()).all()
+
+        if not items:
+            return []
+
+        card_db_gen = get_card_db()
+        card_db = next(card_db_gen)
+        try:
+            result = []
+            for item in items:
+                card_query = text("SELECT * FROM cards WHERE id = :card_id")
+                card_proxy = card_db.execute(card_query, {"card_id": item.card_id})
+                if card_proxy.returns_rows:
+                    card_row = card_proxy.fetchone()
+                    if card_row:
+                        card_dict = {key: card_row._mapping[key] for key in card_row._mapping.keys()}
+                        card_with_relations = enrich_card_with_relationships(card_db, card_dict)
+                        result.append({
+                            "card": card_with_relations,
+                            "added_at": item.added_at.isoformat() if item.added_at else None,
+                        })
+            return result
+        finally:
+            card_db.close()
+    except Exception as e:
+        logger.error(f"Error fetching wishlist: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch wishlist"
+        )
+
+
+@router.post("/wishlist", status_code=status.HTTP_200_OK)
+async def add_to_wishlist(
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_app_db)]
+):
+    """Add a card to the user's wishlist (idempotent)"""
+    try:
+        body = await request.json()
+        card_id = body.get("card_id")
+        if not card_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing card_id")
+
+        existing = db.query(UserWishlist).filter(
+            UserWishlist.user_id == current_user.id,
+            UserWishlist.card_id == card_id
+        ).first()
+
+        if not existing:
+            db.add(UserWishlist(user_id=current_user.id, card_id=card_id))
+            db.commit()
+
+        return {"success": True, "card_id": card_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error adding to wishlist: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to add to wishlist"
+        )
+
+
+@router.delete("/wishlist/{card_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_from_wishlist(
+    card_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_app_db)]
+):
+    """Remove a card from the user's wishlist"""
+    try:
+        db.query(UserWishlist).filter(
+            UserWishlist.user_id == current_user.id,
+            UserWishlist.card_id == card_id
+        ).delete()
+        db.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error removing from wishlist: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to remove from wishlist"
         )

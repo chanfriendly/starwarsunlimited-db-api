@@ -1,129 +1,131 @@
 // frontend/src/app/login/page.tsx
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertTriangle } from "lucide-react";
+import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 
-import { Suspense } from 'react';
-
 function LoginPageContent() {
-    const router = useRouter();
-    const searchParams = useSearchParams();
-    const redirectPath = searchParams.get('redirect') || '/profile'; // Default redirect
+  const searchParams = useSearchParams();
+  const redirectPath = searchParams.get('redirect') || '/profile';
+  const { login } = useAuth();
 
-    const { login } = useAuth(); // Get login function from context
-    const [username, setUsername] = useState('');
-    const [password, setPassword] = useState('');
-    const [error, setError] = useState<string | null>(null);
-    const [isLoading, setIsLoading] = useState(false);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setIsLoading(true);
-        setError(null);
-        
-        try {
-            // Use the login function from auth context
-            console.log('Attempting to log in with:', username);
-            await login(username, password);
-            // Auth context will handle redirect
-        } catch (err) {
-            console.error('Login error:', err);
-            setError('Invalid username or password. Please try again.');
-        } finally {
-            setIsLoading(false);
-        }
-    };
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError(null);
+    try {
+      await login(username, password);
+    } catch {
+      setError('Invalid username or password. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-    return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-950 p-4">
-            <Card className="w-full max-w-md bg-gray-900 border-gray-800 text-white">
-                <CardHeader>
-                    <CardTitle className="text-2xl font-bold text-center">
-                        <span className="bg-gradient-to-r from-purple-500 via-pink-500 to-orange-500 bg-clip-text text-transparent">
-                            Welcome Back
-                        </span>
-                    </CardTitle>
-                    <CardDescription className="text-gray-400 text-center">
-                        Sign in to your account to access your decks and collection
-                    </CardDescription>
-                </CardHeader>
+  return (
+    <div style={{ minHeight: '100vh', background: 'var(--ts-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 24px' }}>
+      <div style={{ width: '100%', maxWidth: 420 }}>
 
-                <CardContent>
-                    {error && (
-                        <Alert variant="destructive" className="mb-6 bg-red-900/30 border-red-800 text-red-300">
-                             <AlertTriangle className="h-4 w-4 !text-red-400" />
-                             <AlertTitle>Login Failed</AlertTitle>
-                             <AlertDescription>{error}</AlertDescription>
-                         </Alert>
-                    )}
-
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                        <div className="space-y-2">
-                            <Label htmlFor="username">Username</Label>
-                            <Input
-                                id="username"
-                                name="username" 
-                                type="text"
-                                placeholder="Enter your username"
-                                value={username}
-                                onChange={(e) => setUsername(e.target.value)}
-                                className="bg-gray-800 border border-gray-700 focus:border-purple-500 focus:ring-purple-500" 
-                                disabled={isLoading}
-                                autoComplete="username"
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label htmlFor="password">Password</Label>
-                            <Input
-                                id="password"
-                                name="password"
-                                type="password"
-                                placeholder="Enter your password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                className="bg-gray-800 border border-gray-700 focus:border-purple-500 focus:ring-purple-500"
-                                disabled={isLoading}
-                                autoComplete="current-password"
-                            />
-                        </div>
-
-                        <Button
-                            type="submit"
-                            className="w-full bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50"
-                            disabled={isLoading}
-                        >
-                            {isLoading ? 'Signing In...' : 'Sign In'}
-                        </Button>
-                    </form>
-                </CardContent>
-
-                <CardFooter className="flex justify-center">
-                    <p className="text-gray-400">
-                        Don't have an account?{' '}
-                        <Link href="/signup" className="text-purple-400 hover:underline">
-                            Sign Up
-                        </Link>
-                    </p>
-                </CardFooter>
-            </Card>
+        {/* Header */}
+        <div style={{ marginBottom: 40, textAlign: 'center' }}>
+          <div className="ts-eyebrow" style={{ marginBottom: 12 }}>Twin Suns · Field Access</div>
+          <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 36, color: 'var(--ts-ink)', lineHeight: 1.1 }}>
+            Welcome back,<br />Commander.
+          </div>
         </div>
-    );
+
+        {/* Card */}
+        <div style={{ background: 'var(--ts-bg-2)', border: '1px solid var(--ts-line)', padding: '36px 32px' }}>
+
+          {error && (
+            <div style={{ marginBottom: 24, padding: '12px 16px', border: '1px solid var(--ts-red)', background: 'rgba(255,61,46,0.08)' }}>
+              <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, letterSpacing: '0.2em', color: 'var(--ts-red)', marginBottom: 4, textTransform: 'uppercase' }}>
+                Access Denied
+              </div>
+              <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 11, color: 'rgba(255,100,90,0.9)', letterSpacing: '0.06em' }}>
+                {error}
+              </div>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: 20 }}>
+              <label htmlFor="username" style={{ display: 'block', fontFamily: 'var(--ts-font-mono)', fontSize: 9, letterSpacing: '0.2em', color: 'var(--ts-ink-3)', textTransform: 'uppercase', marginBottom: 8 }}>
+                Callsign
+              </label>
+              <input
+                id="username"
+                name="username"
+                type="text"
+                className="ts-input"
+                style={{ width: '100%' }}
+                placeholder="Enter your username"
+                value={username}
+                onChange={e => setUsername(e.target.value)}
+                disabled={isLoading}
+                autoComplete="username"
+                required
+              />
+            </div>
+
+            <div style={{ marginBottom: 28 }}>
+              <label htmlFor="password" style={{ display: 'block', fontFamily: 'var(--ts-font-mono)', fontSize: 9, letterSpacing: '0.2em', color: 'var(--ts-ink-3)', textTransform: 'uppercase', marginBottom: 8 }}>
+                Security Code
+              </label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                className="ts-input"
+                style={{ width: '100%' }}
+                placeholder="Enter your password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                disabled={isLoading}
+                autoComplete="current-password"
+                required
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="ts-btn ts-btn-primary"
+              style={{ width: '100%', justifyContent: 'center', fontSize: 11, letterSpacing: '0.22em', padding: '14px 24px', opacity: isLoading ? 0.6 : 1 }}
+              disabled={isLoading}
+            >
+              {isLoading ? 'AUTHENTICATING...' : 'ENTER THE ATELIER →'}
+            </button>
+          </form>
+
+          <div className="ts-rule" style={{ margin: '24px 0' }} />
+
+          <div style={{ textAlign: 'center', fontFamily: 'var(--ts-font-mono)', fontSize: 10, color: 'var(--ts-ink-3)', letterSpacing: '0.12em' }}>
+            No account?{' '}
+            <Link href="/signup" style={{ color: 'var(--ts-amber)', textDecoration: 'none' }}>
+              Enlist now
+            </Link>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 24, textAlign: 'center', fontFamily: 'var(--ts-font-mono)', fontSize: 9, color: 'var(--ts-ink-4)', letterSpacing: '0.14em', textTransform: 'uppercase' }}>
+          Twin Suns · Star Wars Unlimited · Twin Suns Format
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function LoginPage() {
-    return (
-        <Suspense fallback={<div>Loading...</div>}>
-            <LoginPageContent />
-        </Suspense>
-    );
+  return (
+    <Suspense fallback={<div style={{ minHeight: '100vh', background: 'var(--ts-bg)' }} />}>
+      <LoginPageContent />
+    </Suspense>
+  );
 }
