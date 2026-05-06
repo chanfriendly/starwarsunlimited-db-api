@@ -911,8 +911,8 @@ function CardListView({
                     }}
                   >
                     {card.type}
-                    {card.power !== undefined && card.hp !== undefined
-                      ? ` · ${card.power}/${card.hp}`
+                    {card.attack !== undefined && card.health !== undefined
+                      ? ` · ${card.attack}/${card.health}`
                       : ''}
                   </div>
                 </div>
