@@ -6,6 +6,18 @@
 
 ## Current Status
 
+*(2026-05-07 session 7)* **GitHub workflow updated to deploy card DB to TrueNAS after rebuild.**
+
+Added a `Deploy card database to TrueNAS via Portainer exec` step to `.github/workflows/update_dbs.yaml`. After the existing CI build + artifact upload, the new step authenticates with Portainer, finds the `twinsuns-backend` container by name, creates a Docker exec for `python /app/scripts/build_database.py` with `DB_DIR=/databases/cards_db`, then polls until it finishes (10-min timeout). `continue-on-error: true` keeps the workflow green if TrueNAS is unreachable. **Required GitHub secrets not yet set**: `PORTAINER_URL`, `PORTAINER_USER`, `PORTAINER_PASSWORD`, `PORTAINER_ENDPOINT_ID` — values are in `.env.prod`.
+
+*(2026-05-07 session 6)* **Full production verification complete. 26 pytest tests added. All API flows confirmed working.**
+
+Login, deck CRUD, collection, and wishlist all verified end-to-end via API on production (192.168.1.124:4000). Full deck flow confirmed: create with 2 leaders + base + 10 cards, GET list (leaders/base names resolved), GET by ID (enriched card data), PUT (card replace), DELETE. Collection add/remove confirmed (the "double-click" feature from cards page). Profile tab APIs (collection, wishlist, decks) all return authenticated `[]` for new account. 2,360 cards across all 21 sets confirmed. The `SaveDeckDialog` validates 2 leaders + base + 10 minimum cards before POSTing — correct. Deck builder uses `onClick` (single-click) for leaders/base and explicit `+ ADD` button for the cards stage; no double-click in the builder itself. Confirmed duplicate collection proxy routes (`/api/collection` and `/api/me/collection`) — both point to same backend, `api.ts` consistently uses `/api/me/collection`. No issues found.
+
+*(2026-05-07 session 5)* **Login bug fixed. Card database rebuilt (1,398 → 2,360 cards). deploy.sh hardened.**
+
+Login was broken in production: `auth_token` cookie was set with `Secure: true` but the app runs over plain HTTP, so browsers silently discarded the cookie. Every `/api/auth/me` check returned "Not authenticated". Fixed by setting `secure: false` in both `/api/auth/token/route.ts` and `/api/auth/login/route.ts`. The `deploy.sh` Portainer redeploy was also silently failing: the password in `.env.prod` contained `"` which broke both shell `source` parsing and curl JSON body construction. Rewrote `portainer_redeploy()` as an embedded Python script. Also fixed: was reading `StackFileContent` from stack GET (empty in current Portainer version) — now uses `/api/stacks/{id}/file` endpoint. Frontend healthcheck fixed: `localhost` → `127.0.0.1` (Alpine `wget` resolves `localhost` to IPv6 `[::1]` but Next.js standalone only listens on IPv4). Card DB rebuilt locally and via `build_database.py` exec'd inside the backend container — 2,360 cards across 21 sets including new Set 5 (A Lawless Time) and Set 6 (Secrets of Power). Both sets were released after the last DB build (2025-06-26).
+
 *(2026-05-06 session 4)* **Repo cleanup + security hardening.** Deleted ML stubs. Removed backend port 8000 host-binding from prod compose (no longer publicly accessible — internal Docker network only). Deleted `create-test-user` and `debug-login` endpoints (both unauthenticated, exposed known credentials). Wired in `RateLimitMiddleware` at 120 req/min globally; added 10-attempt/min per-IP rate limit on `/api/auth/token` and `/api/auth/register`. Fixed `X-Forwarded-For` spoofability in rate limiter. **Still unverifiable from code**: whether Portainer port 9004 is firewalled at the router — if internet-accessible, that remains the highest-risk surface. Deleted `backend/src/utils/vector_db.py`, `backend/scripts/build_vector_db.py`, and `backend/scripts/rules_parser.py` (ML stubs not wired into anything). Removed stale comment about `NEXT_PUBLIC_API_URL` from `docker-compose.prod.yaml`. Updated CLAUDE.md to remove references to deleted files. `_cleanup_backup/` was already gone. `frontend/src/lib/utils.ts` kept — still used by `src/components/ui/` shadcn components. CHANGELOG.md updated. All PROGRESS.md cleanup items resolved.
 
 *(2026-05-06 session 3)* **Production stack fully operational. Deploy workflow automated — no more manual Portainer step.** Fixed `INTERNAL_API_URL` missing from Portainer stack (was `http://localhost:8000` fallback inside container). `deploy.sh` now authenticates with Portainer API and triggers stack redeploy automatically after push. `docker-compose.prod.yaml` is now the single source of truth (synced with Portainer). Deleted dead `frontend/src/lib/config.ts` (referenced `NEXT_PUBLIC_API_URL` but was never imported — api.ts already uses relative URLs). `frontend/public/.gitkeep` added so Docker build doesn't fail on missing `public/` dir. Full smoke test passed: cards/aspects/types/sets/keywords all 200 on production at `192.168.1.124:4000`. Deploy workflow is now: `./deploy.sh` → done (no Portainer visit needed).
@@ -112,19 +124,11 @@
 
 **Priority order — top item is immediately actionable:**
 
-0. **[BROWSER TEST] Login + full flow test on production** — `http://192.168.1.124:4000`. Test: login → cards page → double-click to add to collection → deck builder → create deck → profile page (decks, collection, wishlist tabs). Production API smoke test passed via curl; needs real browser login flow verified.
+0. **[ENHANCEMENT] Add meaningful test coverage** — ~~Done~~ (session 6): 26 pytest tests in `backend/tests/test_api_endpoints.py` covering auth (7), cards (6), deck CRUD (8), and collection (5). Runs with `cd backend && python -m pytest tests/test_api_endpoints.py`. Key design: env vars set before any src imports so `db.py` initialises with temp SQLite paths, which also fixes the direct `get_card_db()` calls inside route handlers. `pytest==9.0.3` + `httpx==0.27.2` added to `requirements.txt`.
 
-1. **[BROWSER TEST] Test double-click card add in deck builder** — Double-click handler exists (`handleCardDoubleClick`), leader filtering logic confirmed in code (`leadersShareAspects`). Manually double-click a leader, verify second leader grid filters to compatible aspects, proceed through base and cards stages.
+1. **[ENHANCEMENT] GitHub workflow: deploy DB to TrueNAS after rebuild** — ~~Done~~ (session 7): Added `Deploy card database to TrueNAS via Portainer exec` step to `.github/workflows/update_dbs.yaml`. Authenticates with Portainer, finds `twinsuns-backend` container, execs `python /app/scripts/build_database.py` with `DB_DIR=/databases/cards_db`, polls until done (10-min timeout), fails if exit code != 0. `continue-on-error: true` so workflow stays green if TrueNAS is offline. **ACTION NEEDED**: Add 4 GitHub secrets — `PORTAINER_URL`, `PORTAINER_USER`, `PORTAINER_PASSWORD`, `PORTAINER_ENDPOINT_ID` — values are in `.env.prod`.
 
 2. **[REPO CLEANUP] — DONE** (session 4)
-   - ~~`_cleanup_backup/`~~ — was already gone
-   - `frontend/src/lib/utils.ts` — kept; still used by `src/components/ui/` shadcn components
-   - ~~`backend/src/utils/vector_db.py`, `build_vector_db.py`, `rules_parser.py`~~ — deleted
-   - `.env.prod` JWT secret in plaintext — known debt, documented below in Notes; no code change needed
-   - `docker-compose.prod.yaml` — always-edit-on-disk approach confirmed; Portainer copies overwritten on each `./deploy.sh`
-   - `NEXT_PUBLIC_API_URL` — already not present in `.env.prod` or source; stale comment removed from `docker-compose.prod.yaml`
-
-3. **[ENHANCEMENT] Add meaningful test coverage** — Current tests don't use standard pytest patterns. Add at minimum: auth endpoint tests, card search tests, deck CRUD tests.
 
 ---
 
@@ -148,6 +152,6 @@
 - **Production Portainer stack** is ID 94, endpointId 3, at `https://192.168.1.124:9004`. The compose file in Portainer is now synced with `docker-compose.prod.yaml` on disk. `deploy.sh` overwrites the Portainer compose on every deploy — so always edit on disk, not in the Portainer UI.
 - **Portainer stack env vars** (set in Portainer UI, not the compose file): `JWT_SECRET`, `DATABASE_PATH`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `CORS_ALLOWED_ORIGINS`. These are preserved by `deploy.sh` (fetched via API and re-submitted). Don't add new required vars here without updating `deploy.sh` or the compose defaults.
 - **Database layout on TrueNAS**: `swu_app.db` lives at `/mnt/volume1/docker/twinsuns/databases/app_db/swu_app.db`, card DB at `.../cards_db/swu_cards.db`. These paths are hardcoded in `docker-compose.prod.yaml` since they're TrueNAS-specific.
-- `.env.prod` has real secrets (JWT secret, Portainer password). Do not `cat` in a shared screen.
+- `.env.prod` secrets (`JWT_SECRET`, `PORTAINER_PASSWORD`) now stored in Bitwarden as `twinsuns-jwt-secret` and `twinsuns-portainer`. `.env.prod` contains placeholder values. `deploy.sh` fetches from Bitwarden when `BW_SESSION` is set; falls back to `.env.prod` for backwards compatibility.
 - When testing decks, use Swagger at `:8000/docs` to test backend directly before testing via the frontend proxy.
 - The `_cleanup_backup/` directory at project root is safe to delete — old pre-architecture files, nothing recoverable.

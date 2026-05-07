@@ -2,7 +2,15 @@ name: Update Card Database
 
 # Rebuilds swu_cards.db from the official SWU API every Monday at 2 AM UTC.
 # Can also be triggered manually via workflow_dispatch.
-# The built database is uploaded as a GitHub Actions artifact (not committed to git).
+#
+# Two-phase approach:
+#   1. Build a reference copy in CI and upload as a GitHub Actions artifact.
+#   2. Exec build_database.py inside the running TrueNAS backend container so
+#      the production database (mounted at /databases/cards_db/) is updated
+#      in-place without any file transfer.
+#
+# Required GitHub secrets: PORTAINER_URL, PORTAINER_USER, PORTAINER_PASSWORD,
+#                          PORTAINER_ENDPOINT_ID
 
 on:
   schedule:
@@ -41,7 +49,7 @@ jobs:
           cd backend
           python scripts/build_database.py
 
-      - name: Upload card database
+      - name: Upload card database artifact
         uses: actions/upload-artifact@v4
         with:
           name: swu-card-database
@@ -54,3 +62,108 @@ jobs:
           name: card-database-build-log
           path: backend/database_build.log
           retention-days: 7
+
+      - name: Deploy card database to TrueNAS via Portainer exec
+        # Runs build_database.py inside the live backend container so the
+        # production DB on the TrueNAS volume is updated in-place.
+        # continue-on-error keeps the workflow green if TrueNAS is unreachable.
+        continue-on-error: true
+        env:
+          PORTAINER_URL: ${{ secrets.PORTAINER_URL }}
+          PORTAINER_USER: ${{ secrets.PORTAINER_USER }}
+          PORTAINER_PASSWORD: ${{ secrets.PORTAINER_PASSWORD }}
+          PORTAINER_ENDPOINT_ID: ${{ secrets.PORTAINER_ENDPOINT_ID }}
+        run: |
+          python3 - <<'PYEOF'
+          import os, json, ssl, time, sys
+          import urllib.request, urllib.error
+
+          url      = os.environ.get('PORTAINER_URL', '').rstrip('/')
+          user     = os.environ.get('PORTAINER_USER', '')
+          password = os.environ.get('PORTAINER_PASSWORD', '')
+          ep_id    = os.environ.get('PORTAINER_ENDPOINT_ID', '')
+
+          if not all([url, user, password, ep_id]):
+              print('⚠  Portainer secrets not configured — skipping TrueNAS deploy')
+              sys.exit(0)
+
+          ctx = ssl.create_default_context()
+          ctx.check_hostname = False
+          ctx.verify_mode    = ssl.CERT_NONE
+
+          def api(method, path, data=None, token=None):
+              headers = {'Content-Type': 'application/json'}
+              if token:
+                  headers['Authorization'] = f'Bearer {token}'
+              body = json.dumps(data).encode() if data is not None else None
+              req  = urllib.request.Request(f'{url}{path}', data=body,
+                                            headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(req, context=ctx) as r:
+                      return json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                  raise RuntimeError(f'HTTP {e.code}: {e.read().decode()}') from e
+
+          # 1. Authenticate
+          resp  = api('POST', '/api/auth', {'username': user, 'password': password})
+          token = resp['jwt']
+          print('✓ Portainer authenticated')
+
+          # 2. Find the backend container by name
+          containers = api('GET', f'/api/endpoints/{ep_id}/docker/containers/json'
+                           '?all=false', token=token)
+          backend = next(
+              (c for c in containers
+               if any('twinsuns-backend' in n.lstrip('/') for n in c.get('Names', []))),
+              None,
+          )
+          if not backend:
+              print('✗ twinsuns-backend container not found or not running')
+              sys.exit(1)
+          container_id = backend['Id']
+          print(f'✓ Found container {container_id[:12]}')
+
+          # 3. Create exec instance
+          exec_resp = api(
+              'POST',
+              f'/api/endpoints/{ep_id}/docker/containers/{container_id}/exec',
+              {
+                  'AttachStdout': True,
+                  'AttachStderr': True,
+                  'Cmd': ['python', '/app/scripts/build_database.py'],
+                  'Env': ['DB_DIR=/databases/cards_db'],
+              },
+              token=token,
+          )
+          exec_id = exec_resp['Id']
+          print(f'✓ Exec created {exec_id[:12]}')
+
+          # 4. Start exec (detached so we can poll; output goes to container logs)
+          api(
+              'POST',
+              f'/api/endpoints/{ep_id}/docker/exec/{exec_id}/start',
+              {'Detach': True, 'Tty': False},
+              token=token,
+          )
+          print('✓ Exec started — polling for completion (timeout 10 min)…')
+
+          # 5. Poll until the exec finishes
+          deadline = time.time() + 600
+          while time.time() < deadline:
+              info = api('GET',
+                         f'/api/endpoints/{ep_id}/docker/exec/{exec_id}/json',
+                         token=token)
+              if not info.get('Running', True):
+                  break
+              time.sleep(15)
+          else:
+              print('✗ Timed out waiting for build_database.py to finish')
+              sys.exit(1)
+
+          exit_code = info.get('ExitCode', -1)
+          if exit_code == 0:
+              print('✓ build_database.py completed successfully — production DB updated')
+          else:
+              print(f'✗ build_database.py exited with code {exit_code}')
+              sys.exit(1)
+          PYEOF

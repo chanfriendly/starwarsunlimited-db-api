@@ -4,6 +4,22 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-05-07: Login bug fixed, card database rebuilt (2,360 cards), deploy.sh hardened
+
+**Login was broken — root cause: `Secure` cookie flag on HTTP connection**
+
+`/api/auth/token` and `/api/auth/login` both set the `auth_token` cookie with `secure: process.env.NODE_ENV === 'production'`. In the Docker container `NODE_ENV=production`, so `Secure: true` was always set. Browsers silently drop `Secure` cookies on non-HTTPS connections (the app runs over plain HTTP at `192.168.1.124:4000`). The cookie was never stored, so every subsequent `/api/auth/me` check (which reads the cookie, not the `Authorization` header) returned "Not authenticated". Fixed by setting `secure: false` in both route handlers — this app runs on a local network without TLS.
+
+**`/api/auth/me` only reads cookies, not `Authorization` header** — The `fetchWithAuth` utility sends `Authorization: Bearer token`, but the `/api/auth/me` route handler only reads `cookieStore.get('auth_token')`. This works because after the token response sets the cookie, browsers send it automatically. The `Authorization` header in `fetchWithAuth` calls to `/api/auth/me` is redundant but harmless.
+
+**Card database rebuilt: 1,398 → 2,360 cards** — Last rebuild was `2025-06-26`. Two new main sets released since: Set 5 (A Lawless Time / LAW, 267 cards) and Set 6 (Secrets of Power / SEC, 266 cards). Also new: Intro Battle: Hoth (IBH, 104), 2026 Promo (P26, 66), 2026 Twin Suns (TS26, 88), weekly play sets. Rebuild run locally via `build_database.py`, then exec'd inside the backend container via Portainer API to write to the TrueNAS volume mount (`/databases/cards_db/swu_cards.db`).
+
+**`deploy.sh` Portainer redeploy was silently failing** — Two bugs: (1) `PORTAINER_PASSWORD` in `.env.prod` contains `"` and `:` — shell `source` via `grep | source <(...)` produced `unmatched "`, leaving the variable empty. Fixed by quoting the value in `.env.prod` with single quotes. (2) Even with the password fixed, using the password in shell string interpolation (`-d "{...\"password\":\"${pass}\"..."`) broke JSON when the value contained `"`. Rewrote `portainer_redeploy()` as an embedded Python script that reads `.env.prod` directly and uses `json.dumps` for all request bodies. Also fixed: was using `StackFileContent` from the stack GET response (empty in newer Portainer) — now reads compose from `/api/stacks/{id}/file`.
+
+**Frontend healthcheck `localhost` → `127.0.0.1`** — Docker's Alpine `wget` resolved `localhost` to `[::1]` (IPv6) but Next.js standalone listens on `0.0.0.0` (IPv4 only). Health check always failed even though the app was serving correctly. Fixed in `docker-compose.prod.yaml`.
+
+---
+
 ### 2026-05-06: Security hardening — close cryptominer follow-up gaps
 
 **What changed:**

@@ -11,7 +11,9 @@
 #
 # Prerequisites:
 #   - Docker Desktop running and logged into Docker Hub (`docker login`)
-#   - .env.prod present with PORTAINER_* vars set
+#   - .env.prod present with non-secret config vars set
+#   - Bitwarden CLI unlocked: export BW_SESSION=$(bw unlock --raw)
+#     (secrets are fetched from Bitwarden; .env.prod fallback still works)
 #
 # No manual Portainer interaction needed after a successful run.
 
@@ -35,11 +37,10 @@ warn()    { echo -e "${YELLOW}⚠ $1${NC}"; }
 err()     { echo -e "${RED}✗ $1${NC}"; }
 
 # ---------------------------------------------------------------------------
-# Load .env.prod
+# Load .env.prod (non-secret config)
 # ---------------------------------------------------------------------------
 if [ -f ".env.prod" ]; then
   step "Loading production environment"
-  # Export key=value pairs, skipping comments and blanks
   set -a
   # shellcheck disable=SC1091
   source <(grep -v '^\s*#' .env.prod | grep -v '^\s*$')
@@ -47,6 +48,32 @@ if [ -f ".env.prod" ]; then
   success "Environment loaded"
 else
   warn "No .env.prod found — Portainer redeploy step will be skipped"
+fi
+
+# ---------------------------------------------------------------------------
+# Fetch secrets from Bitwarden (overrides any .env.prod fallback values)
+# ---------------------------------------------------------------------------
+if [ -n "${BW_SESSION}" ] && command -v bw >/dev/null 2>&1; then
+  step "Fetching secrets from Bitwarden"
+
+  _jwt=$(bw get password twinsuns-jwt-secret --session "${BW_SESSION}" 2>/dev/null)
+  if [ -n "${_jwt}" ]; then
+    export JWT_SECRET="${_jwt}"
+    success "JWT_SECRET loaded from Bitwarden"
+  else
+    warn "Could not fetch twinsuns-jwt-secret from Bitwarden — using .env.prod fallback"
+  fi
+
+  _portainer_pw=$(bw get password twinsuns-portainer --session "${BW_SESSION}" 2>/dev/null)
+  if [ -n "${_portainer_pw}" ]; then
+    export PORTAINER_PASSWORD="${_portainer_pw}"
+    success "PORTAINER_PASSWORD loaded from Bitwarden"
+  else
+    warn "Could not fetch twinsuns-portainer from Bitwarden — using .env.prod fallback"
+  fi
+else
+  warn "BW_SESSION not set — secrets loaded from .env.prod fallback"
+  warn "To use Bitwarden: export BW_SESSION=\$(bw unlock --raw)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -96,75 +123,92 @@ build_and_push "backend"  "$BACKEND_IMAGE"  "backend/Dockerfile"
 # Portainer auto-redeploy
 # ---------------------------------------------------------------------------
 portainer_redeploy() {
-  local portainer_url="${PORTAINER_URL}"
-  local user="${PORTAINER_USER}"
-  local pass="${PORTAINER_PASSWORD}"
-  local stack_id="${PORTAINER_STACK_ID}"
-  local endpoint_id="${PORTAINER_ENDPOINT_ID}"
-
-  if [ -z "$portainer_url" ] || [ -z "$user" ] || [ -z "$pass" ] || \
-     [ -z "$stack_id" ] || [ -z "$endpoint_id" ]; then
-    warn "Portainer credentials not fully set in .env.prod — skipping auto-redeploy"
-    echo "  Set: PORTAINER_URL, PORTAINER_USER, PORTAINER_PASSWORD, PORTAINER_STACK_ID, PORTAINER_ENDPOINT_ID"
+  # Use Python for all JSON operations — shell string interpolation breaks on
+  # passwords that contain special characters like " or :.
+  if [ ! -f ".env.prod" ]; then
+    warn "No .env.prod found — skipping Portainer redeploy"
     return 0
   fi
 
-  step "Triggering Portainer redeploy (stack ${stack_id})"
+  step "Triggering Portainer redeploy"
 
-  # Authenticate
-  local token
-  token=$(curl -sk -X POST "${portainer_url}/api/auth" \
-    -H "Content-Type: application/json" \
-    -d "{\"username\":\"${user}\",\"password\":\"${pass}\"}" \
-    | python3 -c "import sys,json; print(json.load(sys.stdin).get('jwt',''))" 2>/dev/null)
+  local compose_file="docker-compose.prod.yaml"
+  python3 - "$compose_file" <<'PYEOF'
+import sys, json, ssl, urllib.request, urllib.error
 
-  if [ -z "$token" ]; then
-    err "Portainer authentication failed — check credentials in .env.prod"
+compose_path = sys.argv[1]
+
+# Parse .env.prod directly — avoids shell quoting issues with special-char passwords
+config = {}
+with open('.env.prod') as f:
+    for line in f:
+        line = line.strip()
+        if line and not line.startswith('#') and '=' in line:
+            k, v = line.split('=', 1)
+            config[k.strip()] = v.strip().strip("'\"")
+
+required = ['PORTAINER_URL', 'PORTAINER_USER', 'PORTAINER_PASSWORD',
+            'PORTAINER_STACK_ID', 'PORTAINER_ENDPOINT_ID']
+missing = [k for k in required if not config.get(k)]
+if missing:
+    print(f"⚠  Portainer credentials missing in .env.prod: {missing} — skipping")
+    sys.exit(0)
+
+url      = config['PORTAINER_URL']
+stack_id = config['PORTAINER_STACK_ID']
+ep_id    = config['PORTAINER_ENDPOINT_ID']
+
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+
+def api(method, path, data=None, token=None):
+    headers = {'Content-Type': 'application/json'}
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+    body = json.dumps(data).encode() if data is not None else None
+    req = urllib.request.Request(f'{url}{path}', data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, context=ctx) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f'HTTP {e.code}: {e.read().decode()}') from e
+
+# Auth
+resp = api('POST', '/api/auth', {'username': config['PORTAINER_USER'],
+                                  'password': config['PORTAINER_PASSWORD']})
+token = resp['jwt']
+print('  ✓ Portainer authenticated')
+
+# Preserve env vars stored in Portainer UI
+stack   = api('GET', f'/api/stacks/{stack_id}', token=token)
+env_vars = stack.get('Env', [])
+print(f'  Preserving {len(env_vars)} env vars: {[e["name"] for e in env_vars]}')
+
+# Use compose from disk — our single source of truth
+with open(compose_path) as f:
+    compose = f.read()
+
+# Redeploy
+result = api('PUT', f'/api/stacks/{stack_id}?endpointId={ep_id}',
+             {'stackFileContent': compose, 'env': env_vars,
+              'prune': False, 'pullImage': True},
+             token=token)
+
+status = result.get('Status')
+if status == 1:
+    print('  ✓ Stack redeployed — containers restarting with new images')
+else:
+    print(f'  ✗ Unexpected status: {status}  message: {result.get("message","")}')
+    sys.exit(1)
+PYEOF
+
+  local exit_code=$?
+  if [ $exit_code -ne 0 ]; then
+    err "Portainer redeploy failed (see output above)"
     return 1
   fi
-  success "Portainer authenticated"
-
-  # Fetch current stack compose + env (preserve env vars set in Portainer UI)
-  local stack_info
-  stack_info=$(curl -sk -H "Authorization: Bearer ${token}" \
-    "${portainer_url}/api/stacks/${stack_id}")
-
-  local current_env
-  current_env=$(echo "$stack_info" | python3 -c "
-import sys,json
-s=json.load(sys.stdin)
-print(json.dumps(s.get('Env',[])))
-" 2>/dev/null || echo "[]")
-
-  # Read compose file from disk (our single source of truth)
-  local compose_content
-  compose_content=$(cat docker-compose.prod.yaml)
-
-  # Update stack (pullImage:true pulls latest from Docker Hub before restarting)
-  local result
-  result=$(curl -sk -X PUT \
-    "${portainer_url}/api/stacks/${stack_id}?endpointId=${endpoint_id}" \
-    -H "Authorization: Bearer ${token}" \
-    -H "Content-Type: application/json" \
-    -d "{
-      \"stackFileContent\": $(echo "$compose_content" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))"),
-      \"env\": ${current_env},
-      \"prune\": false,
-      \"pullImage\": true
-    }")
-
-  local status
-  status=$(echo "$result" | python3 -c "import sys,json; print(json.load(sys.stdin).get('Status','?'))" 2>/dev/null)
-  local msg
-  msg=$(echo "$result" | python3 -c "import sys,json; print(json.load(sys.stdin).get('message',''))" 2>/dev/null)
-
-  if [ "$status" = "1" ]; then
-    success "Stack redeployed — containers are restarting with new images"
-  else
-    err "Stack update returned unexpected status: ${status}"
-    [ -n "$msg" ] && echo "  Message: $msg"
-    return 1
-  fi
+  success "Portainer redeploy complete"
 }
 
 portainer_redeploy

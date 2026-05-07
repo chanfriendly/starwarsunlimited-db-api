@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
       name: 'auth_token',
       value: responseData.access_token,
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: false, // app runs over HTTP on local network
       maxAge: 60 * 60 * 24 * 7, // 1 week
       path: '/',
     });
