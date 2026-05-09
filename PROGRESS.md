@@ -124,9 +124,19 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 
 **Priority order — top item is immediately actionable:**
 
-0. **[ENHANCEMENT] Add meaningful test coverage** — ~~Done~~ (session 6): 26 pytest tests in `backend/tests/test_api_endpoints.py` covering auth (7), cards (6), deck CRUD (8), and collection (5). Runs with `cd backend && python -m pytest tests/test_api_endpoints.py`. Key design: env vars set before any src imports so `db.py` initialises with temp SQLite paths, which also fixes the direct `get_card_db()` calls inside route handlers. `pytest==9.0.3` + `httpx==0.27.2` added to `requirements.txt`.
+0. **[FEATURE] Deck builder redesign: browse-first card discovery** — *(Session 8, complete)*
+   - Replaced flat Load More list with tabbed browse panel: **Units / Events / Upgrades** tabs with count badges
+   - Cards grouped by cost within each tab (sticky "Cost N" headers with separator lines)
+   - Each row: cost number · thumbnail image · name + arena/stats/keywords · aspect pips · +ADD button
+   - All three types fetched in parallel at `limit=1000` on stage entry (no Load More)
+   - **My cards only** collection toggle (loads user collection on stage entry, filters client-side)
+   - Card Type section removed from left FilterSidebar (tabs replace it); all other filters kept
+   - Backend `cards` endpoint limit raised from `le=100` → `le=2000`
+   - Zero TypeScript errors; smoke-tested in browser (218 units / 73 events / 19 upgrades for Ackbar+Holdo deck)
 
-1. **[ENHANCEMENT] GitHub workflow: deploy DB to TrueNAS after rebuild** — ~~Done~~ (session 7): Added `Deploy card database to TrueNAS via Portainer exec` step to `.github/workflows/update_dbs.yaml`. Authenticates with Portainer, finds `twinsuns-backend` container, execs `python /app/scripts/build_database.py` with `DB_DIR=/databases/cards_db`, polls until done (10-min timeout), fails if exit code != 0. `continue-on-error: true` so workflow stays green if TrueNAS is offline. **ACTION NEEDED**: Add 4 GitHub secrets — `PORTAINER_URL`, `PORTAINER_USER`, `PORTAINER_PASSWORD`, `PORTAINER_ENDPOINT_ID` — values are in `.env.prod`.
+1. **[ENHANCEMENT] Add meaningful test coverage** — ~~Done~~ (session 6): 26 pytest tests in `backend/tests/test_api_endpoints.py` covering auth (7), cards (6), deck CRUD (8), and collection (5). Runs with `cd backend && python -m pytest tests/test_api_endpoints.py`. Key design: env vars set before any src imports so `db.py` initialises with temp SQLite paths, which also fixes the direct `get_card_db()` calls inside route handlers. `pytest==9.0.3` + `httpx==0.27.2` added to `requirements.txt`.
+
+1. **[ENHANCEMENT] GitHub workflow: deploy DB to TrueNAS after rebuild** — ~~Done~~ (session 7+8): All 4 required GitHub secrets (`PORTAINER_URL`, `PORTAINER_USER`, `PORTAINER_PASSWORD`, `PORTAINER_ENDPOINT_ID`) confirmed set as of 2026-05-07. Workflow is fully operational.
 
 2. **[REPO CLEANUP] — DONE** (session 4)
 

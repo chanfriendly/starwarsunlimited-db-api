@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useDeckBuilder } from '@/contexts/DeckBuilderContext';
-import { Card as CardType, FetchCardsParams, fetchCards, fetchAspects, fetchSets, fetchTraits, SavedDeck } from '@/lib/api';
+import { Card as CardType, CollectionItem, FetchCardsParams, fetchCards, fetchAspects, fetchSets, fetchTraits, fetchUserCollection } from '@/lib/api';
 import { debounce } from 'lodash-es';
 import { fetchWithAuth } from '@/lib/fetch-utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -13,7 +13,8 @@ import { HandSimModal } from './HandSimModal';
 
 // ── Constants ──────────────────────────────────────────────
 const SEARCH_DEBOUNCE_MS = 400;
-const CARDS_PER_PAGE = 60;
+const CARDS_PER_PAGE = 60;   // leaders/base stages
+const BROWSE_LIMIT = 1000;   // cards stage — fetch all in one shot per type
 const LOOP_CHECK_WINDOW_MS = 3000;
 const MAX_VISITS_IN_WINDOW = 10;
 
@@ -584,7 +585,6 @@ function FilterSidebar({
   filterAspects, setFilterAspects,
   filterTraits, setFilterTraits,
   filterSets, setFilterSets,
-  cardTypeFilter, setCardTypeFilter,
   availableAspects, availableTraits, availableSets,
   showAllCards, setShowAllCards,
   hideCardsInDeck, setHideCardsInDeck,
@@ -596,8 +596,6 @@ function FilterSidebar({
   setFilterTraits: React.Dispatch<React.SetStateAction<string[]>>;
   filterSets: string[];
   setFilterSets: React.Dispatch<React.SetStateAction<string[]>>;
-  cardTypeFilter: string;
-  setCardTypeFilter: React.Dispatch<React.SetStateAction<string>>;
   availableAspects: string[];
   availableTraits: string[];
   availableSets: string[];
@@ -612,7 +610,6 @@ function FilterSidebar({
   };
 
   const ASPECTS = ['Command', 'Aggression', 'Cunning', 'Heroism', 'Vigilance', 'Villainy'];
-  const TYPES = ['Unit', 'Event', 'Upgrade'];
 
   if (currentStage !== 'cards') return null;
 
@@ -639,22 +636,6 @@ function FilterSidebar({
             >
               <AspectPip aspect={a} />
               <span style={{ fontSize: 9, letterSpacing: '0.1em' }}>{a.toUpperCase()}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Card Type */}
-      <div style={{ borderBottom: '1px solid var(--ts-line)', padding: '14px 0' }}>
-        <div className="ts-eyebrow" style={{ marginBottom: 10 }}>Card Type</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-          {TYPES.map(t => (
-            <button
-              key={t}
-              className={'ts-filter-pill' + (cardTypeFilter === t ? ' is-active' : '')}
-              onClick={() => setCardTypeFilter(prev => prev === t ? '' : t)}
-            >
-              {t}
             </button>
           ))}
         </div>
@@ -777,7 +758,7 @@ function FilterSidebar({
       {/* Clear */}
       {(filterAspects.length + filterTraits.length + filterSets.length) > 0 && (
         <button
-          onClick={() => { setFilterAspects([]); setFilterTraits([]); setFilterSets([]); setCardTypeFilter(''); }}
+          onClick={() => { setFilterAspects([]); setFilterTraits([]); setFilterSets([]); }}
           style={{
             fontFamily: 'var(--ts-font-mono)',
             fontSize: 9,
@@ -797,184 +778,302 @@ function FilterSidebar({
   );
 }
 
-// ── Card list (middle column) ──────────────────────────────
-function CardListView({
-  cards, deck, addCard, removeCard,
-  loading, hasMoreCards, isLoadingMore, loadMore,
+// ── Card browse panel (middle column, cards stage) ─────────
+function CardBrowsePanel({
+  groupedByCost,
+  tabCounts,
+  activeTab, setActiveTab,
+  collectionOnly, setCollectionOnly,
+  loading,
+  addCard, removeCard,
   isCardInDeck,
 }: {
-  cards: CardType[];
-  deck: { cards: { card: CardType; quantity: number }[] };
+  groupedByCost: { cost: number; cards: CardType[] }[];
+  tabCounts: { Unit: number; Event: number; Upgrade: number };
+  activeTab: 'Unit' | 'Event' | 'Upgrade';
+  setActiveTab: (tab: 'Unit' | 'Event' | 'Upgrade') => void;
+  collectionOnly: boolean;
+  setCollectionOnly: (v: boolean) => void;
+  loading: boolean;
   addCard: (c: CardType) => void;
   removeCard: (id: string) => void;
-  loading: boolean;
-  hasMoreCards: boolean;
-  isLoadingMore: boolean;
-  loadMore: () => void;
   isCardInDeck: (id: string) => boolean;
 }) {
-  if (loading) {
-    return (
-      <div
-        style={{
-          height: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: 'var(--ts-ink-3)',
-          fontFamily: 'var(--ts-font-mono)',
-          fontSize: 11,
-          letterSpacing: '0.16em',
-        }}
-      >
-        Loading cards…
-      </div>
-    );
-  }
+  const tabs: { key: 'Unit' | 'Event' | 'Upgrade'; label: string }[] = [
+    { key: 'Unit', label: 'Units' },
+    { key: 'Event', label: 'Events' },
+    { key: 'Upgrade', label: 'Upgrades' },
+  ];
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* Column headers */}
+      {/* Tab bar */}
       <div
         style={{
-          display: 'grid',
-          gridTemplateColumns: '28px 1fr auto 88px',
-          gap: 8,
+          display: 'flex',
+          alignItems: 'center',
           padding: '8px 12px',
-          background: 'var(--ts-bg-2)',
           borderBottom: '1px solid var(--ts-line)',
-          fontFamily: 'var(--ts-font-mono)',
-          fontSize: 9,
-          letterSpacing: '0.2em',
-          textTransform: 'uppercase',
-          color: 'var(--ts-ink-3)',
+          background: 'var(--ts-bg-2)',
           flexShrink: 0,
+          gap: 0,
         }}
       >
-        <span>#</span>
-        <span>Card · Type</span>
-        <span>Aspects</span>
-        <span style={{ textAlign: 'right' }}>Action</span>
+        <div style={{ display: 'flex' }}>
+          {tabs.map(({ key, label }, i) => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              style={{
+                padding: '6px 16px',
+                fontFamily: 'var(--ts-font-mono)',
+                fontSize: 10,
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
+                background: activeTab === key ? 'var(--ts-amber)' : 'transparent',
+                color: activeTab === key ? '#1a1611' : 'var(--ts-ink-3)',
+                border: '1px solid var(--ts-line-2)',
+                borderRight: i < tabs.length - 1 ? 'none' : '1px solid var(--ts-line-2)',
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+              }}
+            >
+              {label}
+              <span style={{ opacity: 0.65, marginLeft: 5, fontSize: 9 }}>
+                {tabCounts[key]}
+              </span>
+            </button>
+          ))}
+        </div>
+        <div style={{ flex: 1 }} />
+        <label
+          style={{
+            display: 'flex',
+            gap: 6,
+            alignItems: 'center',
+            fontSize: 11,
+            color: 'var(--ts-ink-2)',
+            cursor: 'pointer',
+            fontFamily: 'var(--ts-font-mono)',
+            letterSpacing: '0.08em',
+            userSelect: 'none',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={collectionOnly}
+            onChange={e => setCollectionOnly(e.target.checked)}
+            style={{ accentColor: 'var(--ts-amber)' }}
+          />
+          My cards only
+        </label>
       </div>
 
-      {/* Card rows */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
-        {cards.length === 0 ? (
-          <div
-            style={{
-              padding: 40,
-              textAlign: 'center',
-              color: 'var(--ts-ink-3)',
-              fontFamily: 'var(--ts-font-mono)',
-              fontSize: 11,
-              letterSpacing: '0.14em',
-            }}
-          >
-            No cards found
-          </div>
-        ) : (
-          cards.map(card => {
-            const inDeck = isCardInDeck(card.id);
-            const cost = card.cost ?? card.energy_cost ?? '—';
-            return (
-              <div key={card.id} className="ts-card-row">
-                <span
+      {/* Card list */}
+      {loading ? (
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'var(--ts-ink-3)',
+            fontFamily: 'var(--ts-font-mono)',
+            fontSize: 11,
+            letterSpacing: '0.16em',
+          }}
+        >
+          Loading cards…
+        </div>
+      ) : (
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {groupedByCost.length === 0 ? (
+            <div
+              style={{
+                padding: 40,
+                textAlign: 'center',
+                color: 'var(--ts-ink-3)',
+                fontFamily: 'var(--ts-font-mono)',
+                fontSize: 11,
+                letterSpacing: '0.14em',
+              }}
+            >
+              No cards found
+            </div>
+          ) : (
+            groupedByCost.map(({ cost, cards }) => (
+              <div key={cost}>
+                {/* Cost group header */}
+                <div
                   style={{
-                    fontFamily: 'var(--ts-font-mono)',
-                    fontSize: 12,
-                    color: 'var(--ts-ink)',
-                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '8px 12px 4px',
+                    position: 'sticky',
+                    top: 0,
+                    background: 'var(--ts-bg)',
+                    zIndex: 1,
                   }}
                 >
-                  {cost}
-                </span>
-                <div style={{ minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontFamily: 'var(--ts-font-display)',
-                      fontSize: 14,
-                      color: 'var(--ts-ink)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {card.name}
-                  </div>
-                  <div
+                  <span
                     style={{
                       fontFamily: 'var(--ts-font-mono)',
                       fontSize: 9,
-                      color: 'var(--ts-ink-3)',
-                      letterSpacing: '0.14em',
-                      marginTop: 1,
+                      letterSpacing: '0.2em',
+                      textTransform: 'uppercase',
+                      color: 'var(--ts-amber)',
                     }}
                   >
-                    {card.type}
-                    {card.attack !== undefined && card.health !== undefined
-                      ? ` · ${card.attack}/${card.health}`
-                      : ''}
-                  </div>
+                    Cost {cost}
+                  </span>
+                  <div style={{ flex: 1, height: 1, background: 'var(--ts-line)' }} />
+                  <span
+                    style={{
+                      fontFamily: 'var(--ts-font-mono)',
+                      fontSize: 9,
+                      color: 'var(--ts-ink-4)',
+                    }}
+                  >
+                    {cards.length}
+                  </span>
                 </div>
-                <div style={{ display: 'flex', gap: 3 }}>
-                  {card.aspects?.map(a => (
-                    <AspectPip key={a.aspect_name} aspect={a.aspect_name} />
-                  ))}
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  {inDeck ? (
-                    <button
-                      className="ts-filter-pill is-active"
-                      style={{
-                        padding: '4px 10px',
-                        background: 'var(--ts-green)',
-                        borderColor: 'var(--ts-green)',
-                        color: '#0e1410',
-                        fontSize: 9,
-                      }}
-                      onClick={() => removeCard(card.id)}
-                    >
-                      ✓ IN DECK
-                    </button>
-                  ) : (
-                    <button
-                      className="ts-filter-pill"
-                      style={{ padding: '4px 10px', fontSize: 9 }}
-                      onClick={() => addCard(card)}
-                    >
-                      + ADD
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })
-        )}
 
-        {hasMoreCards && !isLoadingMore && cards.length > 0 && (
-          <div style={{ padding: 16, textAlign: 'center' }}>
-            <button
-              className="ts-btn ts-btn-sm"
-              onClick={loadMore}
-            >
-              Load More
-            </button>
-          </div>
-        )}
-        {isLoadingMore && (
-          <div
-            style={{
-              padding: 16,
-              textAlign: 'center',
-              fontFamily: 'var(--ts-font-mono)',
-              fontSize: 10,
-              color: 'var(--ts-ink-3)',
-            }}
-          >
-            Loading…
-          </div>
-        )}
-      </div>
+                {/* Cards in this cost group */}
+                {cards.map(card => {
+                  const inDeck = isCardInDeck(card.id);
+                  return (
+                    <div
+                      key={card.id}
+                      className="ts-card-row"
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '32px 44px 1fr auto 92px',
+                        gap: 8,
+                        padding: '5px 12px',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontFamily: 'var(--ts-font-mono)',
+                          fontSize: 13,
+                          color: 'var(--ts-ink)',
+                          fontWeight: 600,
+                          textAlign: 'center',
+                        }}
+                      >
+                        {cost}
+                      </span>
+                      <div
+                        style={{
+                          width: 44,
+                          height: 56,
+                          overflow: 'hidden',
+                          border: '1px solid var(--ts-line)',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <img
+                          src={card.image_uri ?? '/placeholder-card.png'}
+                          alt={card.name}
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            objectPosition: '50% 15%',
+                          }}
+                          onError={e => {
+                            (e.target as HTMLImageElement).src = '/placeholder-card.png';
+                          }}
+                        />
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontFamily: 'var(--ts-font-display)',
+                            fontSize: 14,
+                            color: 'var(--ts-ink)',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {card.name}
+                        </div>
+                        <div
+                          style={{
+                            fontFamily: 'var(--ts-font-mono)',
+                            fontSize: 9,
+                            color: 'var(--ts-ink-3)',
+                            letterSpacing: '0.1em',
+                            marginTop: 2,
+                            display: 'flex',
+                            gap: 6,
+                            alignItems: 'center',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          {card.arenas?.length ? (
+                            <span>{card.arenas.join(' · ')}</span>
+                          ) : null}
+                          {card.attack !== undefined && card.health !== undefined && (
+                            <span style={{ color: 'var(--ts-ink-2)' }}>
+                              {card.attack}/{card.health}
+                            </span>
+                          )}
+                          {card.keywords?.length > 0 && (
+                            <span
+                              style={{
+                                color: 'var(--ts-ink-4)',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {card.keywords.slice(0, 2).join(', ')}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 3 }}>
+                        {card.aspects?.map(a => (
+                          <AspectPip key={a.aspect_name} aspect={a.aspect_name} />
+                        ))}
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                        {inDeck ? (
+                          <button
+                            className="ts-filter-pill is-active"
+                            style={{
+                              padding: '4px 10px',
+                              background: 'var(--ts-green)',
+                              borderColor: 'var(--ts-green)',
+                              color: '#0e1410',
+                              fontSize: 9,
+                            }}
+                            onClick={() => removeCard(card.id)}
+                          >
+                            ✓ IN DECK
+                          </button>
+                        ) : (
+                          <button
+                            className="ts-filter-pill"
+                            style={{ padding: '4px 10px', fontSize: 9 }}
+                            onClick={() => addCard(card)}
+                          >
+                            + ADD
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -994,18 +1093,28 @@ export default function DeckBuilderClient() {
 
   // State
   const [isPotentialLoop, setIsPotentialLoop] = useState(false);
+  // leaders/base stage card pool
   const [cards, setCards] = useState<CardType[]>([]);
   const [loading, setLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [hasMoreCards, setHasMoreCards] = useState(true);
+  // cards stage — one array per type, loaded in parallel
+  const [unitCards, setUnitCards] = useState<CardType[]>([]);
+  const [eventCards, setEventCards] = useState<CardType[]>([]);
+  const [upgradeCards, setUpgradeCards] = useState<CardType[]>([]);
+  const [tabsLoading, setTabsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'Unit' | 'Event' | 'Upgrade'>('Unit');
+  // collection
+  const [collectionOnly, setCollectionOnly] = useState(false);
+  const [collectionCardIds, setCollectionCardIds] = useState<Set<string>>(new Set());
+
   const [loadingDeck, setLoadingDeck] = useState(!!deckIdParam);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [cardTypeFilter, setCardTypeFilter] = useState('');
   const [showAllCards, setShowAllCards] = useState(false);
   const [hideCardsInDeck, setHideCardsInDeck] = useState(true);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [hasMoreCards, setHasMoreCards] = useState(true);
   const [handSimMode, setHandSimMode] = useState<'sim' | 'mulligan' | null>(null);
 
   // Filter state
@@ -1056,7 +1165,7 @@ export default function DeckBuilderClient() {
       .catch(err => console.error('[DeckBuilder] filter options:', err));
   }, [currentStage, availableAspects.length]);
 
-  // Load cards
+  // Load cards for leaders/base stages (paginated)
   const loadCards = useCallback(async (page = 1, append = false) => {
     if (loadingRef.current || (append && !hasMoreCards)) return;
     loadingRef.current = true;
@@ -1071,14 +1180,6 @@ export default function DeckBuilderClient() {
 
     if (currentStage === 'leaders') params.type = 'Leader';
     else if (currentStage === 'base') params.type = 'Base';
-    else {
-      params.type = cardTypeFilter
-        ? cardTypeFilter
-        : 'Unit,Event,Upgrade';
-      if (filterAspects.length) params.aspect = filterAspects.join(',');
-      if (filterTraits.length) params.trait = filterTraits.join(',');
-      if (filterSets.length) params.set = filterSets.join(',');
-    }
 
     try {
       const response = await fetchCards(params);
@@ -1094,7 +1195,34 @@ export default function DeckBuilderClient() {
       setIsLoadingMore(false);
       loadingRef.current = false;
     }
-  }, [currentStage, searchQuery, filterAspects, filterTraits, filterSets, cardTypeFilter, hasMoreCards]);
+  }, [currentStage, searchQuery, hasMoreCards]);
+
+  // Load all card types in parallel for the cards stage browse panel
+  const loadAllCardTypes = useCallback(async () => {
+    setTabsLoading(true);
+    const baseParams: FetchCardsParams = {
+      limit: BROWSE_LIMIT.toString(),
+      search: searchQuery || undefined,
+    };
+    if (filterAspects.length) baseParams.aspect = filterAspects.join(',');
+    if (filterTraits.length) baseParams.trait = filterTraits.join(',');
+    if (filterSets.length) baseParams.set = filterSets.join(',');
+
+    try {
+      const [units, events, upgrades] = await Promise.all([
+        fetchCards({ ...baseParams, type: 'Unit' }),
+        fetchCards({ ...baseParams, type: 'Event' }),
+        fetchCards({ ...baseParams, type: 'Upgrade' }),
+      ]);
+      setUnitCards(Array.isArray(units.data) ? units.data : []);
+      setEventCards(Array.isArray(events.data) ? events.data : []);
+      setUpgradeCards(Array.isArray(upgrades.data) ? upgrades.data : []);
+    } catch (err) {
+      setError(`Failed to load cards: ${err instanceof Error ? err.message : 'Unknown'}`);
+    } finally {
+      setTabsLoading(false);
+    }
+  }, [searchQuery, filterAspects, filterTraits, filterSets]);
 
   // Load existing deck
   useEffect(() => {
@@ -1122,27 +1250,45 @@ export default function DeckBuilderClient() {
     load();
   }, [deckIdParam, isPotentialLoop]);
 
-  // Reload cards when stage/filters change
+  // Leaders/base: reload on stage or search change
   useEffect(() => {
-    if (isPotentialLoop) return;
-    const key = `${currentStage}-${searchQuery}-${filterAspects.join(',')}-${filterTraits.join(',')}-${filterSets.join(',')}-${cardTypeFilter}`;
+    if (isPotentialLoop || currentStage === 'cards') return;
+    const key = `${currentStage}-${searchQuery}`;
     if (cardLoadingStageRef.current === key) return;
     cardLoadingStageRef.current = key;
     setCards([]);
     setCurrentPage(1);
     setHasMoreCards(true);
     loadCards(1, false);
-  }, [currentStage, searchQuery, filterAspects, filterTraits, filterSets, cardTypeFilter, loadCards, isPotentialLoop]);
+  }, [currentStage, searchQuery, loadCards, isPotentialLoop]);
+
+  // Cards stage: reload all types when search or filters change
+  useEffect(() => {
+    if (isPotentialLoop || currentStage !== 'cards') return;
+    const key = `cards-${searchQuery}-${filterAspects.join(',')}-${filterTraits.join(',')}-${filterSets.join(',')}`;
+    if (cardLoadingStageRef.current === key) return;
+    cardLoadingStageRef.current = key;
+    loadAllCardTypes();
+  }, [currentStage, searchQuery, filterAspects, filterTraits, filterSets, loadAllCardTypes, isPotentialLoop]);
+
+  // Load user collection once when entering the cards stage
+  useEffect(() => {
+    if (currentStage !== 'cards' || !isAuthenticated) return;
+    fetchUserCollection()
+      .then((items: CollectionItem[]) =>
+        setCollectionCardIds(new Set(items.map(i => i.card.id)))
+      )
+      .catch(() => {});
+  }, [currentStage, isAuthenticated]);
 
   const debouncedSearch = useMemo(
     () => debounce((q: string) => setSearchQuery(q), SEARCH_DEBOUNCE_MS),
     []
   );
 
-  // Client-side filtering
+  // Client-side filtering for leaders/base stages
   const displayedCards = useMemo(() => {
     let filtered = cards;
-
     if (currentStage === 'leaders' && leaders.length === 1) {
       const first = leaders[0];
       const firstAspects = first.aspects?.map(a => a.aspect_name) ?? [];
@@ -1158,15 +1304,59 @@ export default function DeckBuilderClient() {
       const ids = new Set(leaders.map(l => l.id));
       filtered = filtered.filter(c => !ids.has(c.id));
     }
-    if (currentStage === 'cards' && hideCardsInDeck) {
+    return filtered;
+  }, [cards, currentStage, leaders]);
+
+  // Cards stage — client-side filtering applied on top of fetched data
+  const tabCards = useMemo(() => {
+    const source =
+      activeTab === 'Unit' ? unitCards
+      : activeTab === 'Event' ? eventCards
+      : upgradeCards;
+    let filtered = source;
+    if (!showAllCards && leaders.length === 2 && base) {
+      filtered = filtered.filter(c => isCardInAspect(c));
+    }
+    if (hideCardsInDeck) {
       const deckIds = new Set(deckCards.map(dc => dc.card.id));
       filtered = filtered.filter(c => !deckIds.has(c.id));
     }
-    if (currentStage === 'cards' && !showAllCards && leaders.length === 2 && base) {
-      filtered = filtered.filter(c => isCardInAspect(c));
+    if (collectionOnly && collectionCardIds.size > 0) {
+      filtered = filtered.filter(c => collectionCardIds.has(c.id));
     }
     return filtered;
-  }, [cards, currentStage, leaders, base, hideCardsInDeck, showAllCards, deckCards, isCardInAspect]);
+  }, [activeTab, unitCards, eventCards, upgradeCards, showAllCards, leaders, base, isCardInAspect, hideCardsInDeck, deckCards, collectionOnly, collectionCardIds]);
+
+  // Group tab cards by cost for the browse panel
+  const groupedByCost = useMemo(() => {
+    const groups: Record<number, CardType[]> = {};
+    tabCards.forEach(card => {
+      const cost = card.cost ?? card.energy_cost ?? 0;
+      if (!groups[cost]) groups[cost] = [];
+      groups[cost].push(card);
+    });
+    return Object.entries(groups)
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .map(([cost, cards]) => ({
+        cost: Number(cost),
+        cards: cards.sort((a, b) => a.name.localeCompare(b.name)),
+      }));
+  }, [tabCards]);
+
+  // Count per tab after aspect filter (shown as badges)
+  const tabCounts = useMemo(() => {
+    const inAspect = (src: CardType[]) => {
+      if (!showAllCards && leaders.length === 2 && base) {
+        return src.filter(c => isCardInAspect(c)).length;
+      }
+      return src.length;
+    };
+    return {
+      Unit: inAspect(unitCards),
+      Event: inAspect(eventCards),
+      Upgrade: inAspect(upgradeCards),
+    };
+  }, [unitCards, eventCards, upgradeCards, showAllCards, leaders, base, isCardInAspect]);
 
   const handleAddCard = useCallback((card: CardType) => {
     if (currentStage === 'leaders') {
@@ -1325,7 +1515,6 @@ export default function DeckBuilderClient() {
             filterAspects={filterAspects} setFilterAspects={setFilterAspects}
             filterTraits={filterTraits} setFilterTraits={setFilterTraits}
             filterSets={filterSets} setFilterSets={setFilterSets}
-            cardTypeFilter={cardTypeFilter} setCardTypeFilter={setCardTypeFilter}
             availableAspects={availableAspects}
             availableTraits={availableTraits}
             availableSets={availableSets}
@@ -1346,15 +1535,16 @@ export default function DeckBuilderClient() {
           }}
         >
           {currentStage === 'cards' ? (
-            <CardListView
-              cards={displayedCards}
-              deck={{ cards: deckCards }}
+            <CardBrowsePanel
+              groupedByCost={groupedByCost}
+              tabCounts={tabCounts}
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
+              collectionOnly={collectionOnly}
+              setCollectionOnly={setCollectionOnly}
+              loading={tabsLoading}
               addCard={handleAddCard}
               removeCard={handleRemoveFromDeck}
-              loading={loading}
-              hasMoreCards={hasMoreCards}
-              isLoadingMore={isLoadingMore}
-              loadMore={() => loadCards(currentPage + 1, true)}
               isCardInDeck={isCardIdInDeck}
             />
           ) : (

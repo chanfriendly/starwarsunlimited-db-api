@@ -76,7 +76,7 @@ def group_cards_by_identity(cards):
 async def get_cards(
     db: Session = Depends(get_card_db),
     page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=2000),
     search: Optional[str] = None,
     type: Optional[str] = None,
     not_type: Optional[str] = None,  # Add this for filtering out certain types
