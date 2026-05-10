@@ -124,7 +124,10 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 
 **Priority order — top item is immediately actionable:**
 
-0. **[FEATURE] Deck builder redesign: browse-first card discovery** — *(Session 8, complete)*
+0. **[FEATURE] Deck builder redesign + Suggested tab** — *(Session 8, complete)*
+   - **Suggested tab** (◈): synergy-scored cards from all types that share keywords (+2) or traits (+1) with either leader. Sorted by score then cost then name. Opens as the default tab. Shows card type (UNIT/EVENT/UPGRADE) in blue in subtitle. Empty state: "No synergy matches found for these leaders". Verified: 191 matches for Ackbar+Holdo deck.
+
+0b. **[FEATURE] Deck builder redesign: browse-first card discovery** — *(Session 8, complete)*
    - Replaced flat Load More list with tabbed browse panel: **Units / Events / Upgrades** tabs with count badges
    - Cards grouped by cost within each tab (sticky "Cost N" headers with separator lines)
    - Each row: cost number · thumbnail image · name + arena/stats/keywords · aspect pips · +ADD button

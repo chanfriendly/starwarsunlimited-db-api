@@ -779,6 +779,8 @@ function FilterSidebar({
 }
 
 // ── Card browse panel (middle column, cards stage) ─────────
+type BrowseTab = 'Unit' | 'Event' | 'Upgrade' | 'Suggested';
+
 function CardBrowsePanel({
   groupedByCost,
   tabCounts,
@@ -789,9 +791,9 @@ function CardBrowsePanel({
   isCardInDeck,
 }: {
   groupedByCost: { cost: number; cards: CardType[] }[];
-  tabCounts: { Unit: number; Event: number; Upgrade: number };
-  activeTab: 'Unit' | 'Event' | 'Upgrade';
-  setActiveTab: (tab: 'Unit' | 'Event' | 'Upgrade') => void;
+  tabCounts: { Unit: number; Event: number; Upgrade: number; Suggested: number };
+  activeTab: BrowseTab;
+  setActiveTab: (tab: BrowseTab) => void;
   collectionOnly: boolean;
   setCollectionOnly: (v: boolean) => void;
   loading: boolean;
@@ -799,7 +801,8 @@ function CardBrowsePanel({
   removeCard: (id: string) => void;
   isCardInDeck: (id: string) => boolean;
 }) {
-  const tabs: { key: 'Unit' | 'Event' | 'Upgrade'; label: string }[] = [
+  const tabs: { key: BrowseTab; label: string }[] = [
+    { key: 'Suggested', label: 'Suggested' },
     { key: 'Unit', label: 'Units' },
     { key: 'Event', label: 'Events' },
     { key: 'Upgrade', label: 'Upgrades' },
@@ -820,30 +823,38 @@ function CardBrowsePanel({
         }}
       >
         <div style={{ display: 'flex' }}>
-          {tabs.map(({ key, label }, i) => (
-            <button
-              key={key}
-              onClick={() => setActiveTab(key)}
-              style={{
-                padding: '6px 16px',
-                fontFamily: 'var(--ts-font-mono)',
-                fontSize: 10,
-                letterSpacing: '0.14em',
-                textTransform: 'uppercase',
-                background: activeTab === key ? 'var(--ts-amber)' : 'transparent',
-                color: activeTab === key ? '#1a1611' : 'var(--ts-ink-3)',
-                border: '1px solid var(--ts-line-2)',
-                borderRight: i < tabs.length - 1 ? 'none' : '1px solid var(--ts-line-2)',
-                cursor: 'pointer',
-                transition: 'all 0.15s',
-              }}
-            >
-              {label}
-              <span style={{ opacity: 0.65, marginLeft: 5, fontSize: 9 }}>
-                {tabCounts[key]}
-              </span>
-            </button>
-          ))}
+          {tabs.map(({ key, label }, i) => {
+            const isSuggested = key === 'Suggested';
+            const isActive = activeTab === key;
+            return (
+              <button
+                key={key}
+                onClick={() => setActiveTab(key)}
+                style={{
+                  padding: '6px 16px',
+                  fontFamily: 'var(--ts-font-mono)',
+                  fontSize: 10,
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  background: isActive
+                    ? isSuggested ? 'var(--ts-blue)' : 'var(--ts-amber)'
+                    : 'transparent',
+                  color: isActive
+                    ? isSuggested ? '#e8f0ff' : '#1a1611'
+                    : isSuggested ? 'var(--ts-blue)' : 'var(--ts-ink-3)',
+                  border: `1px solid ${isSuggested ? 'var(--ts-blue)' : 'var(--ts-line-2)'}`,
+                  borderRight: i < tabs.length - 1 ? 'none' : `1px solid ${isSuggested ? 'var(--ts-blue)' : 'var(--ts-line-2)'}`,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {isSuggested ? '◈ ' : ''}{label}
+                <span style={{ opacity: 0.65, marginLeft: 5, fontSize: 9 }}>
+                  {tabCounts[key]}
+                </span>
+              </button>
+            );
+          })}
         </div>
         <div style={{ flex: 1 }} />
         <label
@@ -898,7 +909,9 @@ function CardBrowsePanel({
                 letterSpacing: '0.14em',
               }}
             >
-              No cards found
+              {activeTab === 'Suggested'
+                ? 'No synergy matches found for these leaders'
+                : 'No cards found'}
             </div>
           ) : (
             groupedByCost.map(({ cost, cards }) => (
@@ -1014,6 +1027,11 @@ function CardBrowsePanel({
                             overflow: 'hidden',
                           }}
                         >
+                          {activeTab === 'Suggested' && card.type && (
+                            <span style={{ color: 'var(--ts-blue)', letterSpacing: '0.14em' }}>
+                              {card.type.toUpperCase()}
+                            </span>
+                          )}
                           {card.arenas?.length ? (
                             <span>{card.arenas.join(' · ')}</span>
                           ) : null}
@@ -1104,7 +1122,7 @@ export default function DeckBuilderClient() {
   const [eventCards, setEventCards] = useState<CardType[]>([]);
   const [upgradeCards, setUpgradeCards] = useState<CardType[]>([]);
   const [tabsLoading, setTabsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'Unit' | 'Event' | 'Upgrade'>('Unit');
+  const [activeTab, setActiveTab] = useState<BrowseTab>('Suggested');
   // collection
   const [collectionOnly, setCollectionOnly] = useState(false);
   const [collectionCardIds, setCollectionCardIds] = useState<Set<string>>(new Set());
@@ -1327,10 +1345,47 @@ export default function DeckBuilderClient() {
     return filtered;
   }, [activeTab, unitCards, eventCards, upgradeCards, showAllCards, leaders, base, isCardInAspect, hideCardsInDeck, deckCards, collectionOnly, collectionCardIds]);
 
+  // Suggested tab: cards that share keywords or traits with the selected leaders
+  const suggestedCards = useMemo(() => {
+    if (leaders.length < 2 || !base) return [];
+
+    const leaderKeywords = new Set<string>();
+    const leaderTraits = new Set<string>();
+    leaders.forEach(l => {
+      l.keywords?.forEach(k => leaderKeywords.add(k));
+      l.traits?.forEach(t => leaderTraits.add(t));
+    });
+    if (leaderKeywords.size === 0 && leaderTraits.size === 0) return [];
+
+    const allCards = [...unitCards, ...eventCards, ...upgradeCards];
+    const aspectFiltered = showAllCards ? allCards : allCards.filter(c => isCardInAspect(c));
+    const deckIds = new Set(deckCards.map(dc => dc.card.id));
+    const pool = aspectFiltered
+      .filter(c => !hideCardsInDeck || !deckIds.has(c.id))
+      .filter(c => !collectionOnly || collectionCardIds.size === 0 || collectionCardIds.has(c.id));
+
+    return pool
+      .map(card => {
+        let score = 0;
+        card.keywords?.forEach(k => { if (leaderKeywords.has(k)) score += 2; });
+        card.traits?.forEach(t => { if (leaderTraits.has(t)) score += 1; });
+        return { card, score };
+      })
+      .filter(({ score }) => score > 0)
+      .sort((a, b) =>
+        b.score - a.score ||
+        (a.card.cost ?? a.card.energy_cost ?? 0) - (b.card.cost ?? b.card.energy_cost ?? 0) ||
+        a.card.name.localeCompare(b.card.name)
+      )
+      .map(({ card }) => card);
+  }, [leaders, base, unitCards, eventCards, upgradeCards, showAllCards, isCardInAspect, hideCardsInDeck, deckCards, collectionOnly, collectionCardIds]);
+
   // Group tab cards by cost for the browse panel
+  // Suggested tab is already sorted by synergy score — preserve that order within each cost group
   const groupedByCost = useMemo(() => {
+    const source = activeTab === 'Suggested' ? suggestedCards : tabCards;
     const groups: Record<number, CardType[]> = {};
-    tabCards.forEach(card => {
+    source.forEach(card => {
       const cost = card.cost ?? card.energy_cost ?? 0;
       if (!groups[cost]) groups[cost] = [];
       groups[cost].push(card);
@@ -1339,9 +1394,9 @@ export default function DeckBuilderClient() {
       .sort(([a], [b]) => Number(a) - Number(b))
       .map(([cost, cards]) => ({
         cost: Number(cost),
-        cards: cards.sort((a, b) => a.name.localeCompare(b.name)),
+        cards: activeTab === 'Suggested' ? cards : cards.sort((a, b) => a.name.localeCompare(b.name)),
       }));
-  }, [tabCards]);
+  }, [activeTab, tabCards, suggestedCards]);
 
   // Count per tab after aspect filter (shown as badges)
   const tabCounts = useMemo(() => {
@@ -1355,8 +1410,9 @@ export default function DeckBuilderClient() {
       Unit: inAspect(unitCards),
       Event: inAspect(eventCards),
       Upgrade: inAspect(upgradeCards),
+      Suggested: suggestedCards.length,
     };
-  }, [unitCards, eventCards, upgradeCards, showAllCards, leaders, base, isCardInAspect]);
+  }, [unitCards, eventCards, upgradeCards, suggestedCards, showAllCards, leaders, base, isCardInAspect]);
 
   const handleAddCard = useCallback((card: CardType) => {
     if (currentStage === 'leaders') {
