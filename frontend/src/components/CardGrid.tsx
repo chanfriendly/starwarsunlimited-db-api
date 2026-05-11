@@ -1,9 +1,7 @@
-// Fixed CardGrid - Trust backend grouping, don't re-group on frontend
 'use client';
 
 import React, { useState, useCallback } from 'react';
 import { ApiCard } from '@/lib/api';
-import { ChevronLeft, ChevronRight, Image } from 'lucide-react';
 
 interface CardGridProps {
   cards: ApiCard[];
@@ -15,7 +13,6 @@ interface CardGridProps {
   compatibleCards?: Set<string>;
 }
 
-// Define alternate art structure
 interface AlternateArt {
   id: string;
   image_uri: string;
@@ -26,247 +23,394 @@ interface AlternateArt {
   artist: string;
 }
 
-// Extended interface for cards that may have alternate arts from backend
 interface ApiCardWithAlternates extends ApiCard {
   alternate_arts?: AlternateArt[];
 }
 
-// Extended interface for display cards
 interface DisplayCard extends ApiCardWithAlternates {
   hasMultipleVariants: boolean;
   currentVariantIndex: number;
   variants: ApiCard[];
 }
 
-export function CardGrid({ 
-  cards, 
-  onCardClickAction, 
+export function CardGrid({
+  cards,
+  onCardClickAction,
   onDoubleClickAction,
   isInCollection,
   hideCardsInDeck = false,
   isInDeck,
-  compatibleCards
+  compatibleCards,
 }: CardGridProps) {
-  // Track selected art variants for each unique card (by ID, not name)
   const [selectedArtVariants, setSelectedArtVariants] = useState<Record<string, number>>({});
-  
-  // Convert backend-grouped cards to display format
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+
   const displayCards: DisplayCard[] = cards.map((card) => {
     const cardWithAlternates = card as ApiCardWithAlternates;
     const hasAlternateArts = cardWithAlternates.alternate_arts && cardWithAlternates.alternate_arts.length > 0;
-    
-    // If card has alternate arts, create variants array including main card
+
     if (hasAlternateArts) {
       const variants = [
-        card, // Main card first
+        card,
         ...cardWithAlternates.alternate_arts!.map((alt: AlternateArt) => ({
-          ...card, // Copy all properties from main card
-          id: alt.id, // Override with alternate art's ID and image
+          ...card,
+          id: alt.id,
           image_uri: alt.image_uri,
           set_name: alt.set_name,
           set_code: alt.set_code,
           card_number: alt.card_number,
           rarity: alt.rarity,
           artist: alt.artist,
-        }))
+        })),
       ];
-      
       return {
         ...cardWithAlternates,
         hasMultipleVariants: true,
         variants,
-        currentVariantIndex: selectedArtVariants[card.id] || 0
+        currentVariantIndex: selectedArtVariants[card.id] || 0,
       };
     }
-    
-    // Single card with no variants
+
     return {
       ...cardWithAlternates,
       hasMultipleVariants: false,
       variants: [card],
-      currentVariantIndex: 0
+      currentVariantIndex: 0,
     };
   });
 
-  // Get the currently selected variant for a card
-  const getSelectedVariant = useCallback((cardId: string, variants: ApiCard[]) => {
-    const selectedIndex = selectedArtVariants[cardId] || 0;
-    return variants[Math.min(selectedIndex, variants.length - 1)];
-  }, [selectedArtVariants]);
+  const getSelectedVariant = useCallback(
+    (cardId: string, variants: ApiCard[]) => {
+      const selectedIndex = selectedArtVariants[cardId] || 0;
+      return variants[Math.min(selectedIndex, variants.length - 1)];
+    },
+    [selectedArtVariants]
+  );
 
-  // Handle art variant cycling
-  const cycleArtVariant = useCallback((cardId: string, variants: ApiCard[], direction: 'next' | 'prev') => {
-    const currentIndex = selectedArtVariants[cardId] || 0;
-    let newIndex;
-    
-    if (direction === 'next') {
-      newIndex = (currentIndex + 1) % variants.length;
-    } else {
-      newIndex = currentIndex === 0 ? variants.length - 1 : currentIndex - 1;
-    }
-    
-    setSelectedArtVariants(prev => ({
-      ...prev,
-      [cardId]: newIndex
-    }));
-  }, [selectedArtVariants]);
+  const cycleArtVariant = useCallback(
+    (cardId: string, variants: ApiCard[], direction: 'next' | 'prev') => {
+      const currentIndex = selectedArtVariants[cardId] || 0;
+      const newIndex =
+        direction === 'next'
+          ? (currentIndex + 1) % variants.length
+          : currentIndex === 0
+          ? variants.length - 1
+          : currentIndex - 1;
+      setSelectedArtVariants((prev) => ({ ...prev, [cardId]: newIndex }));
+    },
+    [selectedArtVariants]
+  );
 
-  // Filter cards based on deck status if needed
-  const visibleCards = displayCards.filter(card => {
-    if (hideCardsInDeck && isInDeck) {
-      return !isInDeck(card.id);
-    }
+  const visibleCards = displayCards.filter((card) => {
+    if (hideCardsInDeck && isInDeck) return !isInDeck(card.id);
     return true;
   });
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+        gap: 12,
+      }}
+    >
       {visibleCards.map((displayCard) => {
-        // Get the currently displayed variant
-        const currentVariant = displayCard.hasMultipleVariants 
+        const currentVariant = displayCard.hasMultipleVariants
           ? getSelectedVariant(displayCard.id, displayCard.variants)
           : displayCard;
-          
+
         const inCollection = isInCollection ? isInCollection(currentVariant.id) : false;
         const inDeck = isInDeck ? isInDeck(currentVariant.id) : false;
         const compatible = compatibleCards ? compatibleCards.has(currentVariant.id) : true;
+        const isHovered = hoveredId === displayCard.id;
 
         return (
-          <div key={displayCard.id} className="group relative">
+          <div
+            key={displayCard.id}
+            style={{ position: 'relative' }}
+            onMouseEnter={() => setHoveredId(displayCard.id)}
+            onMouseLeave={() => setHoveredId(null)}
+          >
             <div
-              className={`
-                relative overflow-hidden rounded-lg border transition-all duration-200 cursor-pointer
-                ${inCollection ? 'border-green-500/50' : 'border-gray-700'}
-                ${inDeck ? 'ring-2 ring-red-500/50' : ''}
-                ${compatible ? 'hover:border-purple-500/50' : 'border-red-500/50'}
-                ${inCollection ? 'bg-green-900/10' : ''}
-                ${inDeck ? 'bg-red-900/10' : ''}
-                ${!compatible ? 'bg-red-900/10' : ''}
-                ${inCollection && !inDeck ? 'ring-2 ring-green-500/50' : ''}
-                group-hover:shadow-lg group-hover:shadow-purple-500/20
-              `}
+              style={{
+                border: `1px solid ${
+                  !compatible
+                    ? 'var(--ts-red)'
+                    : inCollection
+                    ? 'var(--ts-amber)'
+                    : isHovered
+                    ? 'var(--ts-line-2)'
+                    : 'var(--ts-line)'
+                }`,
+                background: 'var(--ts-panel)',
+                cursor: 'pointer',
+                transition: 'border-color 0.15s, box-shadow 0.15s',
+                boxShadow: isHovered ? '0 4px 20px rgba(0,0,0,0.5)' : 'none',
+                position: 'relative',
+                overflow: 'hidden',
+              }}
               onClick={() => onCardClickAction(currentVariant)}
               onDoubleClick={onDoubleClickAction ? () => onDoubleClickAction(currentVariant) : undefined}
             >
               {/* Card Image */}
-              <div className="aspect-[7/10] relative">
+              <div style={{ aspectRatio: '7/10', position: 'relative', overflow: 'hidden' }}>
                 {currentVariant.image_uri ? (
                   <img
                     src={currentVariant.image_uri}
                     alt={currentVariant.name}
-                    className={`w-full h-full ${currentVariant.type === 'Leader' || currentVariant.type === 'Base' ? 'object-contain' : 'object-cover'}`}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit:
+                        currentVariant.type === 'Leader' || currentVariant.type === 'Base'
+                          ? 'contain'
+                          : 'cover',
+                      display: 'block',
+                    }}
                     loading="lazy"
                   />
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center bg-gray-900 text-gray-500">
-                    <Image className="w-8 h-8" />
+                  <div
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: 'var(--ts-bg-2)',
+                      color: 'var(--ts-ink-4)',
+                      fontSize: 12,
+                      fontFamily: 'var(--ts-font-mono)',
+                    }}
+                  >
+                    NO ART
                   </div>
                 )}
 
-                {/* Art Variant Indicators */}
+                {/* Variant counter */}
                 {displayCard.hasMultipleVariants && (
-                  <>
-                    {/* Variant Counter */}
-                    <div className="absolute top-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1">
-                      <Image className="w-3 h-3" />
-                      {displayCard.currentVariantIndex + 1}/{displayCard.variants.length}
-                    </div>
-
-                    {/* Art Cycling Controls - Show on Hover */}
-                    <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-between px-2 pointer-events-none">
-                      <button
-                        className="p-1 bg-black/70 rounded-full text-white hover:bg-black/90 transition-colors pointer-events-auto"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          cycleArtVariant(displayCard.id, displayCard.variants, 'prev');
-                        }}
-                        title="Previous art variant"
-                      >
-                        <ChevronLeft className="w-4 h-4" />
-                      </button>
-                      
-                      <button
-                        className="p-1 bg-black/70 rounded-full text-white hover:bg-black/90 transition-colors pointer-events-auto"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          cycleArtVariant(displayCard.id, displayCard.variants, 'next');
-                        }}
-                        title="Next art variant"
-                      >
-                        <ChevronRight className="w-4 h-4" />
-                      </button>
-                    </div>
-
-                    {/* Art Variant Dots */}
-                    <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex space-x-1">
-                      {displayCard.variants.map((_, index) => (
-                        <button
-                          key={index}
-                          className={`w-2 h-2 rounded-full transition-colors ${
-                            index === displayCard.currentVariantIndex 
-                              ? 'bg-purple-500' 
-                              : 'bg-gray-500 hover:bg-gray-400'
-                          }`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedArtVariants(prev => ({
-                              ...prev,
-                              [displayCard.id]: index
-                            }));
-                          }}
-                          title={`Art variant ${index + 1}`}
-                        />
-                      ))}
-                    </div>
-                  </>
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 6,
+                      right: 6,
+                      background: 'rgba(26,22,17,0.85)',
+                      border: '1px solid var(--ts-line-2)',
+                      color: 'var(--ts-ink-3)',
+                      fontFamily: 'var(--ts-font-mono)',
+                      fontSize: 9,
+                      letterSpacing: '0.1em',
+                      padding: '2px 6px',
+                    }}
+                  >
+                    {(selectedArtVariants[displayCard.id] || 0) + 1}/{displayCard.variants.length}
+                  </div>
                 )}
 
-                {/* Collection Status */}
+                {/* Variant arrows — shown on hover */}
+                {displayCard.hasMultipleVariants && isHovered && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '0 4px',
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    <button
+                      style={{
+                        background: 'rgba(26,22,17,0.85)',
+                        border: '1px solid var(--ts-line-2)',
+                        color: 'var(--ts-ink)',
+                        width: 24,
+                        height: 24,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        pointerEvents: 'auto',
+                        fontSize: 14,
+                        lineHeight: 1,
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        cycleArtVariant(displayCard.id, displayCard.variants, 'prev');
+                      }}
+                    >
+                      ‹
+                    </button>
+                    <button
+                      style={{
+                        background: 'rgba(26,22,17,0.85)',
+                        border: '1px solid var(--ts-line-2)',
+                        color: 'var(--ts-ink)',
+                        width: 24,
+                        height: 24,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        pointerEvents: 'auto',
+                        fontSize: 14,
+                        lineHeight: 1,
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        cycleArtVariant(displayCard.id, displayCard.variants, 'next');
+                      }}
+                    >
+                      ›
+                    </button>
+                  </div>
+                )}
+
+                {/* Collection badge */}
                 {inCollection && (
-                  <div className="absolute top-2 left-2 bg-green-600/90 text-white text-xs py-0.5 px-2 rounded-full">
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 6,
+                      left: 6,
+                      background: 'var(--ts-amber)',
+                      color: '#1a1611',
+                      fontFamily: 'var(--ts-font-mono)',
+                      fontSize: 8,
+                      letterSpacing: '0.18em',
+                      textTransform: 'uppercase',
+                      padding: '2px 5px',
+                    }}
+                  >
                     Owned
                   </div>
                 )}
 
-                {/* Touch indicator for mobile */}
-                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20 sm:hidden">
-                  <div className="bg-purple-600 text-white text-xs py-1 px-2 rounded-full">
-                    {displayCard.hasMultipleVariants ? 'Tap for Details' : 'Tap to Select'}
-                  </div>
-                </div>
-
-                {/* Compatibility indicator */}
+                {/* Out of aspect */}
                 {!compatible && (
-                  <div className="absolute top-1 right-1 bg-red-600/90 text-white text-xs py-0.5 px-1 rounded-full">
-                    Out of Aspect
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: inCollection ? 26 : 6,
+                      left: 6,
+                      background: 'var(--ts-red)',
+                      color: '#fff',
+                      fontFamily: 'var(--ts-font-mono)',
+                      fontSize: 8,
+                      letterSpacing: '0.12em',
+                      textTransform: 'uppercase',
+                      padding: '2px 5px',
+                    }}
+                  >
+                    Off-Aspect
                   </div>
                 )}
 
-                {/* Already in Deck indicator */}
+                {/* Already in deck overlay */}
                 {inDeck && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-                    <div className="bg-red-600 text-white text-xs font-bold py-1 px-3 rounded-full transform -rotate-12">
-                      Already in Deck
-                    </div>
+                  <div
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      background: 'rgba(26,22,17,0.65)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <span
+                      className="ts-stamp"
+                      style={{ fontSize: 9, transform: 'rotate(-12deg)' }}
+                    >
+                      In Deck
+                    </span>
                   </div>
                 )}
 
-                {/* Card type badge */}
-                <div className="absolute bottom-1 left-1 bg-black/70 text-white text-xs py-0.5 px-1 rounded-full">
+                {/* Type badge */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    bottom: 4,
+                    left: 4,
+                    background: 'rgba(26,22,17,0.8)',
+                    color: 'var(--ts-ink-3)',
+                    fontFamily: 'var(--ts-font-mono)',
+                    fontSize: 8,
+                    letterSpacing: '0.12em',
+                    textTransform: 'uppercase',
+                    padding: '1px 4px',
+                  }}
+                >
                   {currentVariant.type}
                 </div>
               </div>
 
-              {/* Card Info */}
-              <div className="p-2 bg-gray-900">
-                <h3 className="text-xs font-medium text-white truncate">{currentVariant.name}</h3>
+              {/* Card info */}
+              <div
+                style={{
+                  padding: '6px 8px',
+                  background: 'var(--ts-panel)',
+                  borderTop: '1px solid var(--ts-line)',
+                }}
+              >
+                <div
+                  style={{
+                    fontFamily: 'var(--ts-font-body)',
+                    fontSize: 12,
+                    color: 'var(--ts-ink)',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {currentVariant.name}
+                </div>
                 {currentVariant.subtitle && (
-                  <p className="text-xs text-gray-400 truncate mt-0.5">{currentVariant.subtitle}</p>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: 'var(--ts-ink-3)',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      marginTop: 1,
+                    }}
+                  >
+                    {currentVariant.subtitle}
+                  </div>
                 )}
-                <div className="flex justify-between items-center mt-1">
-                  <span className="text-xs text-gray-500">{currentVariant.set_name || 'Unknown Set'}</span>
-                  {currentVariant.energy_cost !== null && currentVariant.energy_cost !== undefined && (
-                    <span className="text-xs font-bold text-yellow-400">
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginTop: 4,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: 'var(--ts-font-mono)',
+                      fontSize: 9,
+                      color: 'var(--ts-ink-4)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {currentVariant.set_code || '—'}
+                  </span>
+                  {currentVariant.energy_cost != null && (
+                    <span
+                      style={{
+                        fontFamily: 'var(--ts-font-mono)',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: 'var(--ts-amber)',
+                      }}
+                    >
                       {currentVariant.energy_cost}
                     </span>
                   )}
@@ -274,37 +418,37 @@ export function CardGrid({
               </div>
             </div>
 
-            {/* Art Variants Preview Thumbnails - Show on Hover for Desktop */}
-            {displayCard.hasMultipleVariants && (
-              <div className="absolute -bottom-16 left-0 right-0 opacity-0 group-hover:opacity-100 transition-opacity hidden sm:block pointer-events-none z-10">
-                <div className="flex justify-center space-x-1 p-2 bg-black/90 rounded-lg backdrop-blur-sm">
-                  {displayCard.variants.slice(0, 4).map((variant, index) => (
-                    <div
-                      key={variant.id}
-                      className={`w-8 h-12 rounded border overflow-hidden cursor-pointer pointer-events-auto ${
-                        index === displayCard.currentVariantIndex 
-                          ? 'border-purple-500' 
-                          : 'border-gray-600 hover:border-gray-400'
-                      }`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedArtVariants(prev => ({
-                          ...prev,
-                          [displayCard.id]: index
-                        }));
-                      }}
-                      title={`${variant.set_name} - ${variant.artist || 'Unknown Artist'}`}
-                    >
-                      {variant.image_uri && (
-                        <img
-                          src={variant.image_uri}
-                          alt={`${variant.name} variant`}
-                          className="w-full h-full object-cover"
-                        />
-                      )}
-                    </div>
-                  ))}
-                </div>
+            {/* Variant dots — below card on hover */}
+            {displayCard.hasMultipleVariants && isHovered && (
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'center',
+                  gap: 4,
+                  marginTop: 4,
+                }}
+              >
+                {displayCard.variants.slice(0, 5).map((_, index) => (
+                  <button
+                    key={index}
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      background:
+                        index === (selectedArtVariants[displayCard.id] || 0)
+                          ? 'var(--ts-amber)'
+                          : 'var(--ts-line-2)',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: 0,
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedArtVariants((prev) => ({ ...prev, [displayCard.id]: index }));
+                    }}
+                  />
+                ))}
               </div>
             )}
           </div>

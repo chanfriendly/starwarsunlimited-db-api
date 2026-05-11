@@ -1,11 +1,16 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
-import { Search, Filter, X, ChevronDown } from 'lucide-react';
+
+interface CardFilters {
+  search: string;
+  types: string[];
+  aspects: string[];
+  keywords: string[];
+  costMin: string;
+  costMax: string;
+  sets: string[];
+}
 
 interface CardSearchProps {
   searchTerm: string;
@@ -18,16 +23,6 @@ interface CardSearchProps {
   isLoading?: boolean;
 }
 
-interface CardFilters {
-  search: string;
-  types: string[];
-  aspects: string[];
-  keywords: string[];
-  costMin: string;
-  costMax: string;
-  sets: string[];
-}
-
 export function CardSearch({
   searchTerm,
   filters,
@@ -36,261 +31,309 @@ export function CardSearch({
   availableTypes,
   availableKeywords,
   availableSets,
-  isLoading = false
+  isLoading = false,
 }: CardSearchProps) {
   const [showFilters, setShowFilters] = useState(false);
 
-  // Handle search input changes
   const handleSearchChange = (value: string) => {
-    // Update filters immediately for responsive UI
-    const updatedFilters = { ...filters, search: value };
-    onFiltersChange(updatedFilters);
+    onFiltersChange({ ...filters, search: value });
   };
 
-  // Handle filter changes
-  const updateFilters = useCallback((newFilters: Partial<CardFilters>) => {
-    const updatedFilters = { ...filters, ...newFilters };
-    onFiltersChange(updatedFilters);
-  }, [filters, onFiltersChange]);
+  const updateFilters = useCallback(
+    (newFilters: Partial<CardFilters>) => {
+      onFiltersChange({ ...filters, ...newFilters });
+    },
+    [filters, onFiltersChange]
+  );
 
-  // Add/remove items from array filters
   const toggleFilterItem = (filterKey: keyof CardFilters, item: string) => {
     const currentArray = filters[filterKey] as string[];
     const newArray = currentArray.includes(item)
-      ? currentArray.filter(i => i !== item)
+      ? currentArray.filter((i) => i !== item)
       : [...currentArray, item];
-    
     updateFilters({ [filterKey]: newArray });
   };
 
-  // Clear all filters
   const clearAllFilters = () => {
-    const clearedFilters: CardFilters = {
-      search: searchTerm, // Keep the search term
+    onFiltersChange({
+      search: searchTerm,
       types: [],
       aspects: [],
       keywords: [],
       costMin: '',
       costMax: '',
-      sets: []
-    };
-    onFiltersChange(clearedFilters);
+      sets: [],
+    });
   };
 
-  // Count active filters
-  const activeFilterCount = filters.types.length + 
-                           filters.aspects.length + 
-                           filters.keywords.length + 
-                           filters.sets.length +
-                           (filters.costMin ? 1 : 0) +
-                           (filters.costMax ? 1 : 0);
+  const activeFilterCount =
+    filters.types.length +
+    filters.aspects.length +
+    filters.keywords.length +
+    filters.sets.length +
+    (filters.costMin ? 1 : 0) +
+    (filters.costMax ? 1 : 0);
 
   return (
-    <div className="space-y-4">
-      {/* Search Bar */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-        <Input
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Search bar */}
+      <div style={{ position: 'relative' }}>
+        <span
+          style={{
+            position: 'absolute',
+            left: 12,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            color: 'var(--ts-ink-4)',
+            fontSize: 14,
+            pointerEvents: 'none',
+          }}
+        >
+          ⌕
+        </span>
+        <input
           type="text"
-          placeholder="Search cards by name, text, or abilities..."
+          placeholder="Search cards by name…"
           value={searchTerm}
           onChange={(e) => handleSearchChange(e.target.value)}
-          className="pl-10 pr-12"
           disabled={isLoading}
+          className="ts-input"
+          style={{ paddingLeft: 34, paddingRight: isLoading ? 36 : 12 }}
         />
         {isLoading && (
-          <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-500"></div>
-          </div>
+          <div
+            style={{
+              position: 'absolute',
+              right: 12,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: 14,
+              height: 14,
+              border: '2px solid var(--ts-line-2)',
+              borderTopColor: 'var(--ts-amber)',
+              borderRadius: '50%',
+              animation: 'spin 0.8s linear infinite',
+            }}
+          />
         )}
       </div>
 
-      {/* Filter Toggle Button */}
-      <div className="flex items-center justify-between">
-        <Button
-          variant="outline"
+      {/* Filter toggle + clear row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button
           onClick={() => setShowFilters(!showFilters)}
-          className="flex items-center gap-2"
+          className="ts-btn ts-btn-sm"
+          style={{
+            borderColor: showFilters ? 'var(--ts-amber)' : undefined,
+            color: showFilters ? 'var(--ts-amber)' : undefined,
+          }}
         >
-          <Filter className="w-4 h-4" />
-          Filters
+          {showFilters ? '▲' : '▼'} Filters
           {activeFilterCount > 0 && (
-            <Badge variant="secondary" className="ml-1">
+            <span
+              className="ts-chip"
+              style={{
+                marginLeft: 4,
+                borderColor: 'var(--ts-amber)',
+                color: 'var(--ts-amber)',
+                padding: '1px 5px',
+                fontSize: 9,
+              }}
+            >
               {activeFilterCount}
-            </Badge>
+            </span>
           )}
-          <ChevronDown className={`w-4 h-4 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
-        </Button>
+        </button>
 
         {activeFilterCount > 0 && (
-          <Button variant="ghost" onClick={clearAllFilters} className="text-sm">
+          <button onClick={clearAllFilters} className="ts-btn ts-btn-sm">
             Clear All
-          </Button>
+          </button>
         )}
       </div>
 
-      {/* Advanced Filters */}
+      {/* Expanded filter panel — mobile/inline */}
       {showFilters && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4 border rounded-lg bg-gray-50 dark:bg-gray-900">
-          {/* Cost Range */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Cost Range</label>
-            <div className="flex gap-2">
-              <Input
+        <div
+          style={{
+            background: 'var(--ts-panel)',
+            border: '1px solid var(--ts-line)',
+            padding: 16,
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gap: 16,
+          }}
+        >
+          {/* Cost range */}
+          <div>
+            <div className="ts-eyebrow" style={{ marginBottom: 6 }}>Cost Range</div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
                 type="number"
                 placeholder="Min"
                 value={filters.costMin}
                 onChange={(e) => updateFilters({ costMin: e.target.value })}
-                className="w-20"
+                className="ts-input"
+                style={{ width: 64, padding: '5px 8px', fontSize: 13 }}
                 min="0"
                 max="20"
               />
-              <span className="flex items-center text-gray-500">-</span>
-              <Input
+              <span style={{ color: 'var(--ts-ink-4)', fontSize: 12 }}>–</span>
+              <input
                 type="number"
                 placeholder="Max"
                 value={filters.costMax}
                 onChange={(e) => updateFilters({ costMax: e.target.value })}
-                className="w-20"
+                className="ts-input"
+                style={{ width: 64, padding: '5px 8px', fontSize: 13 }}
                 min="0"
                 max="20"
               />
             </div>
           </div>
 
-          {/* Card Types */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Card Types</label>
-            <Select onValueChange={(value) => toggleFilterItem('types', value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select types..." />
-              </SelectTrigger>
-              <SelectContent>
-                {availableTypes.map(type => (
-                  <SelectItem key={type} value={type}>
-                    {type}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <div className="flex flex-wrap gap-1">
-              {filters.types.map(type => (
-                <Badge key={type} variant="secondary" className="cursor-pointer" onClick={() => toggleFilterItem('types', type)}>
-                  {type} <X className="w-3 h-3 ml-1" />
-                </Badge>
+          {/* Types */}
+          <div>
+            <div className="ts-eyebrow" style={{ marginBottom: 6 }}>Card Types</div>
+            <select
+              onChange={(e) => { if (e.target.value) toggleFilterItem('types', e.target.value); e.target.value = ''; }}
+              className="ts-input"
+              style={{ fontSize: 12, padding: '5px 8px', marginBottom: 6 }}
+            >
+              <option value="">Select type…</option>
+              {availableTypes.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {filters.types.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => toggleFilterItem('types', t)}
+                  className="ts-filter-pill is-active"
+                  style={{ fontSize: 9 }}
+                >
+                  {t} ×
+                </button>
               ))}
             </div>
           </div>
 
           {/* Aspects */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Aspects</label>
-            <Select onValueChange={(value) => toggleFilterItem('aspects', value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select aspects..." />
-              </SelectTrigger>
-              <SelectContent>
-                {availableAspects.map(aspect => (
-                  <SelectItem key={aspect} value={aspect}>
-                    {aspect}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <div className="flex flex-wrap gap-1">
-              {filters.aspects.map(aspect => (
-                <Badge key={aspect} variant="secondary" className="cursor-pointer" onClick={() => toggleFilterItem('aspects', aspect)}>
-                  {aspect} <X className="w-3 h-3 ml-1" />
-                </Badge>
+          <div>
+            <div className="ts-eyebrow" style={{ marginBottom: 6 }}>Aspects</div>
+            <select
+              onChange={(e) => { if (e.target.value) toggleFilterItem('aspects', e.target.value); e.target.value = ''; }}
+              className="ts-input"
+              style={{ fontSize: 12, padding: '5px 8px', marginBottom: 6 }}
+            >
+              <option value="">Select aspect…</option>
+              {availableAspects.map((a) => (
+                <option key={a} value={a}>{a}</option>
+              ))}
+            </select>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {filters.aspects.map((a) => (
+                <button
+                  key={a}
+                  onClick={() => toggleFilterItem('aspects', a)}
+                  className="ts-filter-pill is-active"
+                  style={{ fontSize: 9 }}
+                >
+                  {a} ×
+                </button>
               ))}
             </div>
           </div>
 
           {/* Keywords */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Keywords</label>
-            <Select onValueChange={(value) => toggleFilterItem('keywords', value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select keywords..." />
-              </SelectTrigger>
-              <SelectContent>
-                {availableKeywords.map(keyword => (
-                  <SelectItem key={keyword} value={keyword}>
-                    {keyword}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <div className="flex flex-wrap gap-1">
-              {filters.keywords.map(keyword => (
-                <Badge key={keyword} variant="secondary" className="cursor-pointer" onClick={() => toggleFilterItem('keywords', keyword)}>
-                  {keyword} <X className="w-3 h-3 ml-1" />
-                </Badge>
+          <div>
+            <div className="ts-eyebrow" style={{ marginBottom: 6 }}>Keywords</div>
+            <select
+              onChange={(e) => { if (e.target.value) toggleFilterItem('keywords', e.target.value); e.target.value = ''; }}
+              className="ts-input"
+              style={{ fontSize: 12, padding: '5px 8px', marginBottom: 6 }}
+            >
+              <option value="">Select keyword…</option>
+              {availableKeywords.map((k) => (
+                <option key={k} value={k}>{k}</option>
+              ))}
+            </select>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {filters.keywords.map((k) => (
+                <button
+                  key={k}
+                  onClick={() => toggleFilterItem('keywords', k)}
+                  className="ts-filter-pill is-active"
+                  style={{ fontSize: 9 }}
+                >
+                  {k} ×
+                </button>
               ))}
             </div>
           </div>
 
           {/* Sets */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Sets</label>
-            <Select onValueChange={(value) => toggleFilterItem('sets', value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select sets..." />
-              </SelectTrigger>
-              <SelectContent>
-                {availableSets.map(set => (
-                  <SelectItem key={set} value={set}>
-                    {set}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <div className="flex flex-wrap gap-1">
-              {filters.sets.map(set => (
-                <Badge key={set} variant="secondary" className="cursor-pointer" onClick={() => toggleFilterItem('sets', set)}>
-                  {set} <X className="w-3 h-3 ml-1" />
-                </Badge>
+          <div>
+            <div className="ts-eyebrow" style={{ marginBottom: 6 }}>Sets</div>
+            <select
+              onChange={(e) => { if (e.target.value) toggleFilterItem('sets', e.target.value); e.target.value = ''; }}
+              className="ts-input"
+              style={{ fontSize: 12, padding: '5px 8px', marginBottom: 6 }}
+            >
+              <option value="">Select set…</option>
+              {availableSets.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {filters.sets.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => toggleFilterItem('sets', s)}
+                  className="ts-filter-pill is-active"
+                  style={{ fontSize: 9 }}
+                >
+                  {s} ×
+                </button>
               ))}
             </div>
           </div>
         </div>
       )}
 
-      {/* Active Filters Summary */}
-      {activeFilterCount > 0 && (
-        <div className="flex flex-wrap gap-2 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
-          <span className="text-sm font-medium text-purple-700 dark:text-purple-300">
-            Active filters:
-          </span>
-          {filters.types.map(type => (
-            <Badge key={`type-${type}`} variant="outline" className="cursor-pointer" onClick={() => toggleFilterItem('types', type)}>
-              Type: {type} <X className="w-3 h-3 ml-1" />
-            </Badge>
+      {/* Active filter pills row */}
+      {activeFilterCount > 0 && !showFilters && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          {filters.types.map((t) => (
+            <button key={`t-${t}`} onClick={() => toggleFilterItem('types', t)} className="ts-filter-pill is-active" style={{ fontSize: 9 }}>
+              {t} ×
+            </button>
           ))}
-          {filters.aspects.map(aspect => (
-            <Badge key={`aspect-${aspect}`} variant="outline" className="cursor-pointer" onClick={() => toggleFilterItem('aspects', aspect)}>
-              {aspect} <X className="w-3 h-3 ml-1" />
-            </Badge>
+          {filters.aspects.map((a) => (
+            <button key={`a-${a}`} onClick={() => toggleFilterItem('aspects', a)} className="ts-filter-pill is-active" style={{ fontSize: 9 }}>
+              {a} ×
+            </button>
           ))}
-          {filters.keywords.map(keyword => (
-            <Badge key={`keyword-${keyword}`} variant="outline" className="cursor-pointer" onClick={() => toggleFilterItem('keywords', keyword)}>
-              {keyword} <X className="w-3 h-3 ml-1" />
-            </Badge>
+          {filters.keywords.map((k) => (
+            <button key={`k-${k}`} onClick={() => toggleFilterItem('keywords', k)} className="ts-filter-pill is-active" style={{ fontSize: 9 }}>
+              {k} ×
+            </button>
           ))}
-          {filters.sets.map(set => (
-            <Badge key={`set-${set}`} variant="outline" className="cursor-pointer" onClick={() => toggleFilterItem('sets', set)}>
-              {set} <X className="w-3 h-3 ml-1" />
-            </Badge>
+          {filters.sets.map((s) => (
+            <button key={`s-${s}`} onClick={() => toggleFilterItem('sets', s)} className="ts-filter-pill is-active" style={{ fontSize: 9 }}>
+              {s} ×
+            </button>
           ))}
           {filters.costMin && (
-            <Badge variant="outline" className="cursor-pointer" onClick={() => updateFilters({ costMin: '' })}>
-              Min Cost: {filters.costMin} <X className="w-3 h-3 ml-1" />
-            </Badge>
+            <button onClick={() => updateFilters({ costMin: '' })} className="ts-filter-pill is-active" style={{ fontSize: 9 }}>
+              Min: {filters.costMin} ×
+            </button>
           )}
           {filters.costMax && (
-            <Badge variant="outline" className="cursor-pointer" onClick={() => updateFilters({ costMax: '' })}>
-              Max Cost: {filters.costMax} <X className="w-3 h-3 ml-1" />
-            </Badge>
+            <button onClick={() => updateFilters({ costMax: '' })} className="ts-filter-pill is-active" style={{ fontSize: 9 }}>
+              Max: {filters.costMax} ×
+            </button>
           )}
         </div>
       )}

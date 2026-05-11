@@ -6,6 +6,10 @@
 
 ## Current Status
 
+*(2026-05-11 session 9)* **Full cards page + components redesigned to Twin Suns design system.**
+
+`cards/page.tsx`, `CardGrid`, `CardFilters`, `CardSearch`, and `CardDetailDialog` all rewritten to use `ts-*` CSS vars and the Imperial Field Manual design system. All shadcn components removed (`Card`, `Button`, `Select`, `Dialog`, `DialogContent`, `Checkbox`, `Label`, `Badge`, `Input`). All Lucide icon imports removed. Key changes: `CardGrid` uses inline styles with `var(--ts-*)` tokens, amber owned badge, ts-stamp "In Deck" overlay; `CardFilters` has custom amber checkbox rows and native `<select>` cost dropdowns; `CardSearch` uses ts-filter-pill active tag chips; `CardDetailDialog` is now self-contained (no shadcn dialog wrappers), with aspect pips, stat blocks using amber/red/green accents, and ts-btn action row; `cards/page.tsx` replaces the shadcn Dialog with a fixed-overlay custom modal, display font page header with eyebrow, and native `<select>` sort dropdown. Zero TypeScript errors. Verified in browser: card grid, sort, filter toggle, and card detail modal all render correctly on the Twin Suns theme.
+
 *(2026-05-07 session 7)* **GitHub workflow updated to deploy card DB to TrueNAS after rebuild.**
 
 Added a `Deploy card database to TrueNAS via Portainer exec` step to `.github/workflows/update_dbs.yaml`. After the existing CI build + artifact upload, the new step authenticates with Portainer, finds the `twinsuns-backend` container by name, creates a Docker exec for `python /app/scripts/build_database.py` with `DB_DIR=/databases/cards_db`, then polls until it finishes (10-min timeout). `continue-on-error: true` keeps the workflow green if TrueNAS is unreachable. **Required GitHub secrets not yet set**: `PORTAINER_URL`, `PORTAINER_USER`, `PORTAINER_PASSWORD`, `PORTAINER_ENDPOINT_ID` — values are in `.env.prod`.
@@ -123,6 +127,16 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 ## What's Next
 
 **Priority order — top item is immediately actionable:**
+
+1. **[FEATURE] Deck list page** — The `/decks/[id]` view exists but there's no `/decks` index page listing all saved decks. Users can only access their decks via the Profile page. A proper deck list page (sortable by name/date, showing leader thumbnails and aspect pips, with quick delete/edit) would make the deck experience feel complete. The backend `/api/me/decks` endpoint already exists.
+
+2. **[ENHANCEMENT] Cards page — "In My Collection" filter toggle** — A quick amber toggle in the card browser header to show only cards the logged-in user owns. The collection data is already fetched; it's a client-side filter on `isInCollection`. Pairs well with the double-click-to-add flow.
+
+3. **[ENHANCEMENT] Card detail dialog — collection count + remove** — Currently "Add to Collection" is one-directional and resets on close. Ideally the dialog would show how many copies you own and allow removing. Requires loading the user's collection count per card in the dialog.
+
+4. **[ENHANCEMENT] Profile collection tab** — Currently shows cards as a flat text list. Could show card thumbnails (same `CardGrid` component) with a count badge per card. The data is already loaded; it's a layout change.
+
+5. **[ENHANCEMENT] Cards page sidebar always visible on ≥1280px** — The `.xl-show` CSS class in the page's inline `<style>` works but could be moved to globals.css or replaced with a Tailwind `xl:block` if the sidebar proves unreliable. Currently hiding via `display: none` with the media query override.
 
 0. **[FEATURE] Deck builder redesign + Suggested tab** — *(Session 8, complete)*
    - **Suggested tab** (◈): synergy-scored cards from all types that share keywords (+2) or traits (+1) with either leader. Sorted by score then cost then name. Opens as the default tab. Shows card type (UNIT/EVENT/UPGRADE) in blue in subtitle. Empty state: "No synergy matches found for these leaders". Verified: 191 matches for Ackbar+Holdo deck.

@@ -1,17 +1,38 @@
-// src/components/CardDetailDialog.tsx
 'use client';
 
 import React, { useState } from 'react';
 import { ApiCard, addCardToCollection } from '@/lib/api';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { DialogTitle, DialogHeader, DialogFooter } from '@/components/ui/dialog';
 import { useRouter } from 'next/navigation';
-import { PlusCircle, Check } from 'lucide-react';
 
 export interface CardDetailDialogProps {
   card: ApiCard;
   onClose: () => void;
+}
+
+const ASPECT_COLORS: Record<string, string> = {
+  Command: '#c2453a',
+  Aggression: '#d96f2d',
+  Cunning: '#e2b342',
+  Heroism: '#ead7a8',
+  Vigilance: '#4a90c4',
+  Villainy: '#4a4038',
+};
+
+function AspectPip({ aspect }: { aspect: string }) {
+  const initials: Record<string, string> = {
+    Command: 'C', Aggression: 'A', Cunning: 'U',
+    Heroism: 'H', Vigilance: 'V', Villainy: 'X',
+  };
+  return (
+    <span
+      className="ts-aspect-pip"
+      data-aspect={aspect}
+      title={aspect}
+      style={{ width: 20, height: 20, fontSize: 9 }}
+    >
+      {initials[aspect] ?? aspect[0]}
+    </span>
+  );
 }
 
 export function CardDetailDialog({ card, onClose }: CardDetailDialogProps) {
@@ -19,22 +40,18 @@ export function CardDetailDialog({ card, onClose }: CardDetailDialogProps) {
   const [showBackSide, setShowBackSide] = useState(false);
   const [addingToCollection, setAddingToCollection] = useState(false);
   const [addedToCollection, setAddedToCollection] = useState(false);
-  const [isInCollection, setIsInCollection] = useState(false);
   const [addMessage, setAddMessage] = useState('');
   const [onWishlist, setOnWishlist] = useState(false);
   const [wishlistLoading, setWishlistLoading] = useState(false);
 
-  // Only allow flipping for cards with a back side (mainly Leaders)
-  const canFlip = card?.image_back_uri !== undefined && card?.image_back_uri !== null;
-  
+  const canFlip = !!card?.image_back_uri;
   const currentImage = showBackSide && card.image_back_uri ? card.image_back_uri : card.image_uri;
 
-  // Navigate to deck builder with this card pre-selected
   const buildDeckWithCard = () => {
+    onClose();
     if (card.type === 'Leader') {
       router.push(`/deck-builder?preselect=${card.id}`);
     } else {
-      // For non-leaders, we'll need to select a leader first
       router.push('/deck-builder');
     }
   };
@@ -61,241 +78,362 @@ export function CardDetailDialog({ card, onClose }: CardDetailDialogProps) {
     }
   };
 
-  // Add card to collection
   const handleAddToCollection = async () => {
     try {
       setAddingToCollection(true);
-      
-      console.log('Adding card to collection:', card.id);
-      
-      // Use Next.js API route directly
       const response = await fetch('/api/me/collection', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          card_id: card.id,
-          count: 1
-        }),
-        credentials: 'include'
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ card_id: card.id, count: 1 }),
+        credentials: 'include',
       });
-      
-      // Log the full response for debugging
-      console.log('Response status:', response.status);
-      const responseText = await response.text();
-      console.log('Response text:', responseText);
-      
-      // Handle auth errors specifically
+
       if (response.status === 401) {
-        setAddMessage('Authentication required. Please log in again.');
-        setTimeout(() => {
-          // Redirect to login page after a short delay
-          router.push('/login');
-        }, 2000);
+        setAddMessage('Not authenticated — redirecting to login…');
+        setTimeout(() => router.push('/login'), 2000);
         return;
       }
-      
-      // Parse the response if it's JSON
-      let responseData;
-      try {
-        responseData = JSON.parse(responseText);
-        console.log('Parsed response data:', responseData);
-      } catch (e) {
-        console.error('Failed to parse response as JSON');
-      }
-      
+
       if (!response.ok) {
-        throw new Error(responseText || 'Failed to add card to collection');
+        const text = await response.text();
+        throw new Error(text || 'Failed to add to collection');
       }
-      
-      setIsInCollection(true);
+
       setAddedToCollection(true);
       setAddMessage('Added to collection!');
-      
-      // Clear message after a delay
-      setTimeout(() => {
-        setAddMessage('');
-      }, 3000);
+      setTimeout(() => setAddMessage(''), 3000);
     } catch (err) {
       console.error('Error adding to collection:', err);
       setAddMessage('Failed to add to collection');
-      
-      // Clear error message after a delay
-      setTimeout(() => {
-        setAddMessage('');
-      }, 3000);
+      setTimeout(() => setAddMessage(''), 3000);
     } finally {
       setAddingToCollection(false);
     }
   };
 
   return (
-    <>
-      <DialogHeader>
-        <DialogTitle className="text-xl font-bold">{card.name}</DialogTitle>
-      </DialogHeader>
-      
-      <div className="py-4 grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Card Image */}
-        <div className="flex flex-col items-center">
-          <div className="relative">
-            <div className="aspect-[7/10] rounded-lg overflow-hidden border border-gray-700">
-              {currentImage ? (
-                <img
-                  src={currentImage}
-                  alt={`${card.name} ${showBackSide ? '(back)' : '(front)'}`}
-                  className="w-full h-full object-contain"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center bg-gray-900">
-                  <span className="text-lg text-center p-4">{card.name}</span>
-                </div>
-              )}
-            </div>
-            
-            {/* Flip button for cards with back side */}
-            {canFlip && (
-              <button 
-                className="absolute top-2 right-2 p-2 bg-purple-500 rounded-full text-white"
-                onClick={() => setShowBackSide(!showBackSide)}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-              </button>
-            )}
-          </div>
-        </div>
-        
-        {/* Card Details */}
+    <div>
+      {/* Title row */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 16,
+          marginBottom: 20,
+          paddingBottom: 16,
+          borderBottom: '1px solid var(--ts-line)',
+        }}
+      >
         <div>
+          <h2
+            style={{
+              fontFamily: 'var(--ts-font-display)',
+              fontSize: 28,
+              color: 'var(--ts-ink)',
+              margin: 0,
+              lineHeight: 1.1,
+            }}
+          >
+            {card.name}
+          </h2>
           {card.subtitle && (
-            <p className="text-gray-400 mb-2">{card.subtitle}</p>
+            <div
+              style={{
+                fontFamily: 'var(--ts-font-body)',
+                fontSize: 14,
+                color: 'var(--ts-ink-3)',
+                marginTop: 4,
+                fontStyle: 'italic',
+              }}
+            >
+              {card.subtitle}
+            </div>
           )}
-          
-          <div className="flex flex-wrap gap-2 mb-4">
-            {card.aspects?.map((aspect) => (
-              <Badge 
-                key={aspect.aspect_name}
+        </div>
+        <button
+          onClick={onClose}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--ts-ink-3)',
+            cursor: 'pointer',
+            fontSize: 22,
+            lineHeight: 1,
+            flexShrink: 0,
+            padding: 4,
+          }}
+        >
+          ×
+        </button>
+      </div>
+
+      {/* Body: image + details */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: 24,
+        }}
+      >
+        {/* Card image */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+          <div
+            style={{
+              aspectRatio: '7/10',
+              width: '100%',
+              maxWidth: 300,
+              border: '1px solid var(--ts-line)',
+              overflow: 'hidden',
+              position: 'relative',
+            }}
+          >
+            {currentImage ? (
+              <img
+                src={currentImage}
+                alt={`${card.name}${showBackSide ? ' (back)' : ''}`}
+                style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+              />
+            ) : (
+              <div
                 style={{
-                  backgroundColor: `${aspect.aspect_color}30`,
-                  color: aspect.aspect_color,
-                  borderColor: aspect.aspect_color
+                  width: '100%',
+                  height: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: 'var(--ts-bg-2)',
+                  color: 'var(--ts-ink-4)',
+                  fontFamily: 'var(--ts-font-mono)',
+                  fontSize: 12,
                 }}
-                variant="outline"
               >
-                {aspect.aspect_name}
-              </Badge>
-            ))}
-          </div>
-          
-          <div className="grid grid-cols-3 gap-4 mb-4 bg-gray-800/50 p-3 rounded-lg">
-            <div className="text-center">
-              <p className="text-xs text-gray-400">Type</p>
-              <p className="text-sm font-bold">{card.type}</p>
-            </div>
-            {card.energy_cost !== undefined && (
-              <div className="text-center">
-                <p className="text-xs text-gray-400">Cost</p>
-                <p className="text-sm font-bold text-amber-400">{card.energy_cost}</p>
-              </div>
-            )}
-            {card.attack !== undefined && (
-              <div className="text-center">
-                <p className="text-xs text-gray-400">Attack</p>
-                <p className="text-sm font-bold text-red-400">{card.attack}</p>
-              </div>
-            )}
-            {card.health !== undefined && (
-              <div className="text-center">
-                <p className="text-xs text-gray-400">Health</p>
-                <p className="text-sm font-bold text-green-400">{card.health}</p>
+                NO ART
               </div>
             )}
           </div>
-          
-          {card.text && (
-            <div className="mb-4">
-              <h3 className="text-sm font-medium mb-1">Card Text</h3>
-              <p className="text-sm text-gray-300 bg-gray-800/50 p-3 rounded-lg whitespace-pre-line">{card.text}</p>
-            </div>
+
+          {/* Flip button */}
+          {canFlip && (
+            <button
+              onClick={() => setShowBackSide(!showBackSide)}
+              className="ts-btn ts-btn-sm"
+              style={{ width: '100%', maxWidth: 300, justifyContent: 'center' }}
+            >
+              ↻ {showBackSide ? 'Show Front' : 'Show Back'}
+            </button>
           )}
-          
-          {card.keywords && card.keywords.length > 0 && (
-            <div className="mb-4">
-              <h3 className="text-sm font-medium mb-1">Keywords</h3>
-              <div className="flex flex-wrap gap-2">
-                {card.keywords.map((keyword) => (
-                  <Badge 
-                    key={keyword}
-                    variant="outline"
-                    className="bg-purple-900/30 text-purple-300 border-purple-700"
-                  >
-                    {keyword}
-                  </Badge>
+        </div>
+
+        {/* Details */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Aspects */}
+          {card.aspects && card.aspects.length > 0 && (
+            <div>
+              <div className="ts-eyebrow" style={{ marginBottom: 8 }}>Aspects</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {card.aspects.map((a) => (
+                  <div key={a.aspect_name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <AspectPip aspect={a.aspect_name} />
+                    <span style={{ fontSize: 13, color: ASPECT_COLORS[a.aspect_name] ?? 'var(--ts-ink-2)' }}>
+                      {a.aspect_name}
+                    </span>
+                  </div>
                 ))}
               </div>
             </div>
           )}
-          
+
+          {/* Stats */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(60px, 1fr))',
+              gap: 8,
+            }}
+          >
+            <div
+              style={{
+                background: 'var(--ts-bg-2)',
+                border: '1px solid var(--ts-line)',
+                padding: '8px 6px',
+                textAlign: 'center',
+              }}
+            >
+              <div className="ts-eyebrow" style={{ marginBottom: 4 }}>Type</div>
+              <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 11, color: 'var(--ts-ink)' }}>
+                {card.type}
+              </div>
+            </div>
+
+            {card.energy_cost != null && (
+              <div
+                style={{
+                  background: 'var(--ts-bg-2)',
+                  border: '1px solid var(--ts-line)',
+                  padding: '8px 6px',
+                  textAlign: 'center',
+                }}
+              >
+                <div className="ts-eyebrow" style={{ marginBottom: 4 }}>Cost</div>
+                <div
+                  style={{
+                    fontFamily: 'var(--ts-font-mono)',
+                    fontSize: 16,
+                    fontWeight: 700,
+                    color: 'var(--ts-amber)',
+                  }}
+                >
+                  {card.energy_cost}
+                </div>
+              </div>
+            )}
+
+            {card.attack != null && (
+              <div
+                style={{
+                  background: 'var(--ts-bg-2)',
+                  border: '1px solid var(--ts-line)',
+                  padding: '8px 6px',
+                  textAlign: 'center',
+                }}
+              >
+                <div className="ts-eyebrow" style={{ marginBottom: 4 }}>Attack</div>
+                <div
+                  style={{
+                    fontFamily: 'var(--ts-font-mono)',
+                    fontSize: 16,
+                    fontWeight: 700,
+                    color: 'var(--ts-red)',
+                  }}
+                >
+                  {card.attack}
+                </div>
+              </div>
+            )}
+
+            {card.health != null && (
+              <div
+                style={{
+                  background: 'var(--ts-bg-2)',
+                  border: '1px solid var(--ts-line)',
+                  padding: '8px 6px',
+                  textAlign: 'center',
+                }}
+              >
+                <div className="ts-eyebrow" style={{ marginBottom: 4 }}>Health</div>
+                <div
+                  style={{
+                    fontFamily: 'var(--ts-font-mono)',
+                    fontSize: 16,
+                    fontWeight: 700,
+                    color: 'var(--ts-green)',
+                  }}
+                >
+                  {card.health}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Card text */}
+          {card.text && (
+            <div>
+              <div className="ts-eyebrow" style={{ marginBottom: 6 }}>Card Text</div>
+              <div
+                style={{
+                  background: 'var(--ts-bg-2)',
+                  border: '1px solid var(--ts-line)',
+                  padding: '10px 12px',
+                  fontSize: 13,
+                  fontFamily: 'var(--ts-font-body)',
+                  color: 'var(--ts-ink-2)',
+                  whiteSpace: 'pre-line',
+                  lineHeight: 1.55,
+                }}
+              >
+                {card.text}
+              </div>
+            </div>
+          )}
+
+          {/* Keywords */}
+          {card.keywords && card.keywords.length > 0 && (
+            <div>
+              <div className="ts-eyebrow" style={{ marginBottom: 6 }}>Keywords</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {card.keywords.map((kw) => (
+                  <span key={kw} className="ts-chip">
+                    {kw}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Set info */}
           {card.set_name && (
-            <div className="text-xs text-gray-400 mt-4">
-              Set: {card.set_name} {card.set_code && `(${card.set_code})`}
+            <div className="ts-eyebrow" style={{ color: 'var(--ts-ink-4)' }}>
+              {card.set_name}{card.set_code ? ` · ${card.set_code}` : ''}
             </div>
           )}
         </div>
       </div>
 
-      <DialogFooter className="flex-col sm:flex-row gap-2">
-        <Button
-          onClick={buildDeckWithCard}
-          className="bg-purple-600 hover:bg-purple-700 text-white"
-        >
-          Build Deck with this Card
-        </Button>
-        
-        <Button
+      {/* Footer actions */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 8,
+          flexWrap: 'wrap',
+          marginTop: 24,
+          paddingTop: 16,
+          borderTop: '1px solid var(--ts-line)',
+        }}
+      >
+        <button onClick={buildDeckWithCard} className="ts-btn ts-btn-primary">
+          Build Deck with This Card
+        </button>
+
+        <button
           onClick={handleAddToCollection}
           disabled={addingToCollection || addedToCollection}
-          className={`${
-            addedToCollection 
-              ? 'bg-green-600 hover:bg-green-700' 
-              : 'bg-blue-600 hover:bg-blue-700'
-          } text-white`}
+          className="ts-btn ts-btn-blue"
+          style={{
+            opacity: addedToCollection ? 0.7 : 1,
+            borderColor: addedToCollection ? 'var(--ts-green)' : undefined,
+            color: addedToCollection ? 'var(--ts-green)' : undefined,
+          }}
         >
-          {addingToCollection ? (
-            <>Loading...</>
-          ) : addedToCollection ? (
-            <>
-              <Check className="w-4 h-4 mr-2" />
-              Added to Collection
-            </>
-          ) : (
-            <>
-              <PlusCircle className="w-4 h-4 mr-2" />
-              Add to Collection
-            </>
-          )}
-        </Button>
-        
-        <Button
+          {addingToCollection ? 'Adding…' : addedToCollection ? '✓ In Collection' : '+ Add to Collection'}
+        </button>
+
+        <button
           onClick={handleToggleWishlist}
           disabled={wishlistLoading}
-          variant="outline"
-          className={`border-amber-700 text-amber-400 hover:bg-amber-900/30 ${onWishlist ? 'bg-amber-900/30' : ''}`}
+          className="ts-btn"
+          style={{
+            borderColor: onWishlist ? 'var(--ts-amber)' : undefined,
+            color: onWishlist ? 'var(--ts-amber)' : undefined,
+          }}
         >
-          {onWishlist ? '★ On Wishlist' : '☆ Add to Wishlist'}
-        </Button>
+          {onWishlist ? '★ On Wishlist' : '☆ Wishlist'}
+        </button>
 
-        <Button
-          onClick={onClose}
-          variant="outline"
-          className="border-gray-700 hover:bg-gray-800"
-        >
-          Close
-        </Button>
-      </DialogFooter>
-    </>
+        {addMessage && (
+          <span
+            style={{
+              alignSelf: 'center',
+              fontFamily: 'var(--ts-font-mono)',
+              fontSize: 11,
+              color: addMessage.includes('fail') || addMessage.includes('error') ? 'var(--ts-red)' : 'var(--ts-green)',
+              letterSpacing: '0.1em',
+            }}
+          >
+            {addMessage}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }

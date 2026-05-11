@@ -4,6 +4,20 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-05-11: Cards page + components — full Twin Suns design system rewrite
+
+**What changed:**
+
+**All shadcn and Lucide deps removed from the cards flow** — `cards/page.tsx`, `CardGrid`, `CardFilters`, `CardSearch`, and `CardDetailDialog` were all using the old purple/gray shadcn theme (`bg-gray-900`, `border-gray-700`, `text-purple-500`, Lucide icons). All five files rewritten to use `ts-*` CSS custom properties and the Imperial Field Manual design system. No new packages added.
+
+**`CardDetailDialog` decoupled from shadcn Dialog** — Previously rendered inside a shadcn `<Dialog>`/`<DialogContent>` wrapper in `cards/page.tsx`, importing `DialogTitle`/`DialogHeader`/`DialogFooter`. Now self-contained; `cards/page.tsx` provides a fixed-overlay custom modal (`position: fixed`, `rgba(26,22,17,0.92)` backdrop, `var(--ts-panel)` inner panel with `border: 1px solid var(--ts-line)`). This removes the dependency and makes the component portable.
+
+**Design specifics:** `CardGrid` — amber owned badge, ts-stamp "In Deck" overlay, mono set-code + amber cost in card footer, hover border on `var(--ts-line-2)`. `CardFilters` — custom amber checkbox squares (no shadcn Checkbox), native `<select>` for cost range, ts-eyebrow section headers. `CardSearch` — ts-input search bar, ts-filter-pill active-tag chips with × dismiss, expandable inline panel for mobile. `CardDetailDialog` — `ts-aspect-pip` hexagons, stat blocks with `var(--ts-amber/red/green)` accent values, ts-btn action row. `cards/page.tsx` — display font title with eyebrow, native `<select>` sort dropdown, ts-btn mobile filter button.
+
+**Why shadcn was removed rather than restyled** — The shadcn components use Tailwind utility classes internally; overriding them with `ts-*` vars requires fighting specificity across both layers. Replacing with native HTML + inline styles using the CSS vars is simpler, more predictable, and matches the pattern already established by the profile page and deck builder redesigns.
+
+---
+
 ### 2026-05-07: Login bug fixed, card database rebuilt (2,360 cards), deploy.sh hardened
 
 **Login was broken — root cause: `Secure` cookie flag on HTTP connection**
