@@ -580,6 +580,139 @@ function StageBanner({
   );
 }
 
+// ── Leader / base card (text row + full-card hover) ─────────
+function LeaderBaseCard({ card, onClick }: { card: CardType; onClick: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  const [popoverPos, setPopoverPos] = useState<{ top: number; left?: number; right?: number } | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const handleMouseEnter = () => {
+    if (ref.current) {
+      const rect = ref.current.getBoundingClientRect();
+      const POPOVER_W = 300;
+      const spaceRight = window.innerWidth - rect.right;
+      if (spaceRight >= POPOVER_W + 12) {
+        setPopoverPos({ top: rect.top, left: rect.right + 10 });
+      } else {
+        setPopoverPos({ top: rect.top, right: window.innerWidth - rect.left + 10 });
+      }
+    }
+    setHovered(true);
+  };
+
+  const cardText = card.text ?? '';
+  const [baseText, epicText] = cardText.includes('Epic Action')
+    ? [cardText.slice(0, cardText.indexOf('Epic Action')).trim(), cardText.slice(cardText.indexOf('Epic Action')).trim()]
+    : [cardText, ''];
+
+  return (
+    <div
+      ref={ref}
+      onClick={onClick}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={() => { setHovered(false); setPopoverPos(null); }}
+      style={{
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 14,
+        padding: '12px 16px',
+        background: hovered ? 'rgba(212,165,85,0.07)' : 'transparent',
+        borderBottom: '1px solid var(--ts-line)',
+        borderRight: '1px solid var(--ts-line)',
+        transition: 'background 0.12s',
+        position: 'relative',
+      }}
+    >
+      {/* Thumbnail: front (commander) art in a landscape crop — shows the horizontal card art */}
+      <div style={{ flexShrink: 0, width: 96, aspectRatio: '4/3', overflow: 'hidden', border: `1px solid ${hovered ? 'var(--ts-amber)' : 'var(--ts-line-2)'}`, transition: 'border-color 0.12s' }}>
+        <img
+          src={card.image_uri ?? '/placeholder-card.png'}
+          alt={card.name}
+          style={{ width: '100%', height: 'auto', display: 'block' }}
+          onError={e => { (e.target as HTMLImageElement).src = '/placeholder-card.png'; }}
+        />
+      </div>
+
+      {/* Text info */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 15, color: 'var(--ts-ink)', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {card.name}
+        </div>
+        {card.subtitle && (
+          <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, color: 'var(--ts-amber)', letterSpacing: '0.12em', textTransform: 'uppercase', marginTop: 2 }}>
+            {card.subtitle}
+          </div>
+        )}
+        {card.traits && card.traits.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 5 }}>
+            {card.traits.slice(0, 4).map(t => (
+              <span key={t} style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ts-ink-3)', border: '1px solid var(--ts-line-2)', padding: '1px 4px' }}>
+                {t}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Aspects — right-aligned */}
+      {card.aspects && card.aspects.length > 0 && (
+        <div style={{ flexShrink: 0, display: 'flex', gap: 3 }}>
+          {card.aspects.map(a => <AspectPip key={a.aspect_name} aspect={a.aspect_name} />)}
+        </div>
+      )}
+
+      {/* Hover popover: full card image + details */}
+      {hovered && popoverPos && (
+        <div
+          style={{
+            position: 'fixed',
+            top: Math.min(popoverPos.top, window.innerHeight - 520),
+            ...(popoverPos.left !== undefined ? { left: popoverPos.left } : { right: popoverPos.right }),
+            width: 290,
+            background: 'var(--ts-panel)',
+            border: '1px solid var(--ts-amber)',
+            zIndex: 1000,
+            pointerEvents: 'none',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.7)',
+          }}
+        >
+          {/* Full card image: back (leader unit) side — clean portrait */}
+          <div style={{ aspectRatio: '7/10', overflow: 'hidden' }}>
+            <img
+              src={card.image_back_uri ?? card.image_uri ?? '/placeholder-card.png'}
+              alt={card.name}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              onError={e => { (e.target as HTMLImageElement).src = '/placeholder-card.png'; }}
+            />
+          </div>
+
+          {/* Text details below image */}
+          <div style={{ padding: '12px 14px' }}>
+            <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 16, color: 'var(--ts-ink)', lineHeight: 1.2 }}>{card.name}</div>
+            {card.subtitle && (
+              <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, color: 'var(--ts-amber)', letterSpacing: '0.14em', textTransform: 'uppercase', marginTop: 2 }}>
+                {card.subtitle}
+              </div>
+            )}
+            {card.aspects && card.aspects.length > 0 && (
+              <div style={{ display: 'flex', gap: 4, marginTop: 8 }}>
+                {card.aspects.map(a => <AspectPip key={a.aspect_name} aspect={a.aspect_name} />)}
+              </div>
+            )}
+            {cardText && (
+              <div style={{ marginTop: 10, borderTop: '1px solid var(--ts-line)', paddingTop: 8 }}>
+                {baseText && <p style={{ fontFamily: 'var(--ts-font-body)', fontSize: 10, color: 'var(--ts-ink-2)', lineHeight: 1.6, margin: 0 }}>{baseText}</p>}
+                {epicText && <p style={{ fontFamily: 'var(--ts-font-body)', fontSize: 10, color: 'var(--ts-amber)', lineHeight: 1.6, margin: 0, marginTop: baseText ? 6 : 0 }}>{epicText}</p>}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Filter sidebar ──────────────────────────────────────────
 function FilterSidebar({
   filterAspects, setFilterAspects,
@@ -1604,8 +1737,8 @@ export default function DeckBuilderClient() {
               isCardInDeck={isCardIdInDeck}
             />
           ) : (
-            /* Leaders / base: grid of card images */
-            <div style={{ padding: 16, overflowY: 'auto' }}>
+            /* Leaders / base: text list with hover card preview */
+            <div style={{ overflowY: 'auto' }}>
               {loading ? (
                 <div
                   style={{
@@ -1621,61 +1754,13 @@ export default function DeckBuilderClient() {
                   Loading…
                 </div>
               ) : (
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
-                    gap: 10,
-                  }}
-                >
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderTop: '1px solid var(--ts-line)' }}>
                   {displayedCards.map(card => (
-                    <div
+                    <LeaderBaseCard
                       key={card.id}
+                      card={card}
                       onClick={() => handleAddCard(card)}
-                      style={{
-                        cursor: 'pointer',
-                        border: '1px solid var(--ts-line)',
-                        overflow: 'hidden',
-                        transition: 'border-color 0.15s',
-                        position: 'relative',
-                      }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--ts-amber)'; }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--ts-line)'; }}
-                    >
-                      <div style={{ aspectRatio: '7/10' }}>
-                        <img
-                          src={card.image_uri ?? '/placeholder-card.png'}
-                          alt={card.name}
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                          onError={e => { (e.target as HTMLImageElement).src = '/placeholder-card.png'; }}
-                        />
-                      </div>
-                      <div
-                        style={{
-                          padding: '5px 6px',
-                          background: 'var(--ts-panel)',
-                          borderTop: '1px solid var(--ts-line)',
-                        }}
-                      >
-                        <div
-                          style={{
-                            fontFamily: 'var(--ts-font-display)',
-                            fontSize: 12,
-                            color: 'var(--ts-ink)',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {card.name}
-                        </div>
-                        <div style={{ display: 'flex', gap: 3, marginTop: 3 }}>
-                          {card.aspects?.map(a => (
-                            <AspectPip key={a.aspect_name} aspect={a.aspect_name} />
-                          ))}
-                        </div>
-                      </div>
-                    </div>
+                    />
                   ))}
                 </div>
               )}
