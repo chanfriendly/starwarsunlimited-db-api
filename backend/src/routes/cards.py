@@ -15,6 +15,15 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Set codes that are always reprints/promos of canonical cards.
+# These are excluded from the main paginated results and instead attached
+# as alternate_arts to their matching canonical card. IBH and TS26 are NOT
+# included here because they contain a large number of unique-to-that-set cards.
+ALWAYS_ALTERNATE_SETS = frozenset({
+    'P25', 'P26', 'C24', 'C25', 'J24', 'J25', 'G25',
+    'GG', 'JTLP', 'LOFP', 'LAWP', 'SECP',
+})
+
 def group_cards_by_identity(cards):
     """
     Group cards by a composite key of name, subtitle, type, and traits.
@@ -201,11 +210,50 @@ async def get_cards(
             if trait_conditions:
                 conditions.append(f"({' OR '.join(trait_conditions)})")
 
+        # Exclude promo/alternate sets from canonical results unless the user is
+        # explicitly filtering by one of them (e.g. set=P26). When not filtered,
+        # these cards are attached as alternate_arts after grouping.
+        set_filter_codes = {s.strip() for s in set.split(',')} if set else frozenset()
+        promo_filter_active = bool(set_filter_codes & ALWAYS_ALTERNATE_SETS)
+        if not promo_filter_active:
+            excl_placeholders = ', '.join(f':excl_set_{i}' for i in range(len(ALWAYS_ALTERNATE_SETS)))
+            conditions.append(f"c.set_code NOT IN ({excl_placeholders})")
+            for i, code in enumerate(sorted(ALWAYS_ALTERNATE_SETS)):
+                params[f'excl_set_{i}'] = code
+
         # Add WHERE conditions if any
         if conditions:
             base_sql += " AND " + " AND ".join(conditions)
         
         # Add sorting
+        # Chronological set order for set_newest/set_oldest sorts.
+        # set_code sorts alphabetically which doesn't match release order, so we
+        # use an explicit CASE mapping. Unknown/promo sets get a high number so
+        # they sort after main sets rather than arbitrarily interspersed.
+        set_order_case = """CASE c.set_code
+            WHEN 'SOR'  THEN 1
+            WHEN 'SHD'  THEN 2
+            WHEN 'TWI'  THEN 3
+            WHEN 'JTL'  THEN 4
+            WHEN 'LOF'  THEN 5
+            WHEN 'LAW'  THEN 6
+            WHEN 'SEC'  THEN 7
+            WHEN 'C24'  THEN 10
+            WHEN 'J24'  THEN 11
+            WHEN 'JTLP' THEN 12
+            WHEN 'LOFP' THEN 13
+            WHEN 'LAWP' THEN 14
+            WHEN 'SECP' THEN 15
+            WHEN 'P25'  THEN 20
+            WHEN 'C25'  THEN 21
+            WHEN 'G25'  THEN 22
+            WHEN 'J25'  THEN 23
+            WHEN 'TS26' THEN 30
+            WHEN 'P26'  THEN 31
+            WHEN 'GG'   THEN 40
+            WHEN 'IBH'  THEN 41
+            ELSE 99
+        END"""
         order_by_clause = ""
         if sort:
             sort_map = {
@@ -214,8 +262,10 @@ async def get_cards(
                 "cost_asc": "c.energy_cost ASC, c.name ASC",
                 "cost_desc": "c.energy_cost DESC, c.name ASC",
                 "type_asc": "c.type ASC, c.name ASC",
-                "set_newest": "c.set_code DESC, c.card_number ASC",
-                "set_oldest": "c.set_code ASC, c.card_number ASC",
+                "set_newest": f"{set_order_case} DESC, CAST(c.card_number AS INTEGER) ASC",
+                "set_newest_desc": f"{set_order_case} DESC, CAST(c.card_number AS INTEGER) DESC",
+                "set_oldest": f"{set_order_case} ASC, CAST(c.card_number AS INTEGER) ASC",
+                "set_oldest_desc": f"{set_order_case} ASC, CAST(c.card_number AS INTEGER) DESC",
                 "rarity_rare": "CASE c.rarity WHEN 'Legendary' THEN 1 WHEN 'Rare' THEN 2 WHEN 'Uncommon' THEN 3 WHEN 'Common' THEN 4 ELSE 5 END, c.name ASC",
                 "rarity_common": "CASE c.rarity WHEN 'Common' THEN 1 WHEN 'Uncommon' THEN 2 WHEN 'Rare' THEN 3 WHEN 'Legendary' THEN 4 ELSE 5 END, c.name ASC"
             }
@@ -268,8 +318,58 @@ async def get_cards(
             # Add relationship data
             cards.append(enrich_card_with_relationships(db, card))
         
-        # Group cards by identity
+        # Group cards by identity (handles same-set art variants)
         grouped_cards = group_cards_by_identity(cards)
+
+        # Attach promo/alternate-set variants to their canonical cards.
+        # We do this after grouping so we can match against the deduplicated list.
+        if not promo_filter_active and grouped_cards:
+            card_names = list({c['name'] for c in grouped_cards})
+            name_placeholders = ', '.join(f':pname_{i}' for i in range(len(card_names)))
+            set_placeholders = ', '.join(f':pset_{i}' for i in range(len(ALWAYS_ALTERNATE_SETS)))
+            promo_params: dict = {}
+            for i, name in enumerate(card_names):
+                promo_params[f'pname_{i}'] = name
+            for i, code in enumerate(sorted(ALWAYS_ALTERNATE_SETS)):
+                promo_params[f'pset_{i}'] = code
+
+            promo_sql = f"""
+                SELECT c.* FROM cards c
+                WHERE c.set_code IN ({set_placeholders})
+                AND c.name IN ({name_placeholders})
+            """
+            promo_result = db.execute(text(promo_sql), promo_params)
+            promo_columns = promo_result.keys()
+            promo_cards = []
+            for row in promo_result:
+                pc: dict = {}
+                for idx, col in enumerate(promo_columns):
+                    pc[col] = row._mapping[col] if hasattr(row, '_mapping') else row[idx]
+                promo_cards.append(enrich_card_with_relationships(db, pc))
+
+            # Build lookup from grouped cards: (name, subtitle, type) → card dict
+            canonical_lookup: dict = {}
+            for gc in grouped_cards:
+                key = (gc.get('name'), gc.get('subtitle'), gc.get('type'))
+                canonical_lookup[key] = gc
+
+            for pc in promo_cards:
+                key = (pc.get('name'), pc.get('subtitle'), pc.get('type'))
+                if key not in canonical_lookup:
+                    continue
+                gc = canonical_lookup[key]
+                existing_ids = {gc.get('id')} | {a['id'] for a in gc.get('alternate_arts', [])}
+                if pc['id'] not in existing_ids:
+                    gc.setdefault('alternate_arts', []).append({
+                        "id": pc.get('id'),
+                        "image_uri": pc.get('image_uri'),
+                        "image_url": pc.get('image_url'),
+                        "set_name": pc.get('set_name'),
+                        "set_code": pc.get('set_code'),
+                        "card_number": pc.get('card_number'),
+                        "rarity": pc.get('rarity'),
+                        "artist": pc.get('artist'),
+                    })
 
         logger.info(f"Finished get_cards request. Total cards: {total}, Grouped cards: {len(grouped_cards)}")
         

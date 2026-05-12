@@ -30,8 +30,10 @@ const SORT_OPTIONS = [
   { value: 'cost_asc', label: 'Cost: Low → High' },
   { value: 'cost_desc', label: 'Cost: High → Low' },
   { value: 'type_asc', label: 'Type (A–Z)' },
-  { value: 'set_newest', label: 'Set: Newest First' },
-  { value: 'set_oldest', label: 'Set: Oldest First' },
+  { value: 'set_newest', label: 'Set: Newest · Card # ↑' },
+  { value: 'set_newest_desc', label: 'Set: Newest · Card # ↓' },
+  { value: 'set_oldest', label: 'Set: Oldest · Card # ↑' },
+  { value: 'set_oldest_desc', label: 'Set: Oldest · Card # ↓' },
   { value: 'rarity_rare', label: 'Rarity: Rare → Common' },
   { value: 'rarity_common', label: 'Rarity: Common → Rare' },
 ];
