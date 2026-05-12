@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { fetchCards, fetchAspects, fetchTypes, fetchKeywords, fetchSets, ApiCard, fetchUserCollection } from '@/lib/api';
+import { fetchCards, fetchAspects, fetchTypes, fetchKeywords, fetchSets, ApiCard, fetchUserCollection, CollectionItem } from '@/lib/api';
 import { CardGrid } from '@/components/CardGrid';
 import { CardFilters } from '@/components/CardFilters';
 import { CardDetailDialog } from '@/components/CardDetailDialog';
@@ -52,6 +52,10 @@ export default function CardBrowser() {
   const [keywords, setKeywords] = useState<string[]>([]);
   const [sets, setSets] = useState<string[]>([]);
   const [userCollection, setUserCollection] = useState<Set<string>>(new Set());
+  const [userCollectionCounts, setUserCollectionCounts] = useState<Map<string, number>>(new Map());
+  const [showOnlyOwned, setShowOnlyOwned] = useState(false);
+  const [collectionCards, setCollectionCards] = useState<ApiCard[]>([]);
+  const [collectionLoaded, setCollectionLoaded] = useState(false);
 
   const { isAuthenticated, isLoading: authLoading } = useAuth();
 
@@ -116,11 +120,27 @@ export default function CardBrowser() {
   // Load user collection
   useEffect(() => {
     if (authLoading) return;
-    if (!isAuthenticated) { setUserCollection(new Set()); return; }
+    if (!isAuthenticated) {
+      setUserCollection(new Set());
+      setUserCollectionCounts(new Map());
+      setCollectionCards([]);
+      setCollectionLoaded(false);
+      setShowOnlyOwned(false);
+      return;
+    }
     fetchUserCollection()
-      .then((c) => setUserCollection(new Set(c.map((item) => item.card.id))))
+      .then((c: CollectionItem[]) => {
+        setUserCollection(new Set(c.map((item) => item.card.id)));
+        setUserCollectionCounts(new Map(c.map((item) => [item.card.id, item.count])));
+        setCollectionCards(c.map((item) => item.card));
+        setCollectionLoaded(true);
+      })
       .catch(() => {});
   }, [isAuthenticated, authLoading]);
+
+  const handleToggleOwned = useCallback(() => {
+    setShowOnlyOwned(prev => !prev);
+  }, []);
 
   // Initial card load after filter options ready
   useEffect(() => {
@@ -226,10 +246,26 @@ export default function CardBrowser() {
         const { addCardToCollection } = await import('@/lib/api');
         await addCardToCollection(card.id, 1);
         setUserCollection((prev) => new Set([...prev, card.id]));
+        setUserCollectionCounts((prev) => {
+          const next = new Map(prev);
+          next.set(card.id, (next.get(card.id) ?? 0) + 1);
+          return next;
+        });
       } catch {}
     },
     [isAuthenticated]
   );
+
+  const handleCollectionCountChange = useCallback((cardId: string, newCount: number) => {
+    if (newCount <= 0) {
+      setUserCollection(prev => { const next = new Set(prev); next.delete(cardId); return next; });
+      setUserCollectionCounts(prev => { const next = new Map(prev); next.delete(cardId); return next; });
+      if (showOnlyOwned) setCollectionCards(prev => prev.filter(c => c.id !== cardId));
+    } else {
+      setUserCollection(prev => new Set([...prev, cardId]));
+      setUserCollectionCounts(prev => { const next = new Map(prev); next.set(cardId, newCount); return next; });
+    }
+  }, [showOnlyOwned]);
 
   const isInCollection = useCallback((cardId: string) => userCollection.has(cardId), [userCollection]);
 
@@ -351,7 +387,11 @@ export default function CardBrowser() {
               <h1 style={{ fontFamily: 'var(--ts-font-display)', fontSize: 'clamp(28px,4vw,44px)', color: 'var(--ts-ink)', margin: 0 }}>
                 Card Browser
               </h1>
-              {totalCards > 0 && (
+              {showOnlyOwned ? (
+                <div style={{ marginTop: 6, fontFamily: 'var(--ts-font-mono)', fontSize: 11, color: 'var(--ts-amber)', letterSpacing: '0.1em' }}>
+                  {collectionCards.length.toLocaleString()} owned cards
+                </div>
+              ) : totalCards > 0 && (
                 <div style={{ marginTop: 6, fontFamily: 'var(--ts-font-mono)', fontSize: 11, color: 'var(--ts-ink-3)', letterSpacing: '0.1em' }}>
                   {totalCards.toLocaleString()} cards
                 </div>
@@ -367,17 +407,35 @@ export default function CardBrowser() {
                 ≡ Filters
               </button>
 
-              {/* Sort dropdown */}
-              <select
-                value={sortBy}
-                onChange={(e) => handleSortChange(e.target.value)}
-                className="ts-input"
-                style={{ padding: '7px 12px', fontSize: 12, fontFamily: 'var(--ts-font-mono)', letterSpacing: '0.08em', cursor: 'pointer' }}
-              >
-                {SORT_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
+              {/* My Collection toggle — only when authenticated */}
+              {isAuthenticated && collectionLoaded && (
+                <button
+                  onClick={handleToggleOwned}
+                  className="ts-btn ts-btn-sm"
+                  style={{
+                    borderColor: showOnlyOwned ? 'var(--ts-amber)' : undefined,
+                    color: showOnlyOwned ? 'var(--ts-amber)' : undefined,
+                    background: showOnlyOwned ? 'rgba(212,163,78,0.10)' : undefined,
+                  }}
+                  title={showOnlyOwned ? 'Show all cards' : 'Show only cards in your collection'}
+                >
+                  {showOnlyOwned ? '◈ My Collection' : '◇ My Collection'}
+                </button>
+              )}
+
+              {/* Sort dropdown — hidden when showing collection (sort is fixed to collection order) */}
+              {!showOnlyOwned && (
+                <select
+                  value={sortBy}
+                  onChange={(e) => handleSortChange(e.target.value)}
+                  className="ts-input"
+                  style={{ padding: '7px 12px', fontSize: 12, fontFamily: 'var(--ts-font-mono)', letterSpacing: '0.08em', cursor: 'pointer' }}
+                >
+                  {SORT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
 
@@ -396,7 +454,7 @@ export default function CardBrowser() {
           </div>
 
           {/* Card grid */}
-          {loading ? (
+          {loading && !showOnlyOwned ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '64px 0' }}>
               <div>
                 <div
@@ -413,17 +471,23 @@ export default function CardBrowser() {
                 <div className="ts-eyebrow" style={{ textAlign: 'center' }}>Loading…</div>
               </div>
             </div>
+          ) : showOnlyOwned && collectionCards.length === 0 ? (
+            <div style={{ padding: '64px 0', textAlign: 'center' }}>
+              <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 12, color: 'var(--ts-ink-4)' }}>
+                Your collection is empty. Double-click any card to add it.
+              </div>
+            </div>
           ) : (
             <CardGrid
-              cards={cards}
+              cards={showOnlyOwned ? collectionCards : cards}
               onCardClickAction={handleCardSelect}
               onDoubleClickAction={handleCardDoubleClick}
               isInCollection={isInCollection}
             />
           )}
 
-          {/* Load more */}
-          {currentPage < totalPages && !loading && (
+          {/* Load more — hidden in My Collection mode */}
+          {!showOnlyOwned && currentPage < totalPages && !loading && (
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: 32 }}>
               <button
                 onClick={() => loadCards(currentPage + 1, true, filters, sortBy)}
@@ -468,6 +532,8 @@ export default function CardBrowser() {
             <CardDetailDialog
               card={selectedCard}
               onClose={() => setShowDetail(false)}
+              collectionCount={userCollectionCounts.get(selectedCard.id) ?? 0}
+              onCollectionChange={(newCount) => handleCollectionCountChange(selectedCard.id, newCount)}
             />
           </div>
         </div>

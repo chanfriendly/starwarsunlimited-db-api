@@ -6,6 +6,10 @@
 
 ## Current Status
 
+*(2026-05-12 session 10)* **Deck list page, My Collection toggle, card detail collection count/remove, DeckViewClient redesign.**
+
+`/decks/page.tsx` created: dedicated deck index with leader image strip thumbnails, aspect pips, sort (date/name), inline delete confirmation, empty state, and "+ New Deck" CTA. `DeckViewClient.tsx` fully rewritten to Twin Suns design system (removed shadcn `Button`, Lucide `AlertTriangle`, gray backgrounds). `cards/page.tsx`: added "◇ My Collection" toggle button — when active, switches card grid to full collection data source (all owned cards at once, no pagination). Collection counts now tracked in a `Map<string,number>` alongside the existing `Set`. `CardDetailDialog`: collection count display with `+`/`−` buttons to add/remove copies inline (backed by `POST /api/me/collection` with count); removing last copy drops card from `userCollection` and filters it out of the My Collection view. Navbar: "My Decks" link added for authenticated users. Zero TypeScript errors. Verified in browser.
+
 *(2026-05-11 session 9)* **Full cards page + components redesigned to Twin Suns design system.**
 
 `cards/page.tsx`, `CardGrid`, `CardFilters`, `CardSearch`, and `CardDetailDialog` all rewritten to use `ts-*` CSS vars and the Imperial Field Manual design system. All shadcn components removed (`Card`, `Button`, `Select`, `Dialog`, `DialogContent`, `Checkbox`, `Label`, `Badge`, `Input`). All Lucide icon imports removed. Key changes: `CardGrid` uses inline styles with `var(--ts-*)` tokens, amber owned badge, ts-stamp "In Deck" overlay; `CardFilters` has custom amber checkbox rows and native `<select>` cost dropdowns; `CardSearch` uses ts-filter-pill active tag chips; `CardDetailDialog` is now self-contained (no shadcn dialog wrappers), with aspect pips, stat blocks using amber/red/green accents, and ts-btn action row; `cards/page.tsx` replaces the shadcn Dialog with a fixed-overlay custom modal, display font page header with eyebrow, and native `<select>` sort dropdown. Zero TypeScript errors. Verified in browser: card grid, sort, filter toggle, and card detail modal all render correctly on the Twin Suns theme.
@@ -128,15 +132,13 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 
 **Priority order — top item is immediately actionable:**
 
-1. **[FEATURE] Deck list page** — The `/decks/[id]` view exists but there's no `/decks` index page listing all saved decks. Users can only access their decks via the Profile page. A proper deck list page (sortable by name/date, showing leader thumbnails and aspect pips, with quick delete/edit) would make the deck experience feel complete. The backend `/api/me/decks` endpoint already exists.
+1. **[ENHANCEMENT] Profile collection tab** — Currently shows cards as a flat text list. Could show card thumbnails (same `CardGrid` component) with a count badge per card. The data is already loaded; it's a layout change.
 
-2. **[ENHANCEMENT] Cards page — "In My Collection" filter toggle** — A quick amber toggle in the card browser header to show only cards the logged-in user owns. The collection data is already fetched; it's a client-side filter on `isInCollection`. Pairs well with the double-click-to-add flow.
+2. **[ENHANCEMENT] Cards page sidebar always visible on ≥1280px** — The `.xl-show` CSS class in the page's inline `<style>` works but could be moved to globals.css or replaced with a Tailwind `xl:block` if the sidebar proves unreliable. Currently hiding via `display: none` with the media query override.
 
-3. **[ENHANCEMENT] Card detail dialog — collection count + remove** — Currently "Add to Collection" is one-directional and resets on close. Ideally the dialog would show how many copies you own and allow removing. Requires loading the user's collection count per card in the dialog.
+3. **[ENHANCEMENT] Deck list page — add "My Decks" to mobile nav** — The navbar now shows "My Decks" for authenticated users on desktop. Worth verifying it's reachable from mobile nav too.
 
-4. **[ENHANCEMENT] Profile collection tab** — Currently shows cards as a flat text list. Could show card thumbnails (same `CardGrid` component) with a count badge per card. The data is already loaded; it's a layout change.
-
-5. **[ENHANCEMENT] Cards page sidebar always visible on ≥1280px** — The `.xl-show` CSS class in the page's inline `<style>` works but could be moved to globals.css or replaced with a Tailwind `xl:block` if the sidebar proves unreliable. Currently hiding via `display: none` with the media query override.
+4. **[ENHANCEMENT] Card detail dialog — wishlist state on open** — Currently `onWishlist` defaults to `false` on dialog open regardless of actual wishlist state. Would require either a prop or a fetch on open to reflect true state.
 
 0. **[FEATURE] Deck builder redesign + Suggested tab** — *(Session 8, complete)*
    - **Suggested tab** (◈): synergy-scored cards from all types that share keywords (+2) or traits (+1) with either leader. Sorted by score then cost then name. Opens as the default tab. Shows card type (UNIT/EVENT/UPGRADE) in blue in subtitle. Empty state: "No synergy matches found for these leaders". Verified: 191 matches for Ackbar+Holdo deck.

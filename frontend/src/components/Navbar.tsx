@@ -147,6 +147,7 @@ export function Navbar() {
   const navLinks = [
     { href: '/cards', label: 'Cards' },
     { href: '/deck-builder', label: 'Deck Builder' },
+    ...(isAuthenticated ? [{ href: '/decks', label: 'My Decks' }] : []),
     ...(isAuthenticated ? [{ href: '/profile', label: 'Profile' }] : []),
   ];
 

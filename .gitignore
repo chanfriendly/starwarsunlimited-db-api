@@ -27,6 +27,10 @@ venv/
 ENV/
 backend/.venv/
 
+# Puppeteer / headless browser downloads (never commit these)
+chrome/
+.local-chromium/
+
 # Node.js - Frontend build and dependency files
 node_modules/
 .next/

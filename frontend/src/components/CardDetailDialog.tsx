@@ -7,6 +7,8 @@ import { useRouter } from 'next/navigation';
 export interface CardDetailDialogProps {
   card: ApiCard;
   onClose: () => void;
+  collectionCount?: number;
+  onCollectionChange?: (newCount: number) => void;
 }
 
 const ASPECT_COLORS: Record<string, string> = {
@@ -35,11 +37,11 @@ function AspectPip({ aspect }: { aspect: string }) {
   );
 }
 
-export function CardDetailDialog({ card, onClose }: CardDetailDialogProps) {
+export function CardDetailDialog({ card, onClose, collectionCount, onCollectionChange }: CardDetailDialogProps) {
   const router = useRouter();
   const [showBackSide, setShowBackSide] = useState(false);
   const [addingToCollection, setAddingToCollection] = useState(false);
-  const [addedToCollection, setAddedToCollection] = useState(false);
+  const [localCount, setLocalCount] = useState(collectionCount ?? 0);
   const [addMessage, setAddMessage] = useState('');
   const [onWishlist, setOnWishlist] = useState(false);
   const [wishlistLoading, setWishlistLoading] = useState(false);
@@ -78,13 +80,13 @@ export function CardDetailDialog({ card, onClose }: CardDetailDialogProps) {
     }
   };
 
-  const handleAddToCollection = async () => {
+  const updateCollection = async (newCount: number) => {
     try {
       setAddingToCollection(true);
       const response = await fetch('/api/me/collection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ card_id: card.id, count: 1 }),
+        body: JSON.stringify({ card_id: card.id, count: newCount }),
         credentials: 'include',
       });
 
@@ -93,18 +95,14 @@ export function CardDetailDialog({ card, onClose }: CardDetailDialogProps) {
         setTimeout(() => router.push('/login'), 2000);
         return;
       }
+      if (!response.ok) throw new Error('Failed to update collection');
 
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || 'Failed to add to collection');
-      }
-
-      setAddedToCollection(true);
-      setAddMessage('Added to collection!');
-      setTimeout(() => setAddMessage(''), 3000);
-    } catch (err) {
-      console.error('Error adding to collection:', err);
-      setAddMessage('Failed to add to collection');
+      setLocalCount(newCount);
+      onCollectionChange?.(newCount);
+      setAddMessage(newCount === 0 ? 'Removed from collection' : newCount > localCount ? 'Added!' : '');
+      setTimeout(() => setAddMessage(''), 2500);
+    } catch {
+      setAddMessage('Failed to update collection');
       setTimeout(() => setAddMessage(''), 3000);
     } finally {
       setAddingToCollection(false);
@@ -395,18 +393,38 @@ export function CardDetailDialog({ card, onClose }: CardDetailDialogProps) {
           Build Deck with This Card
         </button>
 
-        <button
-          onClick={handleAddToCollection}
-          disabled={addingToCollection || addedToCollection}
-          className="ts-btn ts-btn-blue"
-          style={{
-            opacity: addedToCollection ? 0.7 : 1,
-            borderColor: addedToCollection ? 'var(--ts-green)' : undefined,
-            color: addedToCollection ? 'var(--ts-green)' : undefined,
-          }}
-        >
-          {addingToCollection ? 'Adding…' : addedToCollection ? '✓ In Collection' : '+ Add to Collection'}
-        </button>
+        {localCount > 0 ? (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <div className="ts-chip" style={{ borderColor: 'var(--ts-green)', color: 'var(--ts-green)', fontSize: 11 }}>
+              ✓ Owned ×{localCount}
+            </div>
+            <button
+              onClick={() => updateCollection(localCount + 1)}
+              disabled={addingToCollection}
+              className="ts-btn ts-btn-sm"
+              title="Add another copy"
+            >
+              +
+            </button>
+            <button
+              onClick={() => updateCollection(localCount - 1)}
+              disabled={addingToCollection}
+              className="ts-btn ts-btn-sm"
+              style={{ borderColor: 'var(--ts-red)', color: 'var(--ts-red)' }}
+              title={localCount === 1 ? 'Remove from collection' : 'Remove one copy'}
+            >
+              −
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => updateCollection(1)}
+            disabled={addingToCollection}
+            className="ts-btn ts-btn-blue"
+          >
+            {addingToCollection ? 'Adding…' : '+ Add to Collection'}
+          </button>
+        )}
 
         <button
           onClick={handleToggleWishlist}
@@ -426,7 +444,7 @@ export function CardDetailDialog({ card, onClose }: CardDetailDialogProps) {
               alignSelf: 'center',
               fontFamily: 'var(--ts-font-mono)',
               fontSize: 11,
-              color: addMessage.includes('fail') || addMessage.includes('error') ? 'var(--ts-red)' : 'var(--ts-green)',
+              color: addMessage.includes('fail') || addMessage.includes('Removed') ? 'var(--ts-red)' : 'var(--ts-green)',
               letterSpacing: '0.1em',
             }}
           >
