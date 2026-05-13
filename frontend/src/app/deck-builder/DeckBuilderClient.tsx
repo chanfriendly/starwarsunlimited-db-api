@@ -1448,7 +1448,7 @@ export default function DeckBuilderClient() {
         const cardAspects = card.aspects?.map(a => a.aspect_name) ?? [];
         if (firstAspects.includes('Heroism') && cardAspects.includes('Villainy')) return false;
         if (firstAspects.includes('Villainy') && cardAspects.includes('Heroism')) return false;
-        return firstAspects.some(a => cardAspects.includes(a));
+        return true;
       });
     }
     if (currentStage === 'leaders') {
