@@ -4,6 +4,26 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-05-16: Password reset emails — switched from Resend to Gmail SMTP
+
+**What changed:**
+
+**Replaced Resend HTTP API with Gmail SMTP** — `_send_password_reset_email()` in `backend/src/auth/routes.py` was rewritten to use Python stdlib `smtplib` with STARTTLS. No new dependencies. Reads `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, and `APP_BASE_URL` from env vars. Defaults: `smtp.gmail.com:587`, from address falls back to `SMTP_USER` if `SMTP_FROM` is not set. `requests` import and all Resend HTTP logic removed.
+
+**Why Resend was abandoned:**
+1. Resend's `onboarding@resend.dev` sender (available without a verified domain) can only deliver to the Resend account owner's email address — it cannot send to arbitrary users. This made it fundamentally unsuitable for a password reset feature where the recipient is whoever registered the account.
+2. Even with the correct API key, emails to other users would silently fail or be blocked by Resend's sandbox restrictions.
+
+**`docker-compose.prod.yaml` updated** — Backend environment block now has all 6 SMTP vars (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `APP_BASE_URL`) using `${VAR:-default}` Portainer substitution syntax. Old Resend vars removed.
+
+**Root cause of the multi-session debug loop** — Two separate issues compounded:
+1. The Portainer YAML was only passing `SMTP_PASSWORD` — `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_FROM` were never in the environment block and never reached the container. The code couldn't log in without `SMTP_USER`.
+2. The `deploy.sh` Portainer redeploy step fails with HTTP 422 "Invalid credentials", so new images weren't being pulled automatically. After pushing, a manual "Update the stack" in the Portainer UI was required. This is a known open issue.
+
+**Key lesson** — When adding new env vars to a service, the `docker-compose.prod.yaml` file AND the Portainer stack editor must both be updated. The compose file is the local source of truth, but Portainer uses its own stored copy — they diverge silently when the deploy step fails. Always verify env vars are present in the running container after a config change (`docker exec twinsuns-backend env | grep SMTP`).
+
+---
+
 ### 2026-05-15: Full production readiness pass — security, cleanup, infrastructure
 
 **What changed:**

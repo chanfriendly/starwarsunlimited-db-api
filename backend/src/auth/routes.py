@@ -1,11 +1,13 @@
 import os
 import time
 import logging
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from collections import defaultdict
 from datetime import timedelta
 from typing import Annotated, Optional
 
-import requests as http_requests
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field, validator
@@ -32,41 +34,45 @@ logger = logging.getLogger(__name__)
 
 def _send_password_reset_email(to_email: str, token: str) -> bool:
     """
-    Send a password reset email via Resend (https://resend.com).
-    Returns True on success, False if RESEND_API_KEY is not configured or send fails.
+    Send a password reset email via Gmail SMTP.
     Requires env vars:
-      RESEND_API_KEY  — API key from resend.com
-      APP_BASE_URL    — e.g. https://twinsuns.chanfriendly.duckdns.org
-      RESEND_FROM     — optional sender, defaults to noreply@yourdomain.com
+      SMTP_HOST     — e.g. smtp.gmail.com
+      SMTP_PORT     — e.g. 587
+      SMTP_USER     — Gmail address
+      SMTP_PASSWORD — Gmail App Password (not your regular password)
+      SMTP_FROM     — optional display name + address, defaults to SMTP_USER
+      APP_BASE_URL  — e.g. https://twinsuns.chanfriendly.duckdns.org
     """
-    api_key = os.environ.get("RESEND_API_KEY")
-    if not api_key:
+    smtp_user = os.environ.get("SMTP_USER")
+    smtp_password = os.environ.get("SMTP_PASSWORD")
+    if not smtp_user or not smtp_password:
+        logger.warning("SMTP_USER or SMTP_PASSWORD not configured — skipping email send")
         return False
 
+    smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    from_addr = os.environ.get("SMTP_FROM", smtp_user)
     base_url = os.environ.get("APP_BASE_URL", "http://localhost:3000").rstrip("/")
-    from_addr = os.environ.get("RESEND_FROM", f"Twin Suns <noreply@{base_url.split('//')[-1].split('/')[0]}>")
     reset_link = f"{base_url}/reset-password?token={token}"
 
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = "Twin Suns — Password Reset"
+    msg["From"] = from_addr
+    msg["To"] = to_email
+    html = (
+        f"<p>You requested a password reset for your Twin Suns account.</p>"
+        f"<p><a href=\"{reset_link}\">Click here to reset your password</a></p>"
+        f"<p>This link expires in 1 hour. If you didn't request this, ignore this email.</p>"
+        f"<p style=\"font-size:11px;color:#888\">Or copy this URL: {reset_link}</p>"
+    )
+    msg.attach(MIMEText(html, "html"))
+
     try:
-        resp = http_requests.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "from": from_addr,
-                "to": [to_email],
-                "subject": "Twin Suns — Password Reset",
-                "html": (
-                    f"<p>You requested a password reset for your Twin Suns account.</p>"
-                    f"<p><a href=\"{reset_link}\">Click here to reset your password</a></p>"
-                    f"<p>This link expires in 1 hour. If you didn't request this, ignore this email.</p>"
-                    f"<p style=\"font-size:11px;color:#888\">Or copy this URL: {reset_link}</p>"
-                ),
-            },
-            timeout=10,
-        )
-        if resp.status_code not in (200, 201):
-            logger.error("Resend API error %s: %s", resp.status_code, resp.text)
-            return False
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.sendmail(smtp_user, to_email, msg.as_string())
         return True
     except Exception as exc:
         logger.error("Failed to send password reset email: %s", exc)

@@ -6,9 +6,13 @@
 
 ## Current Status
 
+*(2026-05-16 session 14)* **Password reset emails working. deploy.sh Portainer redeploy fixed.**
+
+Replaced Resend HTTP API with stdlib `smtplib` + Gmail App Password. Resend was abandoned because `onboarding@resend.dev` can only deliver to the Resend account owner — not arbitrary users. The Portainer YAML was also missing `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_FROM` (only `SMTP_PASSWORD` was present), so those vars never reached the container. Fixed by syncing `docker-compose.prod.yaml` to Portainer. Password reset emails now deliver to any user's email address. No new Python deps — `smtplib` is stdlib. `deploy.sh` Portainer redeploy also fixed: `.env.prod` had placeholder `REPLACE_WITH_SECRET_FROM_BITWARDEN` for `PORTAINER_PASSWORD` instead of the real value. Updated with actual credentials (single-quoted to handle embedded `"`). Full deploy now automated again.
+
 *(2026-05-15 session 13)* **Password reset email delivery wired. Frontend reset flow added.**
 
-Backend `password_reset_request` endpoint now sends via Resend when `RESEND_API_KEY` env var is set. Falls back to returning token in response body when unset (dev mode / no email on account). Uses `requests` lib (already in deps — no new packages). New frontend pages: `/forgot-password` (username form → request reset) and `/reset-password` (token + new password form → confirm reset). Login page has "Forgot password?" link. Zero TypeScript errors. **To activate email delivery**: sign up at resend.com, add `RESEND_API_KEY` and `APP_BASE_URL` to Portainer env vars, redeploy. Two infrastructure items still require manual setup — see checklist items 1 and 8.
+Backend `password_reset_request` endpoint now sends via Resend when `RESEND_API_KEY` env var is set. Falls back to returning token in response body when unset (dev mode / no email on account). Uses `requests` lib (already in deps — no new packages). New frontend pages: `/forgot-password` (username form → request reset) and `/reset-password` (token + new password form → confirm reset). Login page has "Forgot password?" link. Zero TypeScript errors.
 
 *(2026-05-15 session 12)* **Production readiness hardening — all must/should items addressed.**
 
@@ -149,7 +153,7 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 
 **Priority order — top item is immediately actionable:**
 
-1. **[SECURITY] Email verification on signup** — No email verification. Anyone can register with any string as their email. Now that Resend is wired in, this is a small addition: generate a verification token at register, send via `_send_password_reset_email`-style call, add a `POST /api/auth/verify-email` endpoint. Low urgency while the app is household-only.
+1. **[SECURITY] Email verification on signup** — No email verification. Anyone can register with any string as their email. Gmail SMTP is wired in, so this is achievable: generate a verification token at register, send via `_send_password_reset_email`-style call, add a `POST /api/auth/verify-email` endpoint. Low urgency while the app is household-only.
 
 2. **[ENHANCEMENT] Cards page sidebar CSS cleanup** — The `.xl-show` media query lives in an inline `<style>` block in `cards/page.tsx`. Should be moved to `globals.css`.
 
@@ -157,7 +161,7 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 
 4. **[UX] Loading skeletons** — Card grids flash empty on slow connections. A simple `ts-*`-styled skeleton shimmer would improve perceived performance.
 
-5. **[FEATURE] Activate Resend in production** — Set `RESEND_API_KEY` and `APP_BASE_URL=https://twinsuns.chanfriendly.duckdns.org` in Portainer env vars and redeploy. Password reset emails will then deliver instead of returning token in response body. Users without an email on their account still get token-in-response — consider prompting them to add one.
+5. **[ENHANCEMENT] Cards page sidebar CSS cleanup** — The `.xl-show` media query lives in an inline `<style>` block in `cards/page.tsx`. Should be moved to `globals.css`.
 
 ---
 
@@ -187,7 +191,7 @@ What needs to be resolved before this is genuinely shippable. Grouped by severit
 | 2 | **Security** | ~~No CSRF protection.~~ **✅ DONE** | `SameSite=strict` added to auth cookie in both login and token routes. |
 | 3 | **Security** | ~~No token revocation. 7-day JWTs.~~ **✅ DONE** | `token_version` on User model; JWT includes `tv` claim; logout bumps version; `ACCESS_TOKEN_EXPIRE_MINUTES` reduced to 1440 (24h); both backend logout and frontend logout route updated. |
 | 4 | **Security** | **Portainer at `:9004` may be internet-accessible.** | Verify at router: port 9004 must NOT be in the port-forwarding table. **Confirmed not forwarded per your response.** |
-| 5 | **Auth** | **Password reset — email delivery wired, needs env vars set in prod.** | Backend sends via Resend when `RESEND_API_KEY` is set; falls back to token-in-response otherwise. Frontend pages `/forgot-password` and `/reset-password` added. **To activate**: set `RESEND_API_KEY` + `APP_BASE_URL` in Portainer, redeploy. Users without an email on their account always get token-in-response fallback. |
+| 5 | **Auth** | ~~**Password reset — email delivery wired, needs env vars set in prod.**~~ **✅ DONE** | Switched from Resend to Gmail SMTP (`smtplib`, no new deps). Portainer env vars set: `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, `APP_BASE_URL`. Reset emails deliver to any user address. |
 
 ### 🟡 Should-fix before calling this "done"
 
