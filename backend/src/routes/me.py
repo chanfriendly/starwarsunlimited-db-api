@@ -826,3 +826,22 @@ async def remove_from_wishlist(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to remove from wishlist"
         )
+
+
+@router.delete("/account", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_account(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_app_db)]
+):
+    """Permanently delete the authenticated user and all their data."""
+    try:
+        db.delete(current_user)
+        db.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting account {current_user.id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete account"
+        )

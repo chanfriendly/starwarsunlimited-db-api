@@ -35,7 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // --- Define login function (Corrected) ---
   const login = useCallback(async (username: string, password: string) => {
-    console.log(`[Auth Context] Login attempt for: ${username}`);
+
     setIsLoading(true);
     // Reset auth state immediately on login attempt
     setUser(null);
@@ -53,7 +53,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         body: formData.toString(),
       });
 
-      console.log(`[Auth Context] /api/auth/token response status: ${response.status}`);
       if (!response.ok) {
          let errorDetail = 'Login failed';
          try { const errorData = await response.json(); errorDetail = errorData.detail || JSON.stringify(errorData); }
@@ -63,19 +62,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const data = await response.json();
-      console.log("[Auth Context] Raw data received from /api/auth/token:", JSON.stringify(data, null, 2));
 
       if (data && data.access_token && typeof data.access_token === 'string') {
           localStorage.setItem('auth_token', data.access_token); // Use correct key
-          console.log("[Auth Context] Token stored successfully in localStorage as 'auth_token'.");
+
           const storedToken = localStorage.getItem('auth_token');
-          console.log(`[Auth Context] Verification read from localStorage: ${storedToken ? 'FOUND' : 'NOT FOUND'}`);
 
           try {
-            console.log("[Auth Context] Fetching user data from /api/auth/me after login...");
+
             const userData: User = await fetchWithAuth('/api/auth/me'); // Use fetchWithAuth
             if (userData && userData.username) {
-                console.log("[Auth Context] Successfully fetched user data:", userData.username);
+
                 setUser(userData);
                 setIsAuthenticated(true); // <<< SET authenticated state
                 router.push('/profile');
@@ -110,10 +107,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router, /* logout - causes potential infinite loop if added, handle carefully */ ]);
 
-
   // --- Define logout function (Corrected) ---
   const logout = useCallback(async () => {
-    console.log("[Auth Context] Logging out.");
+
     try {
       // Optional backend call
     } catch (error) { /* ... */ }
@@ -121,7 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
        localStorage.removeItem('auth_token');
        setUser(null);
        setIsAuthenticated(false); // <<< SET authenticated state
-       console.log("[Auth Context] Cleared auth state and token.");
+
        router.push('/login');
     }
   }, [router]);
@@ -129,7 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // --- Define register function (Keep as is) ---
   const register = useCallback(async (username: string, email: string, password: string) => {
     // ... (register logic) ...
-    console.log(`[Auth Context] Registering user: ${username}`);
+
     setIsLoading(true);
     try {
       const response = await fetch(`/api/auth/register`, { // Use relative path
@@ -137,7 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', },
         body: JSON.stringify({ username, email, password }),
       });
-       console.log(`[Auth Context] /api/auth/register response status: ${response.status}`);
+
       if (!response.ok) { /* ... (error handling) ... */
          let errorDetail = 'Registration failed';
          try { const errorData = await response.json(); errorDetail = errorData.detail || JSON.stringify(errorData); }
@@ -145,7 +141,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
          console.error(`[Auth Context] Registration API error (${response.status}): ${errorDetail}`);
          throw new Error(errorDetail);
       }
-      console.log("[Auth Context] Registration successful.");
+
       // Maybe redirect to login page after successful registration
       // router.push('/login');
     } catch (error) {
@@ -156,13 +152,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [/* router - add if redirecting */]);
 
-
   // --- Define refreshAuthState function (Corrected) ---
    const refreshAuthState = useCallback(async (): Promise<boolean> => {
-      console.log("[Auth Context] Refreshing auth state...");
+
       const token = localStorage.getItem('auth_token');
       if (!token) {
-        console.log("[Auth Context] Refresh: No token found.");
+
         if (isAuthenticated) { // Check the state variable
             setUser(null);
             setIsAuthenticated(false); // <<< SET authenticated state
@@ -173,17 +168,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const userData: User = await fetchWithAuth('/api/auth/me');
         if (userData && userData.username) {
-             console.log("[Auth Context] Refresh successful, user:", userData.username);
+
              setUser(userData);
              setIsAuthenticated(true); // <<< SET authenticated state
              return true;
         } else {
-             console.warn('[Auth Context] Refresh: /api/auth/me returned invalid data.');
+
              await logout();
              return false;
         }
       } catch (error: any) {
-        console.warn(`[Auth Context] Refresh failed (token likely invalid/expired): ${error.message}`);
+
         await logout();
         return false;
       }
@@ -191,13 +186,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [logout, isAuthenticated]); // Depend on isAuthenticated state
 
-
   // --- Effect for checking auth on initial mount (Corrected) ---
   useEffect(() => {
-    console.log('[Auth Context] Initial mount effect running.');
+
     // No need to check 'user' state here, refreshAuthState handles token check
     refreshAuthState().finally(() => {
-        console.log('[Auth Context] Initial auth check complete.');
+
         setIsLoading(false);
     });
   // Only run on mount, refreshAuthState has its own dependencies
@@ -207,20 +201,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // --- Effect for periodic token refresh (Corrected) ---
   useEffect(() => {
     const refreshIntervalMinutes = 15;
-    console.log(`[Auth Context] Setting up token refresh interval (${refreshIntervalMinutes} mins)`);
+
     const intervalId = setInterval(() => {
       // Check isAuthenticated state variable
       if (isAuthenticated) {
-           console.log("[Auth Context] Interval: Refreshing token...");
+
            refreshAuthState();
       } else {
-           console.log("[Auth Context] Interval: Skipping refresh, user not logged in.");
+
       }
     }, refreshIntervalMinutes * 60 * 1000);
 
     return () => clearInterval(intervalId); // Clear interval on unmount
   }, [refreshAuthState, isAuthenticated]); // Depend on isAuthenticated state
-
 
   // --- Create context value (Corrected) ---
   const contextValue = {
@@ -233,15 +226,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refreshAuthState
   };
 
-  // --- Log state changes (Corrected) ---
   useEffect(() => {
-      console.log('[Auth State Change]', {
-        isAuthenticated: isAuthenticated, // <<< Use the state variable
-        isLoading,
-        user: user ? user.username : null,
-      });
-  }, [isAuthenticated, isLoading, user]); // Log when any of these change
-
+    // intentionally empty — was debug logging
+  }, [isAuthenticated, isLoading, user]);
 
   return (
     <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>

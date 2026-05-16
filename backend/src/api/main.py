@@ -5,23 +5,29 @@ from src.utils.rate_limiter import RateLimitMiddleware
 import logging
 import os
 
-# Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,  # Change to DEBUG for more details
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Star Wars Unlimited API")
 
 @app.on_event("startup")
 async def startup_event():
-    """Ensure the app database schema exists on every startup."""
+    """Ensure the app database schema exists and run lightweight column migrations."""
     try:
-        import src.database.models  # registers all ORM models with Base.metadata
-        from src.database.db import init_app_db
+        import src.database.models
+        from src.database.db import init_app_db, app_engine
         init_app_db()
-        logger.info("App database initialized successfully.")
+
+        # Add token_version column to users table if it was created before this column existed
+        with app_engine.connect() as conn:
+            from sqlalchemy import text as _text
+            cols = [row[1] for row in conn.execute(_text("PRAGMA table_info(users)"))]
+            if 'token_version' not in cols:
+                conn.execute(_text("ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0"))
+                conn.commit()
+                logger.info("Migrated: added token_version to users table")
+
+        logger.info("App database initialized.")
     except Exception as e:
         logger.error(f"Failed to initialize app database: {e}")
 

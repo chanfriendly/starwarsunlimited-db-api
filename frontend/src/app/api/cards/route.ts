@@ -16,8 +16,7 @@ export async function GET(request: NextRequest) {
     searchParams.forEach((value, key) => {
       backendUrl.searchParams.append(key, value);
     });
-    
-    console.log('Proxying cards request to:', backendUrl.toString());
+
     
     // Make the request to the backend
     const response = await fetch(backendUrl.toString());
@@ -28,7 +27,7 @@ export async function GET(request: NextRequest) {
     }
     
     const data = await response.json();
-    console.log('Cards data received, count:', data.data?.length || 0);
+
     
     return NextResponse.json(data);
   } catch (error) {

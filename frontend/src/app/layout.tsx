@@ -4,6 +4,7 @@ import { Cormorant_Garamond, Spectral, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Navbar } from "@/components/Navbar";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 const cormorant = Cormorant_Garamond({
   variable: "--font-display",
@@ -48,7 +49,9 @@ export default function RootLayout({
       >
         <AuthProvider>
           <Navbar />
-          {children}
+          <ErrorBoundary>
+            {children}
+          </ErrorBoundary>
         </AuthProvider>
       </body>
     </html>

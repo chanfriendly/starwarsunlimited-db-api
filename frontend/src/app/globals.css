@@ -461,3 +461,26 @@ a { color: inherit; }
   color: transparent;
   display: inline;
 }
+
+/* ============================================================
+   Responsive nav
+   ============================================================ */
+.ts-nav-desktop { display: flex; }
+.ts-nav-hamburger { display: none; }
+.ts-nav-mobile-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--ts-bg);
+  border-bottom: 1px solid var(--ts-line);
+  padding: 8px 0;
+  z-index: 99;
+}
+.ts-nav-mobile-menu.open { display: flex; flex-direction: column; }
+
+@media (max-width: 720px) {
+  .ts-nav-desktop { display: none; }
+  .ts-nav-hamburger { display: flex; align-items: center; justify-content: center; }
+}

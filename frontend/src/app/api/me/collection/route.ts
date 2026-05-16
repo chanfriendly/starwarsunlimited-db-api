@@ -5,7 +5,7 @@ const API_URL = process.env.INTERNAL_API_URL || 'http://localhost:8000';
 
 export async function GET(request: NextRequest) {
   try {
-    console.log('GET /api/me/collection called');
+
     // Get the token from cookies - await it properly
     const cookieStore = await cookies();
     const token = cookieStore.get('auth_token');
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
     
     // Forward the request to the backend with the token
     const url = `${API_URL}/api/me/collection${allCards ? '?all_cards=true' : ''}`;
-    console.log('Forwarding to:', url);
+
     
     const response = await fetch(url, {
       headers: {
@@ -53,13 +53,13 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    console.log('POST /api/me/collection called');
+
     // Get the token from cookies - await it here too
     const cookieStore = await cookies();
     const token = cookieStore.get('auth_token');
     
     // Debug logging
-    console.log('Cookie token available:', !!token);
+
     
     // Check if token exists
     if (!token || !token.value) {
@@ -71,10 +71,10 @@ export async function POST(request: NextRequest) {
     
     // Get the request body
     const body = await request.json();
-    console.log('Request body:', body);
+
     
     // Forward the request to the backend with the token
-    console.log('Forwarding to backend:', `${API_URL}/api/me/collection`);
+
     const response = await fetch(`${API_URL}/api/me/collection`, {
       method: 'POST',
       headers: {
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
     });
     
     // Log response for debugging
-    console.log('Backend response status:', response.status);
+
     
     // If response is not ok, log the error details
     if (!response.ok) {
@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
     }
     
     const data = await response.json();
-    console.log('Backend response data:', data);
+
     return NextResponse.json(data);
   } catch (error) {
     console.error('Error in POST /api/me/collection:', error);

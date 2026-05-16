@@ -9,6 +9,8 @@ export interface CardDetailDialogProps {
   onClose: () => void;
   collectionCount?: number;
   onCollectionChange?: (newCount: number) => void;
+  initialOnWishlist?: boolean;
+  onWishlistChange?: (cardId: string, isOnWishlist: boolean) => void;
 }
 
 const ASPECT_COLORS: Record<string, string> = {
@@ -37,13 +39,13 @@ function AspectPip({ aspect }: { aspect: string }) {
   );
 }
 
-export function CardDetailDialog({ card, onClose, collectionCount, onCollectionChange }: CardDetailDialogProps) {
+export function CardDetailDialog({ card, onClose, collectionCount, onCollectionChange, initialOnWishlist, onWishlistChange }: CardDetailDialogProps) {
   const router = useRouter();
   const [showBackSide, setShowBackSide] = useState(false);
   const [addingToCollection, setAddingToCollection] = useState(false);
   const [localCount, setLocalCount] = useState(collectionCount ?? 0);
   const [addMessage, setAddMessage] = useState('');
-  const [onWishlist, setOnWishlist] = useState(false);
+  const [onWishlist, setOnWishlist] = useState(initialOnWishlist ?? false);
   const [wishlistLoading, setWishlistLoading] = useState(false);
 
   const canFlip = !!card?.image_back_uri;
@@ -64,6 +66,7 @@ export function CardDetailDialog({ card, onClose, collectionCount, onCollectionC
       if (onWishlist) {
         await fetch(`/api/me/wishlist/${card.id}`, { method: 'DELETE', credentials: 'include' });
         setOnWishlist(false);
+        onWishlistChange?.(card.id, false);
       } else {
         await fetch('/api/me/wishlist', {
           method: 'POST',
@@ -72,6 +75,7 @@ export function CardDetailDialog({ card, onClose, collectionCount, onCollectionC
           body: JSON.stringify({ card_id: card.id }),
         });
         setOnWishlist(true);
+        onWishlistChange?.(card.id, true);
       }
     } catch (err) {
       console.error('Error toggling wishlist:', err);

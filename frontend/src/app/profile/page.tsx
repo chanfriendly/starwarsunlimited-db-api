@@ -50,9 +50,9 @@ const ASPECT_COLORS: Record<string, string> = {
 };
 
 const defaultUserProfile: UserProfileData = {
-    id: '1',
-    username: 'GalacticGamer77',
-    createdAt: '2023-01-15',
+    id: '',
+    username: '',
+    createdAt: '',
 };
 
 // ── DeckCard ────────────────────────────────────────────────────────────────
@@ -331,7 +331,7 @@ const UserProfilePage = () => {
         setError(null);
 
         try {
-            console.log('[Profile] Fetching user data...');
+
             let decksData = [];
             let collectionData = [];
 
@@ -339,12 +339,12 @@ const UserProfilePage = () => {
                 const fetchedDecks = await fetchWithAuth(`/api/decks`);
                 if (Array.isArray(fetchedDecks)) {
                     decksData = fetchedDecks;
-                    console.log('[Profile] Fetched decks:', decksData.length);
+
                 } else if (fetchedDecks && typeof fetchedDecks === 'object' && fetchedDecks.detail) {
-                    console.warn('[Profile] API error:', fetchedDecks.detail);
+
                     setError(fetchedDecks.detail);
                 } else {
-                    console.warn('[Profile] Unexpected response format:', fetchedDecks);
+
                     setError('Unexpected response format from server');
                 }
             } catch (deckError) {
@@ -356,12 +356,12 @@ const UserProfilePage = () => {
                 const collectionResponse = await fetch(collectionUrl);
                 if (collectionResponse.ok) {
                     collectionData = await collectionResponse.json();
-                    console.log('[Profile] Fetched collection:', collectionData.length);
+
                 } else if (collectionResponse.status === 401) {
-                    console.warn('[Profile] Not authenticated for collection');
+
                     setError('Authentication required');
                 } else {
-                    console.warn('[Profile] Failed to fetch collection:', collectionResponse.status);
+
                 }
             } catch (collectionError) {
                 console.error('[Profile] Error fetching collection:', collectionError);
@@ -395,14 +395,8 @@ const UserProfilePage = () => {
     }, [isAuthenticated, authLoading, showAllCards]);
 
     useEffect(() => {
-        console.log('[Profile] Auth state:', {
-            isAuthenticated,
-            authLoading,
-            token: localStorage.getItem('auth_token') ? 'exists' : 'missing',
-        });
         if (authLoading) return;
         if (!isAuthenticated) {
-            console.log('[Profile] Not authenticated, redirecting to login');
             router.push('/login');
         }
     }, [isAuthenticated, authLoading, router]);

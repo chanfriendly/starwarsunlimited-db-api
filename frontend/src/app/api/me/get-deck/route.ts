@@ -15,8 +15,7 @@ export async function GET(request: NextRequest) {
         { status: 400 }
       );
     }
-    
-    console.log(`GET /api/me/get-deck?id=${id} called`);
+
     
     // Get the token from cookies
     const cookieStore = await cookies();
@@ -28,16 +27,14 @@ export async function GET(request: NextRequest) {
         { status: 401 }
       );
     }
-    
-    console.log(`Forwarding to backend: ${API_URL}/api/me/decks/${id}`);
+
     
     const response = await fetch(`${API_URL}/api/me/decks/${id}`, {
       headers: {
         'Authorization': `Bearer ${token.value}`,
       },
     });
-    
-    console.log('Backend response status:', response.status);
+
     
     if (!response.ok) {
       const errorText = await response.text();

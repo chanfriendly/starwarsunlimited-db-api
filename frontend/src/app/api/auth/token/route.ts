@@ -1,59 +1,43 @@
-// frontend/src/app/api/auth/token/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 
-// The backend API URL - use container networking for server-side requests
 const API_URL = process.env.INTERNAL_API_URL || 'http://localhost:8000';
 
 export async function POST(request: NextRequest) {
   try {
-    // Get login data
     const formData = await request.formData();
-    
-    // Forward the request to the backend
+
     const response = await fetch(`${API_URL}/api/auth/token`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(formData as any).toString(),
     });
-    
-    // Get response data
+
     const responseData = await response.json();
-   
-    // Check for errors
+
     if (!response.ok) {
       return NextResponse.json(
         { detail: responseData.detail || 'Login failed' },
         { status: response.status }
       );
     }
-    
-    // Create a response
+
     const authResponse = NextResponse.json({
       success: true,
       access_token: responseData.access_token,
-      token_type: responseData.token_type
+      token_type: responseData.token_type,
     });
-    
-    // Set HTTP-only cookie with the token
     authResponse.cookies.set({
       name: 'auth_token',
       value: responseData.access_token,
       httpOnly: true,
-      secure: false, // app runs over HTTP on local network
-      maxAge: 60 * 60 * 24 * 7, // 1 week
+      secure: false,        // flip to true once HTTPS is in place
+      sameSite: 'strict',
+      maxAge: 60 * 60 * 24,
       path: '/',
     });
-    
     return authResponse;
   } catch (error) {
-    console.error('Error in login API route:', error);
-    
-    return NextResponse.json(
-      { detail: 'Server error during login' },
-      { status: 500 }
-    );
+    console.error('Error in token route:', error);
+    return NextResponse.json({ detail: 'Server error during login' }, { status: 500 });
   }
 }

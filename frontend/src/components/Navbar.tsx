@@ -1,6 +1,6 @@
 // src/components/Navbar.tsx
 'use client';
-import React, { useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
@@ -16,10 +16,9 @@ function TwinSunsMark({ size = 28 }: { size?: number }) {
 }
 
 const STATUS_ITEMS = [
-  { tag: 'TRANS', text: 'Set 04 · Jump to Lightspeed now available' },
-  { tag: 'META',  text: 'Sabine Wren ▲ +4.2% · Boba Fett ▼ -1.8% · Luke (JK) holds #1' },
-  { tag: 'ALERT', text: "Errata posted for Vader's Lightsaber — see rulings index" },
-  { tag: 'EVENT', text: 'Galactic Championship Series · Qualifier 06.04' },
+  { tag: 'SET',   text: 'Set 04 · Jump to Lightspeed — cards available in the archive' },
+  { tag: 'INFO',  text: 'Twin Suns format — build a 50-card deck around two leaders and one base' },
+  { tag: 'HINT',  text: 'Use the Deck Atelier to build, simulate mulligans, and save your lists' },
 ];
 
 function StatusStrip() {
@@ -130,6 +129,21 @@ export function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
   const { isAuthenticated, user } = useAuth();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close mobile menu on route change
+  useEffect(() => { setMobileOpen(false); }, [pathname]);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMobileOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [mobileOpen]);
 
   const isActive = (path: string) => pathname === path || pathname.startsWith(path + '/');
 
@@ -156,13 +170,14 @@ export function Navbar() {
     : '??';
 
   return (
-    <header style={{ position: 'sticky', top: 0, zIndex: 100 }}>
+    <header style={{ position: 'sticky', top: 0, zIndex: 100 }} ref={menuRef}>
       {/* Main nav bar */}
       <div
         style={{
           borderBottom: '1px solid var(--ts-line)',
           background: 'var(--ts-bg)',
           backdropFilter: 'blur(6px)',
+          position: 'relative',
         }}
       >
         <div
@@ -213,8 +228,8 @@ export function Navbar() {
             </div>
           </Link>
 
-          {/* Nav links */}
-          <nav style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          {/* Desktop nav links */}
+          <nav className="ts-nav-desktop" style={{ gap: 2, alignItems: 'center' }}>
             {navLinks.map((link) => (
               <Link
                 key={link.href}
@@ -237,6 +252,25 @@ export function Navbar() {
               </Link>
             ))}
           </nav>
+
+          {/* Hamburger — mobile only */}
+          <button
+            className="ts-nav-hamburger"
+            onClick={() => setMobileOpen(o => !o)}
+            aria-label="Toggle menu"
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--ts-line-2)',
+              color: 'var(--ts-ink-2)',
+              cursor: 'pointer',
+              padding: '6px 10px',
+              fontFamily: 'var(--ts-font-mono)',
+              fontSize: 14,
+              lineHeight: 1,
+            }}
+          >
+            {mobileOpen ? '✕' : '☰'}
+          </button>
 
           {/* Right: user */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -332,8 +366,50 @@ export function Navbar() {
             )}
           </div>
         </div>
-      </div>
 
+        {/* Mobile menu dropdown */}
+        <div className={`ts-nav-mobile-menu${mobileOpen ? ' open' : ''}`}>
+          {navLinks.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              onClick={() => setMobileOpen(false)}
+              style={{
+                padding: '12px 24px',
+                fontFamily: 'var(--ts-font-mono)',
+                fontSize: 11,
+                letterSpacing: '0.2em',
+                textTransform: 'uppercase',
+                color: isActive(link.href) ? 'var(--ts-amber)' : 'var(--ts-ink-2)',
+                textDecoration: 'none',
+                borderLeft: isActive(link.href) ? '2px solid var(--ts-amber)' : '2px solid transparent',
+              }}
+            >
+              {link.label}
+            </Link>
+          ))}
+          {isAuthenticated && (
+            <button
+              onClick={() => { handleLogout(); setMobileOpen(false); }}
+              style={{
+                padding: '12px 24px',
+                fontFamily: 'var(--ts-font-mono)',
+                fontSize: 11,
+                letterSpacing: '0.2em',
+                textTransform: 'uppercase',
+                color: 'var(--ts-red)',
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                textAlign: 'left',
+                borderLeft: '2px solid transparent',
+              }}
+            >
+              Logout
+            </button>
+          )}
+        </div>
+      </div>
       <StatusStrip />
     </header>
   );

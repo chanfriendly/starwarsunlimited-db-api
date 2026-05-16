@@ -4,29 +4,30 @@ import datetime
 import uuid
 from .base import Base
 
-print(f"--- Executing src/database/models.py ---")
-print(f"--- Imported Base in models.py - ID: {id(Base)} ---")
-
-
-# --- Models inherit Base from .base ---
-print(f"--- Defining User class in models.py using Base ID: {id(Base)} ---")
-
 class User(Base):
     __tablename__ = 'users'
-    # __table_args__ = {'extend_existing': True}
-    
+
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     username = Column(String, unique=True, nullable=False)
-    email = Column(String, unique=True, nullable=False)
+    email = Column(String, unique=True, nullable=True)
     password_hash = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, onupdate=datetime.datetime.utcnow)
-    
+    # Increment to invalidate all existing tokens for this user (logout-all / password-reset)
+    token_version = Column(Integer, default=0, nullable=False, server_default='0')
+
     decks = relationship("Deck", back_populates="user", cascade="all, delete-orphan")
     collection = relationship("UserCollection", back_populates="user", cascade="all, delete-orphan")
     wishlist = relationship("UserWishlist", back_populates="user", cascade="all, delete-orphan")
 
-print(f"--- Defining Deck class in models.py using Base ID: {id(Base)} ---")
+class PasswordResetToken(Base):
+    __tablename__ = 'password_reset_tokens'
+
+    token = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, ForeignKey('users.id'), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class Deck(Base):
     __tablename__ = 'decks'
@@ -164,5 +165,3 @@ class UserWishlist(Base):
     user = relationship("User", back_populates="wishlist")
     card = relationship("Card", back_populates="wishlist_entries")
 
-print(f"--- Finished defining models in models.py ---")
-print(f"--- Tables known to models.Base.metadata: {list(Base.metadata.tables.keys())} ---")

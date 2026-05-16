@@ -56,6 +56,7 @@ export default function CardBrowser() {
   const [showOnlyOwned, setShowOnlyOwned] = useState(false);
   const [collectionCards, setCollectionCards] = useState<ApiCard[]>([]);
   const [collectionLoaded, setCollectionLoaded] = useState(false);
+  const [userWishlistIds, setUserWishlistIds] = useState<Set<string>>(new Set());
 
   const { isAuthenticated, isLoading: authLoading } = useAuth();
 
@@ -134,6 +135,12 @@ export default function CardBrowser() {
         setUserCollectionCounts(new Map(c.map((item) => [item.card.id, item.count])));
         setCollectionCards(c.map((item) => item.card));
         setCollectionLoaded(true);
+      })
+      .catch(() => {});
+    fetch('/api/me/wishlist')
+      .then(r => r.ok ? r.json() : [])
+      .then((items: Array<{ card: { id: string } }>) => {
+        setUserWishlistIds(new Set(items.map(i => i.card.id)));
       })
       .catch(() => {});
   }, [isAuthenticated, authLoading]);
@@ -534,6 +541,14 @@ export default function CardBrowser() {
               onClose={() => setShowDetail(false)}
               collectionCount={userCollectionCounts.get(selectedCard.id) ?? 0}
               onCollectionChange={(newCount) => handleCollectionCountChange(selectedCard.id, newCount)}
+              initialOnWishlist={userWishlistIds.has(selectedCard.id)}
+              onWishlistChange={(cardId, isOnWishlist) => {
+                setUserWishlistIds(prev => {
+                  const next = new Set(prev);
+                  if (isOnWishlist) next.add(cardId); else next.delete(cardId);
+                  return next;
+                });
+              }}
             />
           </div>
         </div>

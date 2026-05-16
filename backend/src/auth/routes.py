@@ -1,12 +1,13 @@
+import time
+import logging
+from collections import defaultdict
 from datetime import timedelta
+from typing import Annotated, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel, Field, validator
 from sqlalchemy.orm import Session
-from typing import Annotated
-import logging
-import time
-from collections import defaultdict
-from src.utils.model_helpers import model_to_dict
 
 from src.database.db import get_app_db
 from src.database.models import User
@@ -17,12 +18,17 @@ from src.auth.auth import (
     UserResponse,
     authenticate_user,
     create_access_token,
+    create_password_reset_token,
+    consume_password_reset_token,
     get_current_user,
-    get_password_hash
+    get_password_hash,
+    revoke_user_tokens,
 )
 
-# Strict rate limiter for auth endpoints: 10 attempts per minute per IP.
-# Keyed by direct connection IP only — X-Forwarded-For is not trusted.
+logger = logging.getLogger(__name__)
+
+# ── Rate limiter (auth endpoints only) ──────────────────────────────────────
+
 _auth_attempts: dict = defaultdict(list)
 _AUTH_LIMIT = 10
 _AUTH_WINDOW = 60
@@ -35,12 +41,30 @@ def _check_auth_rate_limit(request: Request):
         raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
     _auth_attempts[ip].append(now)
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+
+# ── Pydantic helpers ─────────────────────────────────────────────────────────
+
+class PasswordResetRequest(BaseModel):
+    username: str
+
+class PasswordResetConfirm(BaseModel):
+    token: str
+    new_password: str = Field(..., min_length=8, max_length=100)
+
+    @validator('new_password')
+    def validate_password(cls, v):
+        if not any(c.isdigit() for c in v):
+            raise ValueError('Password must contain at least one number')
+        if not any(c.isalpha() for c in v):
+            raise ValueError('Password must contain at least one letter')
+        return v
+
+
+# ── Router ───────────────────────────────────────────────────────────────────
 
 router = APIRouter(tags=["auth"])
 
-# Login endpoint
+
 @router.post("/token", response_model=Token)
 async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
@@ -54,88 +78,76 @@ async def login_for_access_token(
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
+        data={"sub": user.username, "tv": user.token_version or 0},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
-# Registration endpoint
+
 @router.post("/register", response_model=UserResponse)
 async def register_user(
     user_data: UserCreate,
     db: Annotated[Session, Depends(get_app_db)],
     _: None = Depends(_check_auth_rate_limit),
 ):
-    logger.info(f"Attempting to register user: {user_data.username}")
-    try:
-        # Check if username exists
-        db_user = db.query(User).filter(User.username == user_data.username).first()
-        if db_user:
-            logger.warning(f"Username already registered: {user_data.username}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Username already registered"
-            )
-        
-        # Check if email exists
-        logger.debug(f"Checking for existing email: {user_data.email}")
-        db_user = db.query(User).filter(User.email == user_data.email).first()
-        if db_user:
-            logger.warning(f"Email already registered: {user_data.email}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered"
-            )
-        
-        # Create new user
-        logger.debug(f"Attempting to create user object for: {user_data.username}")
-        db_user = User(
-            username=user_data.username,
-            email=user_data.email,
-            password_hash=get_password_hash(user_data.password)
-        )
-        db.add(db_user)
-        db.commit()
-        db.refresh(db_user)
-        
-        logger.info(f"User successfully created: {db_user.username} (ID: {db_user.id})")
-        
-        # Return user data in the format expected by UserResponse
-        return {
-            "id": db_user.id,
-            "username": db_user.username,
-            "email": db_user.email,
-            "created_at": db_user.created_at
-        }
-        
-    except HTTPException as http_exc:
-        raise http_exc
-    except Exception as e:
-        logger.error(f"Unexpected error during user registration for {user_data.username}: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An internal error occurred during registration."
-        )
+    if db.query(User).filter(User.username == user_data.username).first():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already registered")
+    if user_data.email and db.query(User).filter(User.email == user_data.email).first():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+
+    db_user = User(
+        username=user_data.username,
+        email=user_data.email,
+        password_hash=get_password_hash(user_data.password),
+        token_version=0,
+    )
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return {"id": db_user.id, "username": db_user.username, "email": db_user.email, "created_at": db_user.created_at}
+
 
 @router.post("/logout")
-async def logout():
-    """Log out the current user (client-side only)"""
-    # JWT tokens are stateless and can't be invalidated without extra infrastructure
-    # We'll just return a success response for the frontend to clear the token
+async def logout(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_app_db)],
+):
+    """Invalidate all existing tokens for this user."""
+    revoke_user_tokens(db, current_user)
     return {"detail": "Successfully logged out"}
 
-# User profile endpoint
-@router.get("/me", response_model=UserResponse)
-async def read_users_me(
-    current_user: Annotated[User, Depends(get_current_user)]
-):
-    # Convert SQLAlchemy model to a dictionary
-    user_dict = {
-        "id": current_user.id,
-        "username": current_user.username,
-        "email": current_user.email,
-        "created_at": current_user.created_at
-    }
-    return user_dict
 
+@router.get("/me", response_model=UserResponse)
+async def read_users_me(current_user: Annotated[User, Depends(get_current_user)]):
+    return {"id": current_user.id, "username": current_user.username, "email": current_user.email, "created_at": current_user.created_at}
+
+
+@router.post("/password-reset-request")
+async def password_reset_request(
+    body: PasswordResetRequest,
+    db: Annotated[Session, Depends(get_app_db)],
+    _: None = Depends(_check_auth_rate_limit),
+):
+    """
+    Create a password-reset token. Returns the token directly for now —
+    wire up email delivery by sending the token to user.email instead of
+    returning it in the response body.
+    """
+    token = create_password_reset_token(db, body.username)
+    # Always return 200 to avoid username enumeration
+    if token is None:
+        return {"detail": "If that username exists, a reset token has been issued."}
+    # TODO: email the token instead of returning it once SMTP is configured
+    return {"detail": "If that username exists, a reset token has been issued.", "reset_token": token}
+
+
+@router.post("/password-reset-confirm")
+async def password_reset_confirm(
+    body: PasswordResetConfirm,
+    db: Annotated[Session, Depends(get_app_db)],
+):
+    success = consume_password_reset_token(db, body.token, body.new_password)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token")
+    return {"detail": "Password updated. Please log in again."}

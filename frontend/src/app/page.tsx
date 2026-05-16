@@ -9,16 +9,6 @@ const ASPECT_COLORS: Record<string, string> = {
   Heroism: '#ead7a8', Vigilance: '#4a90c4', Villainy: '#2c2a26',
 };
 
-const SPOTLIGHT = {
-  title: "Sabine's Mandalorian Strike",
-  tier: 'S',
-  aspects: ['Aggression', 'Cunning'],
-  subline: 'RA × CU · AGGRO',
-  winRate: '64.2%', winN: 'n=1,418',
-  avgCost: '2.1', avgLabel: 'curve',
-  pilot: 'Ezra_S.', pilotLabel: "GCS '26",
-  units: 32, events: 14, upgrades: 4, total: 50,
-};
 
 const TRAINING_TRACKS = [
   { rank: 'K1', label: 'Cadet',       desc: 'Build your first deck and simulate an opening hand.', progress: 100, complete: true },
@@ -37,10 +27,10 @@ const ASPECTS_GRID = [
 ];
 
 const COMING_SOON = [
-  { label: 'Collection Tracker', desc: 'Mark cards owned, track completion %' },
-  { label: 'Achievements',       desc: 'Pilot training milestones and seasonal tracks' },
-  { label: 'Tournament Log',     desc: 'Event results, ELO, head-to-head records' },
-  { label: 'Wishlist',           desc: 'Wishlist and trade binder management' },
+  { label: 'Achievements',    desc: 'Pilot training milestones and seasonal tracks' },
+  { label: 'Tournament Log',  desc: 'Event results, ELO, head-to-head records' },
+  { label: 'Trade Binder',    desc: 'Mark cards for trade, match with other players' },
+  { label: 'Meta Reports',    desc: 'Win-rate trends, top builds, cycle analysis' },
 ];
 
 const FEATURES = [
@@ -141,61 +131,21 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Right — spotlight card floats over suns */}
+          {/* Right — meta spotlight (coming soon) */}
           <div style={{ alignSelf: 'flex-end' }}>
             <div style={{
               background: 'rgba(20,16,10,0.92)', border: '1px solid var(--ts-line-2)',
-              padding: '22px 24px 20px',
+              padding: '32px 28px',
               boxShadow: '0 24px 64px rgba(0,0,0,0.75)', backdropFilter: 'blur(2px)',
+              textAlign: 'center',
             }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                <div className="ts-eyebrow">Deck of the Cycle</div>
-                <span style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, letterSpacing: '0.2em', border: '1px solid var(--ts-red)', color: 'var(--ts-red)', padding: '2px 8px' }}>
-                  TIER {SPOTLIGHT.tier}
-                </span>
+              <div className="ts-eyebrow" style={{ marginBottom: 16 }}>Deck of the Cycle</div>
+              <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 18, color: 'var(--ts-ink-3)', lineHeight: 1.4, marginBottom: 20 }}>
+                Meta reports and featured decks<br />coming in a future update.
               </div>
-              <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 22, color: 'var(--ts-ink)', lineHeight: 1.1, marginBottom: 10 }}>
-                {SPOTLIGHT.title}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                {SPOTLIGHT.aspects.map(a => (
-                  <span key={a} style={{ width: 20, height: 20, background: ASPECT_COLORS[a] ?? '#555', clipPath: 'polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%)', display: 'inline-block', flexShrink: 0 }} />
-                ))}
-                <span style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, letterSpacing: '0.18em', color: 'var(--ts-ink-3)', textTransform: 'uppercase' }}>
-                  {SPOTLIGHT.subline}
-                </span>
-              </div>
-              <div className="ts-rule" style={{ margin: '0 0 14px' }} />
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 14 }}>
-                {[
-                  { label: 'Win Rate', value: SPOTLIGHT.winRate, sub: SPOTLIGHT.winN },
-                  { label: 'Avg Cost', value: SPOTLIGHT.avgCost, sub: SPOTLIGHT.avgLabel },
-                  { label: 'Pilot',    value: SPOTLIGHT.pilot,   sub: SPOTLIGHT.pilotLabel },
-                ].map(s => (
-                  <div key={s.label}>
-                    <div className="ts-eyebrow" style={{ marginBottom: 2, fontSize: 8 }}>{s.label}</div>
-                    <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 20, color: 'var(--ts-ink)', lineHeight: 1 }}>{s.value}</div>
-                    <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 8, color: 'var(--ts-ink-4)', marginTop: 2 }}>{s.sub}</div>
-                  </div>
-                ))}
-              </div>
-              <div className="ts-rule" style={{ margin: '0 0 12px' }} />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 16 }}>
-                {[
-                  { label: 'Units',    n: SPOTLIGHT.units },
-                  { label: 'Events',   n: SPOTLIGHT.events },
-                  { label: 'Upgrades', n: SPOTLIGHT.upgrades },
-                  { label: 'Total',    n: SPOTLIGHT.total },
-                ].map(row => (
-                  <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--ts-font-mono)', fontSize: 10, color: row.label === 'Total' ? 'var(--ts-ink-2)' : 'var(--ts-ink-3)', letterSpacing: '0.08em' }}>
-                    <span>{row.label}</span>
-                    <span>{String(row.n).padStart(2, '0')}</span>
-                  </div>
-                ))}
-              </div>
-              <button className="ts-btn ts-btn-blue" style={{ width: '100%', justifyContent: 'center', fontSize: 10, letterSpacing: '0.22em' }} disabled>
-                OPEN DECK →
-              </button>
+              <Link href="/deck-builder" className="ts-btn" style={{ fontSize: 10, letterSpacing: '0.18em', display: 'inline-flex' }}>
+                BUILD YOUR OWN →
+              </Link>
             </div>
           </div>
 

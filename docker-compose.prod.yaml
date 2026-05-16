@@ -45,7 +45,7 @@ services:
 
       # Security
       - JWT_SECRET=${JWT_SECRET}
-      - ACCESS_TOKEN_EXPIRE_MINUTES=10080
+      - ACCESS_TOKEN_EXPIRE_MINUTES=1440
 
       # CORS — only the frontend origin needs to be listed
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://192.168.1.124:4000}

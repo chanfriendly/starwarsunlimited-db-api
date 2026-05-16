@@ -169,7 +169,7 @@ export function DeckBuilderProvider({ children }: { children: ReactNode }) {
   // Card management with optimized updates
   const addCard = useCallback((card: Card) => {
     if (isCardInDeck(card.id)) {
-      console.log(`Card ${card.name} is already in the deck`);
+
       return;
     }
     

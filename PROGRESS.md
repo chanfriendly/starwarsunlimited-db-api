@@ -6,6 +6,19 @@
 
 ## Current Status
 
+*(2026-05-15 session 12)* **Production readiness hardening — all must/should items addressed.**
+
+Full backend security pass: token revocation via `token_version` integer on `User` (incrementing invalidates all existing JWTs); JWT now includes `jti` and `tv` claims; `get_current_user` validates `tv` against DB. `ACCESS_TOKEN_EXPIRE_MINUTES` reduced from 10080 → 1440 (24h). Password reset implemented (DB-backed token, 1-hour expiry, one-time use) — backend complete, email delivery deferred until SMTP configured. `DELETE /api/me/account` added (cascades all user data). `POST /api/auth/logout` now requires auth and calls `revoke_user_tokens`. Startup migration auto-adds `token_version` column to existing DBs. All debug `console.log/warn/debug` stripped from frontend (52 calls removed). `ErrorBoundary` added to `layout.tsx`. Auth cookie upgraded to `SameSite=strict`, 24h maxAge. Logout route now proxies token to backend for server-side revocation. `GalacticGamer77` placeholder removed from profile page. Fake `SPOTLIGHT` deck stats and misleading `STATUS_ITEMS` replaced with accurate copy. `COMING_SOON` updated to remove features that now exist (Collection Tracker, Wishlist). `docker-compose.prod.yaml` `ACCESS_TOKEN_EXPIRE_MINUTES` updated to 1440. New proxy routes: `DELETE /api/me/account`, `POST /api/auth/password-reset-request`, `POST /api/auth/password-reset-confirm`. Zero TypeScript errors.
+
+Three items not fully addressable from code alone — see checklist:
+- **HTTPS**: requires NPM configuration on TrueNAS → see checklist item 1
+- **Password reset email delivery**: backend implemented, needs SMTP wired up → see checklist item 5
+- **App DB backup schedule**: needs cron job on TrueNAS → see checklist item 8
+
+*(2026-05-15 session 11)* **Leader filter fix, wishlist state on dialog open, mobile nav, production readiness audit.**
+
+Second-leader aspect filter bug fixed: was incorrectly requiring the second leader to share a secondary aspect with the first (broke multi-aspect leaders like Tobias/Saw/DJ). Now only enforces Heroism/Villainy exclusion. `CardDetailDialog` now accepts `initialOnWishlist` and `onWishlistChange` props — wishlist state is accurate on open, not always `false`. `cards/page.tsx` fetches wishlist IDs on auth and passes them down. Mobile nav: hamburger (☰/✕) added to Navbar for ≤720px viewports with slide-down menu and outside-click dismiss; desktop nav unchanged. See **Production Readiness Checklist** below for what's left before this can be considered shippable.
+
 *(2026-05-12 session 10)* **Deck list page, My Collection toggle, card detail collection count/remove, DeckViewClient redesign.**
 
 `/decks/page.tsx` created: dedicated deck index with leader image strip thumbnails, aspect pips, sort (date/name), inline delete confirmation, empty state, and "+ New Deck" CTA. `DeckViewClient.tsx` fully rewritten to Twin Suns design system (removed shadcn `Button`, Lucide `AlertTriangle`, gray backgrounds). `cards/page.tsx`: added "◇ My Collection" toggle button — when active, switches card grid to full collection data source (all owned cards at once, no pagination). Collection counts now tracked in a `Map<string,number>` alongside the existing `Set`. `CardDetailDialog`: collection count display with `+`/`−` buttons to add/remove copies inline (backed by `POST /api/me/collection` with count); removing last copy drops card from `userCollection` and filters it out of the My Collection view. Navbar: "My Decks" link added for authenticated users. Zero TypeScript errors. Verified in browser.
@@ -132,13 +145,15 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 
 **Priority order — top item is immediately actionable:**
 
-1. **[ENHANCEMENT] Profile collection tab** — Currently shows cards as a flat text list. Could show card thumbnails (same `CardGrid` component) with a count badge per card. The data is already loaded; it's a layout change.
+1. **[ENHANCEMENT] Cards page sidebar always visible on ≥1280px** — The `.xl-show` CSS class in the page's inline `<style>` works but could be moved to globals.css. Currently hiding via `display: none` with the media query override.
 
-2. **[ENHANCEMENT] Cards page sidebar always visible on ≥1280px** — The `.xl-show` CSS class in the page's inline `<style>` works but could be moved to globals.css or replaced with a Tailwind `xl:block` if the sidebar proves unreliable. Currently hiding via `display: none` with the media query override.
+2. **[SECURITY] HTTPS / TLS** — The app runs on plain HTTP at `192.168.1.124:4000`. Auth cookies transmit in cleartext. See Production Readiness Checklist for full detail.
 
-3. **[ENHANCEMENT] Deck list page — add "My Decks" to mobile nav** — The navbar now shows "My Decks" for authenticated users on desktop. Worth verifying it's reachable from mobile nav too.
+3. **[SECURITY] JWT secret in `.env.prod`** — Currently a placeholder, actual value stored in Bitwarden. Good. But `ACCESS_TOKEN_EXPIRE_MINUTES=10080` (7 days) — no refresh token, no revocation. If a token is stolen there is no way to invalidate it.
 
-4. **[ENHANCEMENT] Card detail dialog — wishlist state on open** — Currently `onWishlist` defaults to `false` on dialog open regardless of actual wishlist state. Would require either a prop or a fetch on open to reflect true state.
+4. **[FEATURE] Password reset** — No reset flow exists. Users who forget their password have no recovery path.
+
+5. **[FEATURE] Email verification on signup** — No email verification. Anyone can register with any username.
 
 0. **[FEATURE] Deck builder redesign + Suggested tab** — *(Session 8, complete)*
    - **Suggested tab** (◈): synergy-scored cards from all types that share keywords (+2) or traits (+1) with either leader. Sorted by score then cost then name. Opens as the default tab. Shows card type (UNIT/EVENT/UPGRADE) in blue in subtitle. Empty state: "No synergy matches found for these leaders". Verified: 191 matches for Ackbar+Holdo deck.
@@ -172,6 +187,45 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 
 - **Docker multi-service troubleshooting** — Multiple iterations (`741860e` through `7d4eb33`) on getting Docker networking right. Key lesson: dev compose uses `twinsuns_network`, prod uses `twinsuns` — they are different and cannot be mixed. The `INTERNAL_API_URL` (container-to-container) vs `NEXT_PUBLIC_API_URL` (browser-facing) distinction is critical and easy to swap accidentally.
 - **Decks router** — The decks router was likely disabled to isolate a crash during the Docker troubleshooting phase. The variable name bug (`current_user` vs `get_current_user`) is probably the root cause. Do not simply uncomment — fix the bug first.
+
+---
+
+## Production Readiness Checklist
+
+What needs to be resolved before this is genuinely shippable. Grouped by severity.
+
+### 🔴 Must-fix before sharing with anyone outside the household
+
+| # | Area | Issue | Fix |
+|---|------|-------|-----|
+| 1 | **Security** | **No HTTPS.** Auth cookies and JWTs transmit in cleartext over the LAN. | Put Nginx Proxy Manager (already running on TrueNAS) in front with a Let's Encrypt cert on `twinsuns.chanfriendly.duckdns.org`. Or use Cloudflare Tunnel. **Requires NPM config on TrueNAS — not addressable from code.** |
+| 2 | **Security** | ~~No CSRF protection.~~ **✅ DONE** | `SameSite=strict` added to auth cookie in both login and token routes. |
+| 3 | **Security** | ~~No token revocation. 7-day JWTs.~~ **✅ DONE** | `token_version` on User model; JWT includes `tv` claim; logout bumps version; `ACCESS_TOKEN_EXPIRE_MINUTES` reduced to 1440 (24h); both backend logout and frontend logout route updated. |
+| 4 | **Security** | **Portainer at `:9004` may be internet-accessible.** | Verify at router: port 9004 must NOT be in the port-forwarding table. **Confirmed not forwarded per your response.** |
+| 5 | **Auth** | **No password reset flow — email delivery pending.** | Backend implemented: `POST /api/auth/password-reset-request` + `POST /api/auth/password-reset-confirm`, DB-backed token (1h expiry). Proxy routes added. **Token returned in response body until SMTP is wired.** Requires transactional email service (Resend, Mailgun, etc.) to deliver properly. |
+
+### 🟡 Should-fix before calling this "done"
+
+| # | Area | Issue | Fix |
+|---|------|-------|-----|
+| 6 | **Auth** | **No email verification.** Anyone can register with any string as their email. | Add email verification on signup, or drop the email field. Not yet implemented. |
+| 7 | **Auth** | ~~No account deletion.~~ **✅ DONE** | `DELETE /api/me/account` added to backend (cascades all user data, bumps token_version). Proxy route at `DELETE /api/me/account` added. |
+| 8 | **Data** | **`swu_app.db` has no production backup schedule.** | Add a cron job on TrueNAS: `ssh nas "crontab -l"` and add `0 3 * * * docker exec twinsuns-backend python /app/scripts/backup_db.py`. **Requires TrueNAS cron setup — not addressable from code.** |
+| 9 | **Input validation** | **No length limits on user-submitted strings.** | Username max_length reduced to 32 in `UserCreate`. Deck name limit not yet added. |
+| 10 | **Frontend** | ~~52 `console.log` calls.~~ **✅ DONE** | All `console.log/warn/debug` stripped. `console.error` in catch blocks retained. |
+| 11 | **Frontend** | ~~No error boundary.~~ **✅ DONE** | `ErrorBoundary` component added at `src/components/ErrorBoundary.tsx`, wired into `layout.tsx`. |
+| 12 | **Fake data** | ~~Fake STATUS_ITEMS and SPOTLIGHT.~~ **✅ DONE** | `STATUS_ITEMS` replaced with accurate copy. `SPOTLIGHT` fake deck stats removed; replaced with "coming soon" placeholder. `COMING_SOON` list updated (Collection Tracker and Wishlist removed — they exist now). |
+| 13 | **Fake data** | ~~`GalacticGamer77` flash.~~ **✅ DONE** | `defaultUserProfile` now initializes with empty strings. |
+
+### 🟢 Nice-to-have / polish
+
+| # | Area | Issue |
+|---|------|-------|
+| 14 | **UX** | Cards page sidebar always-visible at ≥1280px needs CSS cleanup (inline `<style>` block → globals.css). |
+| 15 | **UX** | `CardDetail.tsx` (deck builder side panel) still uses shadcn `Button` and Lucide icons — not fully on the Twin Suns design system. |
+| 16 | **UX** | No loading skeleton / placeholder images — card grids flash empty on slow connections. |
+| 17 | **Ops** | No structured logging or request tracing. Errors surface only in container stdout. |
+| 18 | **Ops** | No uptime monitoring — no alert if the stack goes down. Healthcheck endpoints exist but nothing watches them externally. |
 
 ---
 
