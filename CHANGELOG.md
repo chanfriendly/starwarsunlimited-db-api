@@ -4,6 +4,28 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-05-16: UX pass, email verification, design system completion, uptime monitoring
+
+**Collection completion % fix** — Profile header was always showing 100% because the collection endpoint only returned owned cards when `all_cards=false`, making numerator === denominator. Fix: always fetch `?all_cards=true`; the `showAllCards` toggle now only affects display filtering, not the fetch.
+
+**Profile avatar** — `avatar_url` column added to `User` model with startup auto-migration. `PATCH /api/me/profile` endpoint in `me.py`. Next.js proxy at `PATCH /api/me/profile`. Profile header shows avatar image when set, falls back to initials. Edit mode exposes a URL input field. `UserResponse` updated to include `avatar_url`.
+
+**Set filter merging** — "Secrets of Power Weekly Play", "A Lawless Time Weekly Play", "Jump to Lightspeed Weekly Play", and "Legends of the Force Weekly Play" now merged into their parent sets in the filter UI. The merge is computed dynamically from the API response — any future set that has a Weekly Play sibling is handled automatically. When a merged set is selected, the query param expands to both set names.
+
+**Email verification** — `EmailVerificationToken` model (mirrors `PasswordResetToken`). `create_email_verification_token` / `consume_email_verification_token` helpers. Register endpoint creates a token and emails it when SMTP is configured; falls back to returning the token in the response body for dev/no-SMTP. `POST /api/auth/verify-email` and `POST /api/auth/resend-verification` endpoints. Next.js proxies for both. `/verify-email?token=...` page handles loading/success/error. Signup success message updated. Profile page shows amber banner with "Resend link" button when `email_verified=false`. Login not blocked for unverified users — warning only (right call for a household app where lockout would be disruptive). `email_verified` added to `UserResponse` and `AuthContext` `User` interface.
+
+**CSS cleanup** — `@keyframes spin`, `.xl-show`, `.xl-hide` moved from an inline `<style>` block in `cards/page.tsx` into `globals.css`. `@keyframes ts-shimmer` and `.ts-skeleton` added to `globals.css` for the new loading skeletons.
+
+**Loading skeletons** — Card browser loading state replaced with a 24-card shimmer grid matching the real card grid layout. Profile decks tab gets 6 skeleton deck cards. Profile collection tab gets 24 skeleton card thumbnails. Shimmer uses a gradient sweep animation on `--ts-bg-2`/`--ts-bg-3` colors — visible but not distracting against the dark theme.
+
+**Deck name validation** — Both `create_user_deck` and `update_user_deck` now enforce: required, non-empty after strip, max 100 characters. 400 with a clear message on violation.
+
+**CardDetail.tsx design system migration** — Full rewrite removing the last shadcn and Lucide dependencies in the app. `Button` from `@/components/ui/button` replaced with `ts-btn`. `ChevronLeft`/`ChevronRight` from `lucide-react` replaced with `‹`/`›` characters. All Tailwind color classes replaced with `ts-*` CSS vars. Art nav, flip button, stats block, keywords, card text, empty state, and action button all on the design system. No new dependencies added or removed.
+
+**Uptime monitoring** — `.github/workflows/uptime_check.yaml` pings `https://twinsuns.chanfriendly.duckdns.org/health` every 15 minutes via GitHub Actions cron. On failure (non-200 or timeout), sends email via `dawidd6/action-send-mail`. Requires three GitHub secrets to be set: `SMTP_USER`, `SMTP_PASSWORD` (same Gmail app password in Bitwarden as `twinsuns-smtp-*`), `ALERT_EMAIL`.
+
+---
+
 ### 2026-05-16: Password reset emails — switched from Resend to Gmail SMTP
 
 **What changed:**

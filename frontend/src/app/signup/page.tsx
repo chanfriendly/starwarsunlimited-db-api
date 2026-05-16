@@ -44,7 +44,6 @@ export default function SignupPage() {
     try {
       await register(formData.username, formData.email, formData.password);
       setSuccess(true);
-      setTimeout(() => router.push('/login'), 2000);
     } catch (err: unknown) {
       setServerError(err instanceof Error ? err.message : 'An unexpected error occurred during signup');
     } finally {
@@ -96,8 +95,8 @@ export default function SignupPage() {
               <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, letterSpacing: '0.2em', color: 'var(--ts-green)', marginBottom: 4, textTransform: 'uppercase' }}>
                 Enlisted
               </div>
-              <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 11, color: 'rgba(110,227,107,0.9)', letterSpacing: '0.06em' }}>
-                Account created. Redirecting to login...
+              <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 11, color: 'rgba(110,227,107,0.9)', letterSpacing: '0.06em', lineHeight: 1.6 }}>
+                Account created. Check your email for a verification link, then sign in.
               </div>
             </div>
           )}

@@ -6,6 +6,18 @@
 
 ## Current Status
 
+*(2026-05-16 session 17)* **CardDetail design system migration, uptime monitoring, production deploy.**
+
+`CardDetail.tsx` (deck builder side panel) fully migrated off shadcn `Button` and Lucide icons. All Tailwind classes replaced with `ts-*` CSS vars and inline styles matching the design system. Art variant navigation uses `‹`/`›` characters instead of Lucide chevrons. Flip button uses amber border. Stats block uses amber/red/green `ts-*` accent colors. Keywords and card text use design system typography. Action button uses `ts-btn` with conditional amber/red/disabled states. Empty state uses design system placeholder. Zero new dependencies. Uptime monitoring added as `.github/workflows/uptime_check.yaml` — pings `/health` every 15 minutes via GitHub Actions cron; on failure, sends email via `dawidd6/action-send-mail`. Requires three GitHub secrets: `SMTP_USER`, `SMTP_PASSWORD` (same Gmail app password already in Bitwarden), `ALERT_EMAIL` (chanfriendly@gmail.com). All 🟡 and 🟢 production readiness items now resolved.
+
+*(2026-05-16 session 16)* **Email verification, CSS cleanup, deck name validation, loading skeletons.**
+
+Four items from the backlog: (1) Email verification — `EmailVerificationToken` model + startup migration; `create_email_verification_token` / `consume_email_verification_token` helpers in `auth.py`; `_send_verification_email` in `routes.py`; register now creates + emails a token when an address is provided; `POST /api/auth/verify-email` and `POST /api/auth/resend-verification` endpoints added; Next.js proxy routes for both; `/verify-email?token=...` page (handles loading/success/error states); signup success message updated; profile page shows amber banner with "Resend link" button when email is unverified; `email_verified` added to `UserResponse` and `User` interface in `AuthContext`. Login not blocked for unverified users — warning only (appropriate for household app). (2) Cards page inline `<style>` block moved to `globals.css` — `@keyframes spin`, `.xl-show`, `.xl-hide`. (3) Deck name length validation added to both `create_user_deck` and `update_user_deck` — required, non-empty after strip, max 100 chars. (4) Loading skeletons — shimmer animation (`@keyframes ts-shimmer`, `.ts-skeleton` class) added to `globals.css`; card browser loading state replaced with 24 shimmer cards matching the real grid layout; profile decks tab loading replaced with 6 skeleton deck cards; profile collection tab loading replaced with 24 skeleton card thumbnails. Zero TypeScript errors.
+
+*(2026-05-16 session 15)* **Collection % fix, profile avatar, set filter merging.**
+
+Three UX fixes: (1) Collection completion % on the profile header now shows accurately (was always 100% because the collection endpoint returned owned-only cards, making numerator = denominator). Fix: always fetch `?all_cards=true` for collection data; `showAllCards` toggle now only controls display filtering. (2) Profile avatar feature: `avatar_url` column added to `User` model with startup auto-migration; `PATCH /api/me/profile` endpoint added to `me.py`; Next.js proxy at `PATCH /api/me/profile`; profile header shows avatar image when set, falls back to initials; edit mode has URL input field. (3) Sets filter now merges "X Weekly Play" variants into the parent set display name (Secrets of Power, A Lawless Time, Jump to Lightspeed, Legends of the Force). Merging is dynamic from API data — no hardcoding. Query expansion sends both set names to the backend. Zero TypeScript errors.
+
 *(2026-05-16 session 14)* **Password reset emails working. deploy.sh Portainer redeploy fixed.**
 
 Replaced Resend HTTP API with stdlib `smtplib` + Gmail App Password. Resend was abandoned because `onboarding@resend.dev` can only deliver to the Resend account owner — not arbitrary users. The Portainer YAML was also missing `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_FROM` (only `SMTP_PASSWORD` was present), so those vars never reached the container. Fixed by syncing `docker-compose.prod.yaml` to Portainer. Password reset emails now deliver to any user's email address. No new Python deps — `smtplib` is stdlib. `deploy.sh` Portainer redeploy also fixed: `.env.prod` had placeholder `REPLACE_WITH_SECRET_FROM_BITWARDEN` for `PORTAINER_PASSWORD` instead of the real value. Updated with actual credentials (single-quoted to handle embedded `"`). Full deploy now automated again.
@@ -153,15 +165,7 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 
 **Priority order — top item is immediately actionable:**
 
-1. **[SECURITY] Email verification on signup** — No email verification. Anyone can register with any string as their email. Gmail SMTP is wired in, so this is achievable: generate a verification token at register, send via `_send_password_reset_email`-style call, add a `POST /api/auth/verify-email` endpoint. Low urgency while the app is household-only.
-
-2. **[ENHANCEMENT] Cards page sidebar CSS cleanup** — The `.xl-show` media query lives in an inline `<style>` block in `cards/page.tsx`. Should be moved to `globals.css`.
-
-3. **[ENHANCEMENT] Deck name input validation** — Username max_length is now 32 via Pydantic. Deck name has no server-side length limit yet. Add `Field(..., max_length=100)` to the deck create/update schema in `me.py`.
-
-4. **[UX] Loading skeletons** — Card grids flash empty on slow connections. A simple `ts-*`-styled skeleton shimmer would improve perceived performance.
-
-5. **[ENHANCEMENT] Cards page sidebar CSS cleanup** — The `.xl-show` media query lives in an inline `<style>` block in `cards/page.tsx`. Should be moved to `globals.css`.
+All known items resolved. No open backlog items at close of session 17.
 
 ---
 
@@ -197,10 +201,10 @@ What needs to be resolved before this is genuinely shippable. Grouped by severit
 
 | # | Area | Issue | Fix |
 |---|------|-------|-----|
-| 6 | **Auth** | **No email verification.** Anyone can register with any string as their email. | Add email verification on signup, or drop the email field. Not yet implemented. |
+| 6 | **Auth** | ~~**No email verification.**~~ **✅ DONE** | `EmailVerificationToken` model; token sent on register (SMTP) or returned in response (dev); `POST /api/auth/verify-email` + `POST /api/auth/resend-verification`; profile page shows unverified banner; login not blocked (warning only). |
 | 7 | **Auth** | ~~No account deletion.~~ **✅ DONE** | `DELETE /api/me/account` added to backend (cascades all user data, bumps token_version). Proxy route at `DELETE /api/me/account` added. |
 | 8 | **Data** | ~~**`swu_app.db` has no production backup schedule.**~~ **✅ DONE** | Cron added to `truenas_admin` crontab on TrueNAS: `0 3 * * * docker exec twinsuns-backend python /app/scripts/backup_db.py >> /mnt/volume1/docker/twinsuns/backup.log 2>&1`. Runs daily at 3 AM. Backup log at `/mnt/volume1/docker/twinsuns/backup.log`. |
-| 9 | **Input validation** | **No length limits on user-submitted strings.** | Username max_length reduced to 32 in `UserCreate`. Deck name limit not yet added. |
+| 9 | **Input validation** | ~~**No length limits on user-submitted strings.**~~ **✅ DONE** | Username max 32 chars. Deck name: required, non-empty, max 100 chars — validated in both `create_user_deck` and `update_user_deck`. |
 | 10 | **Frontend** | ~~52 `console.log` calls.~~ **✅ DONE** | All `console.log/warn/debug` stripped. `console.error` in catch blocks retained. |
 | 11 | **Frontend** | ~~No error boundary.~~ **✅ DONE** | `ErrorBoundary` component added at `src/components/ErrorBoundary.tsx`, wired into `layout.tsx`. |
 | 12 | **Fake data** | ~~Fake STATUS_ITEMS and SPOTLIGHT.~~ **✅ DONE** | `STATUS_ITEMS` replaced with accurate copy. `SPOTLIGHT` fake deck stats removed; replaced with "coming soon" placeholder. `COMING_SOON` list updated (Collection Tracker and Wishlist removed — they exist now). |
@@ -210,11 +214,11 @@ What needs to be resolved before this is genuinely shippable. Grouped by severit
 
 | # | Area | Issue |
 |---|------|-------|
-| 14 | **UX** | Cards page sidebar always-visible at ≥1280px needs CSS cleanup (inline `<style>` block → globals.css). |
-| 15 | **UX** | `CardDetail.tsx` (deck builder side panel) still uses shadcn `Button` and Lucide icons — not fully on the Twin Suns design system. |
-| 16 | **UX** | No loading skeleton / placeholder images — card grids flash empty on slow connections. |
+| 14 | **UX** | ~~Cards page sidebar inline `<style>` block → globals.css.~~ **✅ DONE** | `@keyframes spin`, `.xl-show`, `.xl-hide` moved to `globals.css`. |
+| 15 | **UX** | ~~`CardDetail.tsx` shadcn/Lucide.~~ **✅ DONE** | Full rewrite using `ts-*` CSS vars. No shadcn, no Lucide. Art nav, flip button, stats, keywords, action button all on design system. |
+| 16 | **UX** | ~~No loading skeleton / placeholder images.~~ **✅ DONE** | `ts-skeleton` shimmer class in `globals.css`; card browser, profile decks tab, and profile collection tab all use skeleton grids on load. |
 | 17 | **Ops** | No structured logging or request tracing. Errors surface only in container stdout. |
-| 18 | **Ops** | No uptime monitoring — no alert if the stack goes down. Healthcheck endpoints exist but nothing watches them externally. |
+| 18 | **Ops** | ~~No uptime monitoring.~~ **✅ DONE** | `.github/workflows/uptime_check.yaml` — pings `/health` every 15 min, emails alert on failure. Requires GitHub secrets: `SMTP_USER`, `SMTP_PASSWORD`, `ALERT_EMAIL`. |
 
 ---
 

@@ -26,6 +26,14 @@ async def startup_event():
                 conn.execute(_text("ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0"))
                 conn.commit()
                 logger.info("Migrated: added token_version to users table")
+            if 'avatar_url' not in cols:
+                conn.execute(_text("ALTER TABLE users ADD COLUMN avatar_url TEXT"))
+                conn.commit()
+                logger.info("Migrated: added avatar_url to users table")
+            if 'email_verified' not in cols:
+                conn.execute(_text("ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0"))
+                conn.commit()
+                logger.info("Migrated: added email_verified to users table")
 
         logger.info("App database initialized.")
     except Exception as e:

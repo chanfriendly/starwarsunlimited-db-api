@@ -322,9 +322,10 @@ const UserProfilePage = () => {
     const [isEditing, setIsEditing] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedTab, setSelectedTab] = useState('decks');
-    const [formData, setFormData] = useState({ username: userProfile.username });
+    const [formData, setFormData] = useState({ username: userProfile.username, avatarUrl: userProfile.avatarUrl || '' });
     const [error, setError] = useState<string | null>(null);
     const [showAllCards, setShowAllCards] = useState(false);
+    const [resendStatus, setResendStatus] = useState<'idle' | 'sending' | 'sent'>('idle');
 
     const loadData = async () => {
         setIsPageLoading(true);
@@ -352,7 +353,7 @@ const UserProfilePage = () => {
             }
 
             try {
-                const collectionUrl = `/api/me/collection${showAllCards ? '?all_cards=true' : ''}`;
+                const collectionUrl = `/api/me/collection?all_cards=true`;
                 const collectionResponse = await fetch(collectionUrl);
                 if (collectionResponse.ok) {
                     collectionData = await collectionResponse.json();
@@ -392,7 +393,7 @@ const UserProfilePage = () => {
         if (isAuthenticated && !authLoading) {
             loadData();
         }
-    }, [isAuthenticated, authLoading, showAllCards]);
+    }, [isAuthenticated, authLoading]);
 
     useEffect(() => {
         if (authLoading) return;
@@ -409,17 +410,26 @@ const UserProfilePage = () => {
                 avatarUrl: user.avatar_url,
                 createdAt: user.created_at || defaultUserProfile.createdAt,
             });
-            setFormData({ username: user.username });
+            setFormData({ username: user.username, avatarUrl: user.avatar_url || '' });
         }
     }, [user]);
 
     const handleEditProfile = () => setIsEditing(true);
-    const handleSaveProfile = () => {
-        setUserProfile({ ...userProfile, username: formData.username });
+    const handleSaveProfile = async () => {
+        try {
+            await fetchWithAuth('/api/me/profile', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ avatar_url: formData.avatarUrl || null }),
+            });
+            setUserProfile({ ...userProfile, username: formData.username, avatarUrl: formData.avatarUrl || undefined });
+        } catch (err) {
+            console.error('Error saving profile:', err);
+        }
         setIsEditing(false);
     };
     const handleCancelEdit = () => {
-        setFormData({ username: userProfile.username });
+        setFormData({ username: userProfile.username, avatarUrl: userProfile.avatarUrl || '' });
         setIsEditing(false);
     };
 
@@ -455,6 +465,21 @@ const UserProfilePage = () => {
         }
     };
 
+    const handleResendVerification = async () => {
+        if (!user?.username || resendStatus !== 'idle') return;
+        setResendStatus('sending');
+        try {
+            await fetch('/api/auth/resend-verification', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: user.username }),
+            });
+        } catch (err) {
+            console.error('Error resending verification:', err);
+        }
+        setResendStatus('sent');
+    };
+
     const handleAddToCollection = async (cardId: string, quantity: number = 1) => {
         try {
             await fetchWithAuth('/api/me/collection', {
@@ -468,13 +493,14 @@ const UserProfilePage = () => {
         }
     };
 
-    const filteredCollection = collection.filter(item =>
-        item.card.name.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-
     const ownedCount = collection.filter(item => item.in_collection).length;
     const totalCount = collection.length;
     const completionPct = totalCount > 0 ? ((ownedCount / totalCount) * 100).toFixed(1) : null;
+
+    const filteredCollection = collection.filter(item =>
+        (showAllCards || item.in_collection) &&
+        item.card.name.toLowerCase().includes(searchTerm.toLowerCase())
+    );
 
     return (
         <div style={{ minHeight: '100vh', background: 'var(--ts-bg)' }}>
@@ -485,23 +511,43 @@ const UserProfilePage = () => {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
 
                         {/* Avatar square */}
-                        <div style={{ width: 56, height: 56, background: 'var(--ts-bg-3)', border: '1px solid var(--ts-line-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                            <span style={{ fontFamily: 'var(--ts-font-display)', fontSize: 22, color: 'var(--ts-amber)' }}>
-                                {userProfile.username.substring(0, 2).toUpperCase()}
-                            </span>
+                        <div style={{ width: 56, height: 56, background: 'var(--ts-bg-3)', border: '1px solid var(--ts-line-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden', position: 'relative' }}>
+                            {userProfile.avatarUrl ? (
+                                <img
+                                    src={userProfile.avatarUrl}
+                                    alt={userProfile.username}
+                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                />
+                            ) : (
+                                <span style={{ fontFamily: 'var(--ts-font-display)', fontSize: 22, color: 'var(--ts-amber)' }}>
+                                    {userProfile.username.substring(0, 2).toUpperCase()}
+                                </span>
+                            )}
                         </div>
 
                         {/* Name + member since */}
                         <div>
                             {isEditing ? (
-                                <input
-                                    type="text"
-                                    name="username"
-                                    value={formData.username}
-                                    onChange={handleInputChange}
-                                    className="ts-input"
-                                    style={{ fontSize: 18, padding: '4px 10px', width: 'auto' }}
-                                />
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                    <input
+                                        type="text"
+                                        name="username"
+                                        value={formData.username}
+                                        onChange={handleInputChange}
+                                        className="ts-input"
+                                        style={{ fontSize: 18, padding: '4px 10px', width: 'auto' }}
+                                    />
+                                    <input
+                                        type="url"
+                                        name="avatarUrl"
+                                        value={formData.avatarUrl}
+                                        onChange={handleInputChange}
+                                        placeholder="Avatar image URL (optional)"
+                                        className="ts-input"
+                                        style={{ fontSize: 12, padding: '4px 10px', width: 260 }}
+                                    />
+                                </div>
                             ) : (
                                 <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 28, color: 'var(--ts-ink)', lineHeight: 1.1 }}>
                                     {userProfile.username}
@@ -546,6 +592,25 @@ const UserProfilePage = () => {
                 </div>
             </header>
 
+            {/* ── Email verification banner ──────────────────────────── */}
+            {user?.email && !user.email_verified && (
+                <div style={{ background: 'rgba(255,180,0,0.08)', borderBottom: '1px solid rgba(255,180,0,0.3)', padding: '10px 32px' }}>
+                    <div style={{ maxWidth: 1280, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                        <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 10, color: 'var(--ts-amber)', letterSpacing: '0.1em' }}>
+                            Your email address is unverified. Check your inbox for a verification link.
+                        </div>
+                        <button
+                            onClick={handleResendVerification}
+                            disabled={resendStatus !== 'idle'}
+                            className="ts-btn ts-btn-sm"
+                            style={{ borderColor: 'var(--ts-amber)', color: 'var(--ts-amber)', opacity: resendStatus !== 'idle' ? 0.6 : 1 }}
+                        >
+                            {resendStatus === 'idle' ? 'Resend link' : resendStatus === 'sending' ? 'Sending...' : 'Sent'}
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* ── Main Content ───────────────────────────────────────── */}
             <main style={{ maxWidth: 1280, margin: '0 auto', padding: '40px 32px' }}>
                 <Tabs defaultValue="decks" className="w-full" onValueChange={setSelectedTab}>
@@ -577,8 +642,14 @@ const UserProfilePage = () => {
                                 <button onClick={loadData} className="ts-btn ts-btn-sm" style={{ alignSelf: 'flex-start', marginTop: 4 }}>Retry</button>
                             </div>
                         ) : isPageLoading ? (
-                            <div style={{ textAlign: 'center', padding: '64px 0', fontFamily: 'var(--ts-font-mono)', fontSize: 11, letterSpacing: '0.2em', color: 'var(--ts-ink-3)' }}>
-                                LOADING…
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 20 }}>
+                                {Array.from({ length: 6 }).map((_, i) => (
+                                    <div key={i} style={{ border: '1px solid var(--ts-line)', padding: 16, background: 'var(--ts-bg-2)' }}>
+                                        <div className="ts-skeleton" style={{ height: 14, width: '60%', marginBottom: 10 }} />
+                                        <div className="ts-skeleton" style={{ height: 9, width: '35%', marginBottom: 16 }} />
+                                        <div className="ts-skeleton" style={{ height: 80 }} />
+                                    </div>
+                                ))}
                             </div>
                         ) : decks.length > 0 ? (
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 20 }}>
@@ -642,8 +713,15 @@ const UserProfilePage = () => {
                                 <button onClick={loadData} className="ts-btn ts-btn-sm" style={{ alignSelf: 'flex-start', marginTop: 4 }}>Retry</button>
                             </div>
                         ) : isPageLoading ? (
-                            <div style={{ textAlign: 'center', padding: '64px 0', fontFamily: 'var(--ts-font-mono)', fontSize: 11, letterSpacing: '0.2em', color: 'var(--ts-ink-3)' }}>
-                                LOADING…
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 12 }}>
+                                {Array.from({ length: 24 }).map((_, i) => (
+                                    <div key={i} style={{ border: '1px solid var(--ts-line)', overflow: 'hidden' }}>
+                                        <div className="ts-skeleton" style={{ aspectRatio: '2/3', width: '100%' }} />
+                                        <div style={{ padding: '6px 8px', background: 'var(--ts-bg-2)' }}>
+                                            <div className="ts-skeleton" style={{ height: 9, width: '65%' }} />
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         ) : filteredCollection.length > 0 ? (
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 12 }}>

@@ -22,6 +22,8 @@ from src.auth.auth import (
     UserResponse,
     authenticate_user,
     create_access_token,
+    create_email_verification_token,
+    consume_email_verification_token,
     create_password_reset_token,
     consume_password_reset_token,
     get_current_user,
@@ -76,6 +78,44 @@ def _send_password_reset_email(to_email: str, token: str) -> bool:
         return True
     except Exception as exc:
         logger.error("Failed to send password reset email: %s", exc)
+        return False
+
+
+def _send_verification_email(to_email: str, token: str) -> bool:
+    """Send an email verification link. Uses the same SMTP config as password reset."""
+    smtp_user = os.environ.get("SMTP_USER")
+    smtp_password = os.environ.get("SMTP_PASSWORD")
+    if not smtp_user or not smtp_password:
+        logger.warning("SMTP not configured — skipping verification email")
+        return False
+
+    smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    from_addr = os.environ.get("SMTP_FROM", smtp_user)
+    base_url = os.environ.get("APP_BASE_URL", "http://localhost:3000").rstrip("/")
+    verify_link = f"{base_url}/verify-email?token={token}"
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = "Twin Suns — Verify your email"
+    msg["From"] = from_addr
+    msg["To"] = to_email
+    html = (
+        f"<p>Welcome to Twin Suns! Please verify your email address.</p>"
+        f"<p><a href=\"{verify_link}\">Click here to verify your email</a></p>"
+        f"<p>This link expires in 24 hours.</p>"
+        f"<p style=\"font-size:11px;color:#888\">Or copy this URL: {verify_link}</p>"
+    )
+    msg.attach(MIMEText(html, "html"))
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.sendmail(smtp_user, to_email, msg.as_string())
+        return True
+    except Exception as exc:
+        logger.error("Failed to send verification email: %s", exc)
         return False
 
 
@@ -153,11 +193,31 @@ async def register_user(
         email=user_data.email,
         password_hash=get_password_hash(user_data.password),
         token_version=0,
+        email_verified=False,
     )
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    return {"id": db_user.id, "username": db_user.username, "email": db_user.email, "created_at": db_user.created_at}
+
+    # Send verification email if address was provided
+    verification_token = None
+    if db_user.email:
+        verification_token = create_email_verification_token(db, db_user)
+        sent = _send_verification_email(db_user.email, verification_token)
+        if not sent:
+            # SMTP not configured — include token in response for dev
+            logger.info("SMTP not configured; verification token for %s: %s", db_user.username, verification_token)
+
+    response = {
+        "id": db_user.id,
+        "username": db_user.username,
+        "email": db_user.email,
+        "email_verified": db_user.email_verified,
+        "created_at": db_user.created_at,
+    }
+    if verification_token:
+        response["verification_token"] = verification_token
+    return response
 
 
 @router.post("/logout")
@@ -172,7 +232,7 @@ async def logout(
 
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(current_user: Annotated[User, Depends(get_current_user)]):
-    return {"id": current_user.id, "username": current_user.username, "email": current_user.email, "created_at": current_user.created_at}
+    return {"id": current_user.id, "username": current_user.username, "email": current_user.email, "avatar_url": current_user.avatar_url, "email_verified": current_user.email_verified or False, "created_at": current_user.created_at}
 
 
 @router.post("/password-reset-request")
@@ -210,3 +270,35 @@ async def password_reset_confirm(
     if not success:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token")
     return {"detail": "Password updated. Please log in again."}
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+@router.post("/verify-email")
+async def verify_email(
+    body: VerifyEmailRequest,
+    db: Annotated[Session, Depends(get_app_db)],
+):
+    success = consume_email_verification_token(db, body.token)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification link")
+    return {"detail": "Email verified. You can now log in."}
+
+
+class ResendVerificationRequest(BaseModel):
+    username: str
+
+@router.post("/resend-verification")
+async def resend_verification(
+    body: ResendVerificationRequest,
+    db: Annotated[Session, Depends(get_app_db)],
+    _: None = Depends(_check_auth_rate_limit),
+):
+    """Re-send a verification email. Always returns 200 to avoid enumeration."""
+    user = db.query(User).filter(User.username == body.username).first()
+    if not user or not user.email or user.email_verified:
+        return {"detail": "If that account exists and needs verification, a new link has been sent."}
+    token = create_email_verification_token(db, user)
+    _send_verification_email(user.email, token)
+    return {"detail": "If that account exists and needs verification, a new link has been sent."}

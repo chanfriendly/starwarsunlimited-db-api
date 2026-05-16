@@ -51,6 +51,8 @@ export default function CardBrowser() {
   const [types, setTypes] = useState<string[]>([]);
   const [keywords, setKeywords] = useState<string[]>([]);
   const [sets, setSets] = useState<string[]>([]);
+  // Maps canonical display name → all DB set names it covers (for weekly-play merging)
+  const [setExpansionMap, setSetExpansionMap] = useState<Map<string, string[]>>(new Map());
   const [userCollection, setUserCollection] = useState<Set<string>>(new Set());
   const [userCollectionCounts, setUserCollectionCounts] = useState<Map<string, number>>(new Map());
   const [showOnlyOwned, setShowOnlyOwned] = useState(false);
@@ -102,11 +104,24 @@ export default function CardBrowser() {
             ? keywordsData.map((i: KeywordResponse | string) => (typeof i === 'string' ? i : i.keyword))
             : []
         );
-        setSets(
-          Array.isArray(setsData)
-            ? setsData.map((i: SetResponse | string) => (typeof i === 'string' ? i : i.set_name))
-            : []
-        );
+        if (Array.isArray(setsData)) {
+          const allSetNames = setsData.map((i: SetResponse | string) => (typeof i === 'string' ? i : i.set_name));
+          const allSetNamesSet = new Set(allSetNames);
+          const expansion = new Map<string, string[]>();
+          const displayNames: string[] = [];
+          for (const name of allSetNames) {
+            const weeklyPlay = `${name} Weekly Play`;
+            if (name.endsWith(' Weekly Play')) continue; // handled by parent
+            if (allSetNamesSet.has(weeklyPlay)) {
+              expansion.set(name, [name, weeklyPlay]);
+            } else {
+              expansion.set(name, [name]);
+            }
+            displayNames.push(name);
+          }
+          setSets(displayNames);
+          setSetExpansionMap(expansion);
+        }
         setFilterOptionsLoaded(true);
       } catch {
         if (!isUnmounted.current) {
@@ -182,7 +197,9 @@ export default function CardBrowser() {
           costMin: searchFilters.costMin || undefined,
           costMax: searchFilters.costMax || undefined,
           keyword: searchFilters.keywords.length > 0 ? searchFilters.keywords.join(',') : undefined,
-          set: searchFilters.sets.length > 0 ? searchFilters.sets.join(',') : undefined,
+          set: searchFilters.sets.length > 0
+            ? searchFilters.sets.flatMap(s => setExpansionMap.get(s) ?? [s]).join(',')
+            : undefined,
           sort: sortOrder,
           structured: true,
         };
@@ -462,21 +479,16 @@ export default function CardBrowser() {
 
           {/* Card grid */}
           {loading && !showOnlyOwned ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '64px 0' }}>
-              <div>
-                <div
-                  style={{
-                    width: 28,
-                    height: 28,
-                    border: '2px solid var(--ts-line-2)',
-                    borderTopColor: 'var(--ts-amber)',
-                    borderRadius: '50%',
-                    animation: 'spin 0.8s linear infinite',
-                    margin: '0 auto 12px',
-                  }}
-                />
-                <div className="ts-eyebrow" style={{ textAlign: 'center' }}>Loading…</div>
-              </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 }}>
+              {Array.from({ length: 24 }).map((_, i) => (
+                <div key={i} style={{ border: '1px solid var(--ts-line)', overflow: 'hidden' }}>
+                  <div className="ts-skeleton" style={{ aspectRatio: '2/3', width: '100%' }} />
+                  <div style={{ padding: '6px 8px', background: 'var(--ts-bg-2)' }}>
+                    <div className="ts-skeleton" style={{ height: 10, width: '70%', marginBottom: 4 }} />
+                    <div className="ts-skeleton" style={{ height: 8, width: '45%' }} />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : showOnlyOwned && collectionCards.length === 0 ? (
             <div style={{ padding: '64px 0', textAlign: 'center' }}>
@@ -554,14 +566,6 @@ export default function CardBrowser() {
         </div>
       )}
 
-      {/* Spinner keyframe */}
-      <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @media (min-width: 1280px) {
-          .xl-show { display: block !important; }
-          .xl-hide { display: none !important; }
-        }
-      `}</style>
     </div>
   );
 }

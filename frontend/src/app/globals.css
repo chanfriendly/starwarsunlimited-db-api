@@ -484,3 +484,22 @@ a { color: inherit; }
   .ts-nav-desktop { display: none; }
   .ts-nav-hamburger { display: flex; align-items: center; justify-content: center; }
 }
+
+/* Cards page — sidebar visibility */
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (min-width: 1280px) {
+  .xl-show { display: block !important; }
+  .xl-hide { display: none !important; }
+}
+
+/* Skeleton shimmer */
+@keyframes ts-shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.ts-skeleton {
+  background: linear-gradient(90deg, var(--ts-bg-2) 25%, var(--ts-bg-3) 50%, var(--ts-bg-2) 75%);
+  background-size: 800px 100%;
+  animation: ts-shimmer 1.4s ease-in-out infinite;
+  border-radius: 2px;
+}

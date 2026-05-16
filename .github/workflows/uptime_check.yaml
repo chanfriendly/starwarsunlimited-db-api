@@ -1,0 +1,39 @@
+name: Uptime Check
+
+on:
+  schedule:
+    # Every 15 minutes
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check /health endpoint
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 https://twinsuns.chanfriendly.duckdns.org/health)
+          echo "HTTP status: $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "UNHEALTHY — got $STATUS"
+            exit 1
+          fi
+          echo "OK"
+
+      - name: Send alert on failure
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "🔴 Twin Suns is DOWN"
+          to: ${{ secrets.ALERT_EMAIL }}
+          from: ${{ secrets.SMTP_USER }}
+          body: |
+            The Twin Suns healthcheck failed at ${{ github.run_id }}.
+
+            URL: https://twinsuns.chanfriendly.duckdns.org/health
+
+            Check Portainer or the TrueNAS Docker stack.

@@ -15,6 +15,8 @@ class User(Base):
     updated_at = Column(DateTime, onupdate=datetime.datetime.utcnow)
     # Increment to invalidate all existing tokens for this user (logout-all / password-reset)
     token_version = Column(Integer, default=0, nullable=False, server_default='0')
+    avatar_url = Column(String, nullable=True)
+    email_verified = Column(Boolean, default=False, nullable=False, server_default='0')
 
     decks = relationship("Deck", back_populates="user", cascade="all, delete-orphan")
     collection = relationship("UserCollection", back_populates="user", cascade="all, delete-orphan")
@@ -22,6 +24,15 @@ class User(Base):
 
 class PasswordResetToken(Base):
     __tablename__ = 'password_reset_tokens'
+
+    token = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, ForeignKey('users.id'), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class EmailVerificationToken(Base):
+    __tablename__ = 'email_verification_tokens'
 
     token = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String, ForeignKey('users.id'), nullable=False)

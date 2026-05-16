@@ -2,10 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { ApiCard } from '@/lib/api';
-import { Button } from '@/components/ui/button';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
 
-// Define the alternate art structure based on backend grouping
 interface AlternateArt {
   id: string;
   image_uri: string;
@@ -16,7 +13,6 @@ interface AlternateArt {
   artist: string;
 }
 
-// Extend ApiCard to include the alternate_arts that gets added by backend grouping
 interface GroupedApiCard extends ApiCard {
   alternate_arts?: AlternateArt[];
 }
@@ -30,6 +26,11 @@ interface CardDetailProps {
   currentStage?: 'leaders' | 'base' | 'cards';
 }
 
+const ASPECT_COLORS: Record<string, string> = {
+  Command: '#c2453a', Aggression: '#d96f2d', Cunning: '#e2b342',
+  Heroism: '#ead7a8', Vigilance: '#4a90c4', Villainy: '#2c2a26',
+};
+
 export function CardDetail({
   card,
   onAddToDeck,
@@ -41,223 +42,116 @@ export function CardDetail({
   const [showBackSide, setShowBackSide] = useState(false);
   const [selectedArtIndex, setSelectedArtIndex] = useState(0);
 
-  // Reset art selection when card changes
   useEffect(() => {
     setSelectedArtIndex(0);
     setShowBackSide(false);
   }, [card?.id]);
 
-  // Create array of all available art variants (main card + alternates)
   const allArtVariants = useMemo(() => {
     if (!card) return [];
-    
-    const variants = [
-      // Main card as first variant
-      {
-        id: card.id,
-        image_uri: card.image_uri,
-        set_name: card.set_name,
-        set_code: card.set_code,
-        card_number: card.card_number,
-        rarity: card.rarity,
-        artist: card.artist,
-        isMainCard: true,
-      },
-      // Add alternate arts
-      ...(card.alternate_arts || []).map(art => ({
-        ...art,
-        isMainCard: false,
-      }))
+    return [
+      { id: card.id, image_uri: card.image_uri, set_name: card.set_name, set_code: card.set_code, card_number: card.card_number, rarity: card.rarity, artist: card.artist },
+      ...(card.alternate_arts || []),
     ];
-    
-    return variants;
   }, [card]);
 
-  // Get currently displayed card data (main card properties + selected art's image)
   const displayCard = useMemo(() => {
     if (!card || allArtVariants.length === 0) return null;
-    
-    const selectedArt = allArtVariants[selectedArtIndex];
-    
-    return {
-      ...card, // Use main card's data for everything except image
-      image_uri: selectedArt.image_uri, // Override with selected art's image
-      set_name: selectedArt.set_name,
-      set_code: selectedArt.set_code,
-      artist: selectedArt.artist,
-      rarity: selectedArt.rarity,
-    };
+    const art = allArtVariants[selectedArtIndex];
+    return { ...card, image_uri: art.image_uri, set_name: art.set_name, set_code: art.set_code, artist: art.artist, rarity: art.rarity };
   }, [card, allArtVariants, selectedArtIndex]);
 
-  // Navigation functions
-  const navigateToPreviousArt = () => {
-    setSelectedArtIndex(prev => 
-      prev === 0 ? allArtVariants.length - 1 : prev - 1
-    );
-  };
+  const navigatePrev = () => setSelectedArtIndex(i => i === 0 ? allArtVariants.length - 1 : i - 1);
+  const navigateNext = () => setSelectedArtIndex(i => i === allArtVariants.length - 1 ? 0 : i + 1);
 
-  const navigateToNextArt = () => {
-    setSelectedArtIndex(prev => 
-      prev === allArtVariants.length - 1 ? 0 : prev + 1
-    );
-  };
+  const canFlip = !!(displayCard?.image_back_uri);
+  const hasMultipleArts = allArtVariants.length > 1;
 
-  // Only allow flipping for cards with a back side (mainly Leaders)
-  const canFlip = displayCard?.image_back_uri !== undefined && displayCard?.image_back_uri !== null;
-  
   if (!displayCard) {
     return (
-      <div className="flex flex-col items-center justify-center h-full p-6">
-        <div className="w-16 h-16 rounded-full bg-gray-800 mb-4 flex items-center justify-center">
-          <svg 
-            className="w-8 h-8 text-gray-400" 
-            fill="none" 
-            stroke="currentColor" 
-            viewBox="0 0 24 24"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <path 
-              strokeLinecap="round" 
-              strokeLinejoin="round" 
-              strokeWidth={2} 
-              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" 
-            />
-          </svg>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '24px', textAlign: 'center' }}>
+        <div style={{ width: 48, height: 48, border: '1px solid var(--ts-line-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+          <span style={{ fontFamily: 'var(--ts-font-display)', fontSize: 24, color: 'var(--ts-ink-4)' }}>?</span>
         </div>
-        <h3 className="text-lg font-medium mb-2">No Card Selected</h3>
-        <p className="text-gray-400 text-center">
+        <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 20, color: 'var(--ts-ink-3)', marginBottom: 8 }}>No Card Selected</div>
+        <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 10, color: 'var(--ts-ink-4)', letterSpacing: '0.12em' }}>
           Select a card to view its details
-        </p>
+        </div>
       </div>
     );
   }
 
   const currentImage = showBackSide && displayCard.image_back_uri ? displayCard.image_back_uri : displayCard.image_uri;
-  const hasMultipleArts = allArtVariants.length > 1;
 
-  // Function to get the appropriate button text based on the card's stage and status
-  const getButtonText = () => {
-    if (isInDeck) {
-      return `Remove ${currentStage === 'leaders' ? 'Leader' : currentStage === 'base' ? 'Base' : 'Card'}`;
-    }
-
-    if (!isCompatible) {
-      return 'Incompatible with Deck';
-    }
-
-    if (currentStage === 'base' && displayCard.type !== 'Base') {
-      return 'Not a Base Card';
-    }
-
-    return `Add as ${currentStage === 'leaders' ? 'Leader' : currentStage === 'base' ? 'Base' : 'Card'}`;
-  };
-
-  const isButtonDisabled = () => {
-    return !isCompatible || (currentStage === 'base' && displayCard.type !== 'Base');
-  };
+  const isDisabled = !isCompatible || (currentStage === 'base' && displayCard.type !== 'Base');
+  const buttonLabel = isInDeck
+    ? `Remove ${currentStage === 'leaders' ? 'Leader' : currentStage === 'base' ? 'Base' : 'Card'}`
+    : !isCompatible ? 'Incompatible with Deck'
+    : currentStage === 'base' && displayCard.type !== 'Base' ? 'Not a Base Card'
+    : `Add as ${currentStage === 'leaders' ? 'Leader' : currentStage === 'base' ? 'Base' : 'Card'}`;
 
   return (
-    <div className="flex flex-col items-center p-6 h-full overflow-y-auto">
-      {/* Card Image Section */}
-      <div className="relative mb-4">
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '20px 16px', height: '100%', overflowY: 'auto' }}>
+
+      {/* Card image */}
+      <div style={{ position: 'relative', width: '100%', maxWidth: 220, marginBottom: 16 }}>
         <div
-          className={`relative ${
-            onAddToDeck && onRemoveFromDeck && !isButtonDisabled() 
-              ? 'cursor-pointer' : ''
-          }`}
+          style={{ position: 'relative', border: '1px solid var(--ts-line-2)', overflow: 'hidden', cursor: onAddToDeck && !isDisabled ? 'pointer' : 'default' }}
           onClick={() => {
-            if (onAddToDeck && onRemoveFromDeck && displayCard) {
-              if (isInDeck) {
-                onRemoveFromDeck(displayCard.id);
-              } else if (!isButtonDisabled()) {
-                onAddToDeck(displayCard);
-              }
-            }
+            if (!displayCard || !onAddToDeck || !onRemoveFromDeck) return;
+            if (isInDeck) onRemoveFromDeck(displayCard.id);
+            else if (!isDisabled) onAddToDeck(displayCard);
           }}
         >
-          <div className="aspect-[7/10] relative rounded-lg overflow-hidden border border-gray-700">
-            {currentImage ? (
-              <img
-                src={currentImage}
-                alt={`${displayCard.name} ${showBackSide ? '(back)' : '(front)'}`}
-                className="w-full h-full object-contain"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center bg-gray-900">
-                <span className="text-lg text-center p-4">{displayCard.name}</span>
-              </div>
-            )}
-          </div>
-          
-          {/* Flip button for cards with back side */}
+          {currentImage ? (
+            <img src={currentImage} alt={displayCard.name} style={{ width: '100%', display: 'block', aspectRatio: '7/10', objectFit: 'contain', background: 'var(--ts-bg-3)' }} />
+          ) : (
+            <div style={{ aspectRatio: '7/10', background: 'var(--ts-bg-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+              <span style={{ fontFamily: 'var(--ts-font-display)', fontSize: 16, color: 'var(--ts-ink-3)', textAlign: 'center' }}>{displayCard.name}</span>
+            </div>
+          )}
+
+          {/* Flip button */}
           {canFlip && (
-            <button 
-              className="absolute top-2 right-2 p-2 bg-purple-500 rounded-full text-white hover:bg-purple-600 transition-colors"
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowBackSide(!showBackSide);
-              }}
-              title={showBackSide ? "Show front side" : "Show back side"}
+            <button
+              onClick={e => { e.stopPropagation(); setShowBackSide(b => !b); }}
+              title={showBackSide ? 'Show front' : 'Show back'}
+              style={{ position: 'absolute', top: 6, right: 6, width: 28, height: 28, background: 'rgba(0,0,0,0.75)', border: '1px solid var(--ts-amber)', color: 'var(--ts-amber)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 13 }}
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
+              ↺
             </button>
           )}
 
-          {/* Art Navigation Controls */}
+          {/* Art variant counter */}
+          {hasMultipleArts && (
+            <div style={{ position: 'absolute', top: 6, left: 6, background: 'rgba(0,0,0,0.8)', padding: '2px 7px', fontFamily: 'var(--ts-font-mono)', fontSize: 9, color: 'var(--ts-ink-2)', letterSpacing: '0.08em' }}>
+              {selectedArtIndex + 1} / {allArtVariants.length}
+              {allArtVariants[selectedArtIndex].set_code && ` · ${allArtVariants[selectedArtIndex].set_code}`}
+            </div>
+          )}
+
+          {/* Art nav arrows */}
           {hasMultipleArts && (
             <>
-              {/* Art counter and info */}
-              <div className="absolute top-2 left-2 bg-black/80 text-white text-xs px-2 py-1 rounded-lg flex items-center gap-2">
-                <span>{selectedArtIndex + 1} / {allArtVariants.length}</span>
-                {allArtVariants[selectedArtIndex].set_code && (
-                  <span className="text-gray-300">
-                    ({allArtVariants[selectedArtIndex].set_code})
-                  </span>
-                )}
-              </div>
+              <button
+                onClick={e => { e.stopPropagation(); navigatePrev(); }}
+                style={{ position: 'absolute', left: 4, top: '50%', transform: 'translateY(-50%)', width: 26, height: 26, background: 'rgba(0,0,0,0.75)', border: '1px solid var(--ts-line-2)', color: 'var(--ts-ink-2)', cursor: 'pointer', fontFamily: 'var(--ts-font-mono)', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                title="Previous art"
+              >‹</button>
+              <button
+                onClick={e => { e.stopPropagation(); navigateNext(); }}
+                style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)', width: 26, height: 26, background: 'rgba(0,0,0,0.75)', border: '1px solid var(--ts-line-2)', color: 'var(--ts-ink-2)', cursor: 'pointer', fontFamily: 'var(--ts-font-mono)', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                title="Next art"
+              >›</button>
 
-              {/* Navigation arrows */}
-              <div className="absolute inset-y-0 left-0 right-0 flex items-center justify-between px-2 pointer-events-none">
-                <button
-                  className="p-2 bg-black/70 rounded-full text-white hover:bg-black/90 transition-colors pointer-events-auto"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    navigateToPreviousArt();
-                  }}
-                  title="Previous art variant"
-                >
-                  <ChevronLeft className="w-5 h-5" />
-                </button>
-                
-                <button
-                  className="p-2 bg-black/70 rounded-full text-white hover:bg-black/90 transition-colors pointer-events-auto"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    navigateToNextArt();
-                  }}
-                  title="Next art variant"
-                >
-                  <ChevronRight className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Art variant indicator dots */}
-              <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex space-x-1">
-                {allArtVariants.map((_, index) => (
+              {/* Dot indicators */}
+              <div style={{ position: 'absolute', bottom: 6, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 4 }}>
+                {allArtVariants.map((_, i) => (
                   <button
-                    key={index}
-                    className={`w-2 h-2 rounded-full transition-colors ${
-                      index === selectedArtIndex 
-                        ? 'bg-white' 
-                        : 'bg-white/50 hover:bg-white/70'
-                    }`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedArtIndex(index);
-                    }}
-                    title={`Art variant ${index + 1}`}
+                    key={i}
+                    onClick={e => { e.stopPropagation(); setSelectedArtIndex(i); }}
+                    style={{ width: 7, height: 7, borderRadius: '50%', background: i === selectedArtIndex ? 'var(--ts-amber)' : 'rgba(255,255,255,0.3)', border: 'none', cursor: 'pointer', padding: 0 }}
+                    title={`Art ${i + 1}`}
                   />
                 ))}
               </div>
@@ -265,113 +159,111 @@ export function CardDetail({
           )}
         </div>
       </div>
-        
-      {/* Card Information */}
-      <h2 className="text-xl font-bold mb-1">{displayCard.name}</h2>
-      {displayCard.subtitle && (
-        <p className="text-gray-400 mb-2">{displayCard.subtitle}</p>
-      )}
-      
+
+      {/* Name + subtitle */}
+      <div style={{ textAlign: 'center', marginBottom: 12, width: '100%' }}>
+        <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 20, color: 'var(--ts-ink)', lineHeight: 1.15 }}>{displayCard.name}</div>
+        {displayCard.subtitle && (
+          <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, color: 'var(--ts-ink-3)', letterSpacing: '0.14em', textTransform: 'uppercase', marginTop: 4 }}>{displayCard.subtitle}</div>
+        )}
+      </div>
+
       {/* Aspects */}
-      <div className="flex flex-wrap gap-2 mb-4 justify-center">
-        {displayCard.aspects?.map((aspect: any) => (
-          <div 
-            key={aspect.aspect_name}
-            className="px-2 py-1 text-xs rounded-full"
-            style={{
-              backgroundColor: `${aspect.aspect_color}30`,
-              color: aspect.aspect_color,
-              border: `1px solid ${aspect.aspect_color}`
-            }}
-          >
-            {aspect.aspect_name}
-          </div>
-        ))}
-      </div>
-      
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-4 bg-gray-800/50 p-3 rounded-lg w-full max-w-xs">
-        {displayCard.energy_cost !== undefined && (
-          <div className="text-center">
-            <p className="text-xs text-gray-400">Cost</p>
-            <p className="text-lg font-bold text-amber-400">{displayCard.energy_cost}</p>
-          </div>
-        )}
-        {displayCard.attack !== undefined && (
-          <div className="text-center">
-            <p className="text-xs text-gray-400">Attack</p>
-            <p className="text-lg font-bold text-red-400">{displayCard.attack}</p>
-          </div>
-        )}
-        {displayCard.health !== undefined && (
-          <div className="text-center">
-            <p className="text-xs text-gray-400">Health</p>
-            <p className="text-lg font-bold text-green-400">{displayCard.health}</p>
-          </div>
-        )}
-      </div>
-      
-      {/* Card Text */}
-      {displayCard.text && (
-        <div className="mb-4 w-full max-w-xs">
-          <h3 className="text-sm font-medium mb-1">Card Text</h3>
-          <p className="text-sm text-gray-300 whitespace-pre-line">{displayCard.text}</p>
+      {displayCard.aspects && displayCard.aspects.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', marginBottom: 14 }}>
+          {displayCard.aspects.map((a: any) => {
+            const color = a.aspect_color || ASPECT_COLORS[a.aspect_name] || 'var(--ts-ink-3)';
+            return (
+              <div key={a.aspect_name} style={{ padding: '3px 10px', border: `1px solid ${color}`, color, fontFamily: 'var(--ts-font-mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', background: `${color}18` }}>
+                {a.aspect_name}
+              </div>
+            );
+          })}
         </div>
       )}
-      
+
+      {/* Stats */}
+      {(displayCard.energy_cost != null || displayCard.attack != null || displayCard.health != null) && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 14, width: '100%', maxWidth: 220, background: 'var(--ts-bg-3)', border: '1px solid var(--ts-line)', padding: '10px 8px' }}>
+          {displayCard.energy_cost != null && (
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 8, color: 'var(--ts-ink-4)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 2 }}>Cost</div>
+              <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 20, color: 'var(--ts-amber)', lineHeight: 1 }}>{displayCard.energy_cost}</div>
+            </div>
+          )}
+          {displayCard.attack != null && (
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 8, color: 'var(--ts-ink-4)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 2 }}>Atk</div>
+              <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 20, color: 'var(--ts-red)', lineHeight: 1 }}>{displayCard.attack}</div>
+            </div>
+          )}
+          {displayCard.health != null && (
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 8, color: 'var(--ts-ink-4)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 2 }}>HP</div>
+              <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 20, color: 'var(--ts-green)', lineHeight: 1 }}>{displayCard.health}</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Card text */}
+      {displayCard.text && (
+        <div style={{ width: '100%', maxWidth: 220, marginBottom: 14 }}>
+          <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 8, color: 'var(--ts-ink-4)', letterSpacing: '0.16em', textTransform: 'uppercase', marginBottom: 6 }}>Card Text</div>
+          <div style={{ fontFamily: 'var(--ts-font-body)', fontSize: 11, color: 'var(--ts-ink-2)', lineHeight: 1.6, whiteSpace: 'pre-line' }}>{displayCard.text}</div>
+        </div>
+      )}
+
       {/* Keywords */}
       {displayCard.keywords && displayCard.keywords.length > 0 && (
-        <div className="mb-4 w-full max-w-xs">
-          <h3 className="text-sm font-medium mb-1">Keywords</h3>
-          <div className="flex flex-wrap gap-2">
-            {displayCard.keywords.map((keyword: any) => (
-              <span 
-                key={keyword}
-                className="text-xs px-2 py-1 bg-purple-900/30 border border-purple-700 text-purple-300 rounded-full"
-              >
-                {keyword}
+        <div style={{ width: '100%', maxWidth: 220, marginBottom: 14 }}>
+          <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 8, color: 'var(--ts-ink-4)', letterSpacing: '0.16em', textTransform: 'uppercase', marginBottom: 6 }}>Keywords</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {displayCard.keywords.map((kw: any) => (
+              <span key={kw} style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, letterSpacing: '0.1em', color: 'var(--ts-ink-3)', border: '1px solid var(--ts-line-2)', padding: '2px 8px' }}>
+                {kw}
               </span>
             ))}
           </div>
         </div>
       )}
 
-      {/* Current Art Information */}
+      {/* Current art info */}
       {hasMultipleArts && (
-        <div className="mb-4 w-full max-w-xs">
-          <h3 className="text-sm font-medium mb-1">Current Art</h3>
-          <div className="text-xs text-gray-400 space-y-1">
-            <p><span className="text-gray-300">Set:</span> {displayCard.set_name}</p>
-            {displayCard.artist && (
-              <p><span className="text-gray-300">Artist:</span> {displayCard.artist}</p>
-            )}
-            <p><span className="text-gray-300">Rarity:</span> {displayCard.rarity}</p>
+        <div style={{ width: '100%', maxWidth: 220, marginBottom: 14 }}>
+          <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 8, color: 'var(--ts-ink-4)', letterSpacing: '0.16em', textTransform: 'uppercase', marginBottom: 6 }}>Current Art</div>
+          <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 10, color: 'var(--ts-ink-3)', lineHeight: 1.8 }}>
+            <span style={{ color: 'var(--ts-ink-2)' }}>Set: </span>{displayCard.set_name}<br />
+            {displayCard.artist && <><span style={{ color: 'var(--ts-ink-2)' }}>Artist: </span>{displayCard.artist}<br /></>}
+            <span style={{ color: 'var(--ts-ink-2)' }}>Rarity: </span>{displayCard.rarity}
           </div>
         </div>
       )}
-      
-      {/* Action Button */}
+
+      {/* Action button */}
       {onAddToDeck && onRemoveFromDeck && (
-        <div className="mt-4 w-full max-w-xs">
-          <Button
+        <div style={{ width: '100%', maxWidth: 220, marginTop: 8 }}>
+          <button
             onClick={() => {
-              if (isInDeck) {
-                onRemoveFromDeck(displayCard.id);
-              } else if (!isButtonDisabled()) {
-                onAddToDeck(displayCard);
-              }
+              if (isInDeck) onRemoveFromDeck(displayCard.id);
+              else if (!isDisabled) onAddToDeck(displayCard);
             }}
-            disabled={isButtonDisabled()}
-            className={`w-full ${
-              isInDeck
-                ? 'bg-red-600 hover:bg-red-700 text-white'
-                : isButtonDisabled()
-                ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                : 'bg-purple-600 hover:bg-purple-700 text-white'
-            }`}
+            disabled={isDisabled}
+            className="ts-btn"
+            style={{
+              width: '100%',
+              justifyContent: 'center',
+              fontSize: 9,
+              letterSpacing: '0.2em',
+              padding: '11px 16px',
+              borderColor: isInDeck ? 'var(--ts-red)' : isDisabled ? 'var(--ts-line-2)' : 'var(--ts-amber)',
+              color: isInDeck ? 'var(--ts-red)' : isDisabled ? 'var(--ts-ink-4)' : 'var(--ts-amber)',
+              opacity: isDisabled ? 0.5 : 1,
+              cursor: isDisabled ? 'not-allowed' : 'pointer',
+            }}
           >
-            {getButtonText()}
-          </Button>
+            {buttonLabel.toUpperCase()}
+          </button>
         </div>
       )}
     </div>

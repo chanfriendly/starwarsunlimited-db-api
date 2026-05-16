@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
-from typing import List, Annotated
+from typing import List, Annotated, Optional
+from pydantic import BaseModel
 import uuid
 from src.database.db import get_app_db, get_card_db
 from src.database.models import User, Deck, DeckCard, Card, UserCollection, UserWishlist
@@ -355,6 +356,11 @@ async def create_user_deck(
         
         # Extract deck components
         deck_name = deck_data.get('name', 'New Deck')
+        if not deck_name or not deck_name.strip():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Deck name is required")
+        if len(deck_name) > 100:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Deck name must be 100 characters or fewer")
+        deck_name = deck_name.strip()
         leaders_ids = deck_data.get('leaders', [])
         base_id = deck_data.get('base')
         cards_data = deck_data.get('cards', [])
@@ -489,6 +495,11 @@ async def update_user_deck(
 
         deck_data = await request.json()
         deck_name = deck_data.get("name", deck.name)
+        if not deck_name or not deck_name.strip():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Deck name is required")
+        if len(deck_name) > 100:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Deck name must be 100 characters or fewer")
+        deck_name = deck_name.strip()
         leaders_ids = deck_data.get("leaders", [])
         base_id = deck_data.get("base")
         cards_data = deck_data.get("cards", [])
@@ -827,6 +838,35 @@ async def remove_from_wishlist(
             detail="Failed to remove from wishlist"
         )
 
+
+class ProfileUpdate(BaseModel):
+    avatar_url: Optional[str] = None
+
+@router.patch("/profile", status_code=status.HTTP_200_OK)
+async def update_profile(
+    data: ProfileUpdate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_app_db)]
+):
+    """Update the authenticated user's profile fields."""
+    try:
+        if data.avatar_url is not None:
+            current_user.avatar_url = data.avatar_url or None
+        db.commit()
+        return {
+            "id": current_user.id,
+            "username": current_user.username,
+            "email": current_user.email,
+            "avatar_url": current_user.avatar_url,
+            "created_at": current_user.created_at,
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating profile {current_user.id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update profile"
+        )
 
 @router.delete("/account", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_account(

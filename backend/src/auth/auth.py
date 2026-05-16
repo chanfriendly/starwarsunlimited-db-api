@@ -17,7 +17,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-from src.database.models import User, PasswordResetToken
+from src.database.models import User, PasswordResetToken, EmailVerificationToken
 from src.database.db import get_app_db
 
 SECRET_KEY = os.getenv("JWT_SECRET", "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7")
@@ -54,6 +54,8 @@ class UserResponse(BaseModel):
     id: str
     username: str
     email: Optional[str] = None
+    avatar_url: Optional[str] = None
+    email_verified: bool = False
     created_at: datetime
 
 
@@ -131,6 +133,41 @@ def create_user(db: Session, user_data: UserCreate) -> dict:
     db.commit()
     db.refresh(db_user)
     return {"id": db_user.id, "username": db_user.username, "email": db_user.email, "created_at": db_user.created_at}
+
+
+# ── Email verification ───────────────────────────────────────────────────────
+
+EMAIL_VERIFICATION_EXPIRY_HOURS = 24
+
+def create_email_verification_token(db: Session, user: User) -> str:
+    """Create a 24-hour one-time email verification token for the given user."""
+    token_str = str(uuid.uuid4())
+    db.add(EmailVerificationToken(
+        token=token_str,
+        user_id=user.id,
+        expires_at=datetime.utcnow() + timedelta(hours=EMAIL_VERIFICATION_EXPIRY_HOURS),
+        used=False,
+    ))
+    db.commit()
+    return token_str
+
+def consume_email_verification_token(db: Session, token_str: str) -> bool:
+    """Mark email as verified. Returns True on success."""
+    record = db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.token == token_str,
+        EmailVerificationToken.used == False,
+    ).first()
+    if not record:
+        return False
+    if datetime.utcnow() > record.expires_at:
+        return False
+    user = db.query(User).filter(User.id == record.user_id).first()
+    if not user:
+        return False
+    user.email_verified = True
+    record.used = True
+    db.commit()
+    return True
 
 
 # ── Password reset ───────────────────────────────────────────────────────────
