@@ -149,34 +149,15 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 
 **Priority order — top item is immediately actionable:**
 
-1. **[ENHANCEMENT] Cards page sidebar always visible on ≥1280px** — The `.xl-show` CSS class in the page's inline `<style>` works but could be moved to globals.css. Currently hiding via `display: none` with the media query override.
+1. **[SECURITY] Email verification on signup** — No email verification. Anyone can register with any string as their email. Now that Resend is wired in, this is a small addition: generate a verification token at register, send via `_send_password_reset_email`-style call, add a `POST /api/auth/verify-email` endpoint. Low urgency while the app is household-only.
 
-2. **[SECURITY] HTTPS / TLS** — The app runs on plain HTTP at `192.168.1.124:4000`. Auth cookies transmit in cleartext. See Production Readiness Checklist for full detail.
+2. **[ENHANCEMENT] Cards page sidebar CSS cleanup** — The `.xl-show` media query lives in an inline `<style>` block in `cards/page.tsx`. Should be moved to `globals.css`.
 
-3. **[SECURITY] JWT secret in `.env.prod`** — Currently a placeholder, actual value stored in Bitwarden. Good. But `ACCESS_TOKEN_EXPIRE_MINUTES=10080` (7 days) — no refresh token, no revocation. If a token is stolen there is no way to invalidate it.
+3. **[ENHANCEMENT] Deck name input validation** — Username max_length is now 32 via Pydantic. Deck name has no server-side length limit yet. Add `Field(..., max_length=100)` to the deck create/update schema in `me.py`.
 
-4. **[FEATURE] Password reset** — No reset flow exists. Users who forget their password have no recovery path.
+4. **[UX] Loading skeletons** — Card grids flash empty on slow connections. A simple `ts-*`-styled skeleton shimmer would improve perceived performance.
 
-5. **[FEATURE] Email verification on signup** — No email verification. Anyone can register with any username.
-
-0. **[FEATURE] Deck builder redesign + Suggested tab** — *(Session 8, complete)*
-   - **Suggested tab** (◈): synergy-scored cards from all types that share keywords (+2) or traits (+1) with either leader. Sorted by score then cost then name. Opens as the default tab. Shows card type (UNIT/EVENT/UPGRADE) in blue in subtitle. Empty state: "No synergy matches found for these leaders". Verified: 191 matches for Ackbar+Holdo deck.
-
-0b. **[FEATURE] Deck builder redesign: browse-first card discovery** — *(Session 8, complete)*
-   - Replaced flat Load More list with tabbed browse panel: **Units / Events / Upgrades** tabs with count badges
-   - Cards grouped by cost within each tab (sticky "Cost N" headers with separator lines)
-   - Each row: cost number · thumbnail image · name + arena/stats/keywords · aspect pips · +ADD button
-   - All three types fetched in parallel at `limit=1000` on stage entry (no Load More)
-   - **My cards only** collection toggle (loads user collection on stage entry, filters client-side)
-   - Card Type section removed from left FilterSidebar (tabs replace it); all other filters kept
-   - Backend `cards` endpoint limit raised from `le=100` → `le=2000`
-   - Zero TypeScript errors; smoke-tested in browser (218 units / 73 events / 19 upgrades for Ackbar+Holdo deck)
-
-1. **[ENHANCEMENT] Add meaningful test coverage** — ~~Done~~ (session 6): 26 pytest tests in `backend/tests/test_api_endpoints.py` covering auth (7), cards (6), deck CRUD (8), and collection (5). Runs with `cd backend && python -m pytest tests/test_api_endpoints.py`. Key design: env vars set before any src imports so `db.py` initialises with temp SQLite paths, which also fixes the direct `get_card_db()` calls inside route handlers. `pytest==9.0.3` + `httpx==0.27.2` added to `requirements.txt`.
-
-1. **[ENHANCEMENT] GitHub workflow: deploy DB to TrueNAS after rebuild** — ~~Done~~ (session 7+8): All 4 required GitHub secrets (`PORTAINER_URL`, `PORTAINER_USER`, `PORTAINER_PASSWORD`, `PORTAINER_ENDPOINT_ID`) confirmed set as of 2026-05-07. Workflow is fully operational.
-
-2. **[REPO CLEANUP] — DONE** (session 4)
+5. **[FEATURE] Activate Resend in production** — Set `RESEND_API_KEY` and `APP_BASE_URL=https://twinsuns.chanfriendly.duckdns.org` in Portainer env vars and redeploy. Password reset emails will then deliver instead of returning token in response body. Users without an email on their account still get token-in-response — consider prompting them to add one.
 
 ---
 

@@ -4,6 +4,34 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-05-15: Full production readiness pass — security, cleanup, infrastructure
+
+**What changed:**
+
+**Token revocation via `token_version`** — Added an integer column to the `User` table. Logging out (or resetting a password) increments it. JWTs now carry a `tv` claim; `get_current_user` rejects tokens where the claim doesn't match the DB value. This means a stolen session token is invalidated the moment the user logs out. No blocklist needed — a single DB read per request handles it. Startup migration auto-adds the column to existing databases via `PRAGMA table_info` check + `ALTER TABLE ADD COLUMN`.
+
+**JWT expiry reduced 10,080 → 1,440 minutes (7 days → 24 hours)** — Combined with revocation, the worst-case stolen-token window is now 24h and shrinks to zero on explicit logout. `docker-compose.prod.yaml` updated to match.
+
+**`SameSite=strict` on auth cookie** — Prevents the cookie from being sent on cross-site requests, mitigating CSRF attacks against state-mutating endpoints. Also tightened `maxAge` to match the 24h JWT lifetime.
+
+**Authenticated logout with server-side revocation** — The Next.js `/api/auth/logout` route now forwards the token to `POST /api/auth/logout` on the backend (which increments `token_version`) before clearing the cookie. Previously it only cleared the client-side cookie, leaving the JWT valid until expiry.
+
+**Password reset — full stack** — `PasswordResetToken` DB model (UUID primary key, 1h expiry, one-time use). `POST /api/auth/password-reset-request` creates a token; `POST /api/auth/password-reset-confirm` validates, updates the password, and bumps `token_version` to invalidate all existing sessions. Next.js proxy routes added for both. Email delivery via Resend when `RESEND_API_KEY` is set; falls back to token-in-response for dev / users without an email. Frontend: `/forgot-password` and `/reset-password` pages on design system; "Forgot password?" link on login page.
+
+**`DELETE /api/me/account`** — Backend cascades all user data (`Deck`, `DeckCard`, `UserCollection`, `UserWishlist`), bumps `token_version`, returns 204. Next.js proxy at `DELETE /api/me/account` clears the auth cookie on success.
+
+**All 52 `console.log/warn/debug` calls stripped** — Removed from `AuthContext.tsx`, `DeckBuilderContext.tsx`, `profile/page.tsx`, `CardDetailDialog.tsx`, `DeckBuilderClient.tsx`, `Navbar.tsx`, `SaveDeckDialog.tsx`, `lib/api.ts`, and all `src/app/api/**/route.ts` files. `console.error` in catch blocks retained.
+
+**`ErrorBoundary` component** — `src/components/ErrorBoundary.tsx` (React class component with "Try Again" reset). Wraps `{children}` in `layout.tsx` so an unhandled render error shows a styled error panel instead of a blank page.
+
+**Fake data removed** — `SPOTLIGHT` fake deck stats replaced with a "coming soon" placeholder. `STATUS_ITEMS` in Navbar replaced with accurate copy. `COMING_SOON` on home page updated (Collection Tracker and Wishlist removed — they're live now). `defaultUserProfile.username` was `'GalacticGamer77'`; now initializes empty to eliminate the flash before auth resolves.
+
+**Infrastructure (confirmed operational):**
+- HTTPS: Let's Encrypt cert via Nginx Proxy Manager for `twinsuns.chanfriendly.duckdns.org`. TLS 1.3, valid until 2026-07-01.
+- App DB backup cron: `0 3 * * * docker exec twinsuns-backend python /app/scripts/backup_db.py` on TrueNAS `truenas_admin` crontab, logging to `/mnt/volume1/docker/twinsuns/backup.log`.
+
+---
+
 ### 2026-05-15: Password reset email delivery + frontend reset flow
 
 **What changed:**
