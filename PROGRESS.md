@@ -6,6 +6,10 @@
 
 ## Current Status
 
+*(2026-05-15 session 13)* **Password reset email delivery wired. Frontend reset flow added.**
+
+Backend `password_reset_request` endpoint now sends via Resend when `RESEND_API_KEY` env var is set. Falls back to returning token in response body when unset (dev mode / no email on account). Uses `requests` lib (already in deps — no new packages). New frontend pages: `/forgot-password` (username form → request reset) and `/reset-password` (token + new password form → confirm reset). Login page has "Forgot password?" link. Zero TypeScript errors. **To activate email delivery**: sign up at resend.com, add `RESEND_API_KEY` and `APP_BASE_URL` to Portainer env vars, redeploy. Two infrastructure items still require manual setup — see checklist items 1 and 8.
+
 *(2026-05-15 session 12)* **Production readiness hardening — all must/should items addressed.**
 
 Full backend security pass: token revocation via `token_version` integer on `User` (incrementing invalidates all existing JWTs); JWT now includes `jti` and `tv` claims; `get_current_user` validates `tv` against DB. `ACCESS_TOKEN_EXPIRE_MINUTES` reduced from 10080 → 1440 (24h). Password reset implemented (DB-backed token, 1-hour expiry, one-time use) — backend complete, email delivery deferred until SMTP configured. `DELETE /api/me/account` added (cascades all user data). `POST /api/auth/logout` now requires auth and calls `revoke_user_tokens`. Startup migration auto-adds `token_version` column to existing DBs. All debug `console.log/warn/debug` stripped from frontend (52 calls removed). `ErrorBoundary` added to `layout.tsx`. Auth cookie upgraded to `SameSite=strict`, 24h maxAge. Logout route now proxies token to backend for server-side revocation. `GalacticGamer77` placeholder removed from profile page. Fake `SPOTLIGHT` deck stats and misleading `STATUS_ITEMS` replaced with accurate copy. `COMING_SOON` updated to remove features that now exist (Collection Tracker, Wishlist). `docker-compose.prod.yaml` `ACCESS_TOKEN_EXPIRE_MINUTES` updated to 1440. New proxy routes: `DELETE /api/me/account`, `POST /api/auth/password-reset-request`, `POST /api/auth/password-reset-confirm`. Zero TypeScript errors.
@@ -198,11 +202,11 @@ What needs to be resolved before this is genuinely shippable. Grouped by severit
 
 | # | Area | Issue | Fix |
 |---|------|-------|-----|
-| 1 | **Security** | **No HTTPS.** Auth cookies and JWTs transmit in cleartext over the LAN. | Put Nginx Proxy Manager (already running on TrueNAS) in front with a Let's Encrypt cert on `twinsuns.chanfriendly.duckdns.org`. Or use Cloudflare Tunnel. **Requires NPM config on TrueNAS — not addressable from code.** |
+| 1 | **Security** | ~~**No HTTPS.**~~ **✅ DONE** | NPM configured on TrueNAS with Let's Encrypt cert for `twinsuns.chanfriendly.duckdns.org`. |
 | 2 | **Security** | ~~No CSRF protection.~~ **✅ DONE** | `SameSite=strict` added to auth cookie in both login and token routes. |
 | 3 | **Security** | ~~No token revocation. 7-day JWTs.~~ **✅ DONE** | `token_version` on User model; JWT includes `tv` claim; logout bumps version; `ACCESS_TOKEN_EXPIRE_MINUTES` reduced to 1440 (24h); both backend logout and frontend logout route updated. |
 | 4 | **Security** | **Portainer at `:9004` may be internet-accessible.** | Verify at router: port 9004 must NOT be in the port-forwarding table. **Confirmed not forwarded per your response.** |
-| 5 | **Auth** | **No password reset flow — email delivery pending.** | Backend implemented: `POST /api/auth/password-reset-request` + `POST /api/auth/password-reset-confirm`, DB-backed token (1h expiry). Proxy routes added. **Token returned in response body until SMTP is wired.** Requires transactional email service (Resend, Mailgun, etc.) to deliver properly. |
+| 5 | **Auth** | **Password reset — email delivery wired, needs env vars set in prod.** | Backend sends via Resend when `RESEND_API_KEY` is set; falls back to token-in-response otherwise. Frontend pages `/forgot-password` and `/reset-password` added. **To activate**: set `RESEND_API_KEY` + `APP_BASE_URL` in Portainer, redeploy. Users without an email on their account always get token-in-response fallback. |
 
 ### 🟡 Should-fix before calling this "done"
 
@@ -210,7 +214,7 @@ What needs to be resolved before this is genuinely shippable. Grouped by severit
 |---|------|-------|-----|
 | 6 | **Auth** | **No email verification.** Anyone can register with any string as their email. | Add email verification on signup, or drop the email field. Not yet implemented. |
 | 7 | **Auth** | ~~No account deletion.~~ **✅ DONE** | `DELETE /api/me/account` added to backend (cascades all user data, bumps token_version). Proxy route at `DELETE /api/me/account` added. |
-| 8 | **Data** | **`swu_app.db` has no production backup schedule.** | Add a cron job on TrueNAS: `ssh nas "crontab -l"` and add `0 3 * * * docker exec twinsuns-backend python /app/scripts/backup_db.py`. **Requires TrueNAS cron setup — not addressable from code.** |
+| 8 | **Data** | ~~**`swu_app.db` has no production backup schedule.**~~ **✅ DONE** | Cron added to `truenas_admin` crontab on TrueNAS: `0 3 * * * docker exec twinsuns-backend python /app/scripts/backup_db.py >> /mnt/volume1/docker/twinsuns/backup.log 2>&1`. Runs daily at 3 AM. Backup log at `/mnt/volume1/docker/twinsuns/backup.log`. |
 | 9 | **Input validation** | **No length limits on user-submitted strings.** | Username max_length reduced to 32 in `UserCreate`. Deck name limit not yet added. |
 | 10 | **Frontend** | ~~52 `console.log` calls.~~ **✅ DONE** | All `console.log/warn/debug` stripped. `console.error` in catch blocks retained. |
 | 11 | **Frontend** | ~~No error boundary.~~ **✅ DONE** | `ErrorBoundary` component added at `src/components/ErrorBoundary.tsx`, wired into `layout.tsx`. |

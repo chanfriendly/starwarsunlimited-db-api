@@ -111,6 +111,10 @@ function LoginPageContent() {
             <Link href="/signup" style={{ color: 'var(--ts-amber)', textDecoration: 'none' }}>
               Enlist now
             </Link>
+            <span style={{ margin: '0 10px', opacity: 0.4 }}>·</span>
+            <Link href="/forgot-password" style={{ color: 'var(--ts-ink-3)', textDecoration: 'none' }}>
+              Forgot password?
+            </Link>
           </div>
         </div>
 

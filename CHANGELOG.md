@@ -4,6 +4,24 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-05-15: Password reset email delivery + frontend reset flow
+
+**What changed:**
+
+**Backend email sending via Resend** — `backend/src/auth/routes.py` now has `_send_password_reset_email()` using the Resend HTTP API (`POST https://api.resend.com/emails`). Uses `requests` (already in `requirements.txt` — no new dep). When `RESEND_API_KEY` env var is set, the `password-reset-request` endpoint emails the reset link to the user's address instead of returning the token in the response. Falls back to token-in-response when: the env var is not set, the user has no email on their account, or the Resend call fails. Failures are logged but don't surface as errors (always 200 to avoid enumeration).
+
+**Why Resend over SMTP** — Resend's API is HTTP + one API key, no SMTP ports/TLS config, and `requests` is already a dep. Mailgun/SES are equivalent but require more setup. Resend free tier (3,000/month) is more than sufficient for this use case.
+
+**`APP_BASE_URL` env var** — Used to build the reset link (`{APP_BASE_URL}/reset-password?token={token}`). Defaults to `http://localhost:3000` if not set. Set to `https://twinsuns.chanfriendly.duckdns.org` in production.
+
+**Frontend `/forgot-password`** — Username form. POSTs to `/api/auth/password-reset-request`. Always shows success message after submit (no enumeration). Design system consistent with login/signup.
+
+**Frontend `/reset-password`** — Reads `?token` from URL query string; falls back to a manual token paste field if not present. POSTs to `/api/auth/password-reset-confirm`. On success redirects to `/login` after 3s. Client-side validation: passwords must match and be ≥8 chars before hitting the API.
+
+**Login page** — "Forgot password?" link added next to "Enlist now".
+
+---
+
 ### 2026-05-11: Cards page + components — full Twin Suns design system rewrite
 
 **What changed:**
