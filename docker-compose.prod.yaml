@@ -7,6 +7,9 @@ version: '3.8'
 # Key env vars (set in Portainer stack env or .env.prod):
 #   JWT_SECRET              — required, no default
 #   CORS_ALLOWED_ORIGINS    — e.g. http://192.168.1.124:4000
+#   RESEND_API_KEY          — required for password reset emails
+#   APP_BASE_URL            — public URL used in reset links, e.g. http://192.168.1.124:4000
+#   RESEND_FROM             — sender address (default: onboarding@resend.dev for unverified domains)
 #
 # This file is the single source of truth. Keep Portainer's copy in sync.
 
@@ -49,6 +52,11 @@ services:
 
       # CORS — only the frontend origin needs to be listed
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://192.168.1.124:4000}
+
+      # Password reset emails via Resend (https://resend.com)
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - APP_BASE_URL=${APP_BASE_URL:-http://192.168.1.124:4000}
+      - RESEND_FROM=${RESEND_FROM:-Twin Suns <onboarding@resend.dev>}
 
       # Application settings
       - PYTHONPATH=/app
