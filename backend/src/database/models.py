@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, Float, ForeignKey, Boolean, DateTime, Text
+from sqlalchemy import Column, String, Integer, Float, ForeignKey, Boolean, DateTime, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 import datetime
 import uuid
@@ -21,6 +21,7 @@ class User(Base):
     decks = relationship("Deck", back_populates="user", cascade="all, delete-orphan")
     collection = relationship("UserCollection", back_populates="user", cascade="all, delete-orphan")
     wishlist = relationship("UserWishlist", back_populates="user", cascade="all, delete-orphan")
+    achievements = relationship("UserAchievement", back_populates="user", cascade="all, delete-orphan")
 
 class PasswordResetToken(Base):
     __tablename__ = 'password_reset_tokens'
@@ -176,4 +177,16 @@ class UserWishlist(Base):
 
     user = relationship("User", back_populates="wishlist")
     card = relationship("Card", back_populates="wishlist_entries")
+
+class UserAchievement(Base):
+    __tablename__ = 'user_achievements'
+
+    id        = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id   = Column(String, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    key       = Column(String, nullable=False)       # e.g. 'first_deck'
+    earned_at = Column(DateTime, default=datetime.datetime.utcnow)
+    source    = Column(String, nullable=True)         # None = in-app; 'karabast' = future external hook
+    __table_args__ = (UniqueConstraint('user_id', 'key', name='uq_user_achievement'),)
+
+    user = relationship("User", back_populates="achievements")
 

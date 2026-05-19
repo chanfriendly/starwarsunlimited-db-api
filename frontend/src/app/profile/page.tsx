@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { SavedDeck, deleteUserDeck } from '@/lib/api';
+import { SavedDeck, deleteUserDeck, fetchUserAchievements, AchievementsResponse } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { fetchWithAuth } from '@/lib/fetch-utils';
@@ -303,6 +303,225 @@ function WishlistCard({ item, onRemove }: { item: WishlistItem; onRemove: (cardI
     );
 }
 
+// ── Pilot Training lesson content ───────────────────────────────────────────
+
+const RANK_LESSONS: Record<string, { gate: string; lesson: React.ReactNode }> = {
+    K1: {
+        gate: 'Build your first deck.',
+        lesson: (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <p><strong>What is Twin Suns?</strong> Twin Suns is a two-player format where each player brings two leaders and one base. Your base starts with a set HP total — when it reaches zero, you lose. Leaders sit in a special zone and can be deployed as powerful units later in the game.</p>
+                <p><strong>Deck structure:</strong> Every deck is 50 cards (no leaders or base counted). You can run up to 3 copies of any card. Leaders and bases are chosen separately when you save your deck.</p>
+                <p><strong>Reading a card:</strong> The top-left number is its energy cost. Power and HP appear at the bottom. Aspects appear as colored icons — these determine which leaders can play the card without a penalty. Keywords (like <em>Ambush</em> or <em>Sentinel</em>) appear in bold in the text box.</p>
+                <p><strong>Get started:</strong> Use the Deck Builder to put together your first 50-card list. Try browsing by aspect to find cards that match your leaders.</p>
+            </div>
+        ),
+    },
+    K2: {
+        gate: 'Save three decks.',
+        lesson: (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <p><strong>Resources and energy:</strong> You gain one additional resource each round (1 on round 1, 2 on round 2, and so on). Planning your curve — having cards to play at every cost — is one of the most important parts of deckbuilding.</p>
+                <p><strong>Aspect penalties:</strong> If you play a card whose aspect doesn&apos;t match either of your leaders, you pay 2 extra resources for each off-aspect icon. This is a real cost. Build your deck around your leaders&apos; aspects to minimize penalties.</p>
+                <p><strong>Your opening hand:</strong> You draw 6 cards and may mulligan once (shuffle back any number, draw replacements). A good keep has a mix of early plays and late-game power. A hand of all expensive cards is usually a mulligan. Use the Hand Simulator on any deck to practice evaluating hands.</p>
+                <p><strong>The initiative token:</strong> Whoever holds initiative decides who goes first next round. Passing initiative early can set up a tempo swing — taking it back to deploy a leader or play a big card at the right moment.</p>
+            </div>
+        ),
+    },
+    K3: {
+        gate: 'Build decks spanning all 6 aspects across your collection.',
+        lesson: (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <p><strong>The six aspects:</strong> Heroism and Villainy appear on leaders only — they define the moral alignment of your deck. The four strategy aspects (Command, Aggression, Cunning, Vigilance) appear on regular cards and define your play style.</p>
+                <ul style={{ paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <li><strong>Command</strong> — board presence, resource advantage, big swings.</li>
+                    <li><strong>Aggression</strong> — damage, removal, tempo attacks.</li>
+                    <li><strong>Cunning</strong> — hand disruption, tricks, unexpected plays.</li>
+                    <li><strong>Vigilance</strong> — defense, resilience, long-game setups.</li>
+                </ul>
+                <p><strong>Aspect-heavy vs. neutral builds:</strong> A deck built deep into one aspect is consistent but predictable. Neutral cards (no aspect icons) cost face value for anyone. Splashing a second aspect gives flexibility but raises your off-aspect risk.</p>
+                <p><strong>Twin Suns vs. Premier:</strong> In Premier you have one leader. In Twin Suns you have two — which means you can legitimately cover two aspects without penalties and have more strategic identity to build around.</p>
+            </div>
+        ),
+    },
+    K4: {
+        gate: 'Save ten decks.',
+        lesson: (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <p><strong>Card advantage:</strong> The player who draws more cards (or makes their opponent discard) generates options. Cards that replace themselves (draw an extra card) or generate tokens are worth extra scrutiny.</p>
+                <p><strong>Win conditions:</strong> Know what your deck is trying to do. Is it racing to kill the base with direct damage? Grinding with a wide board? Setting up one big turn with a deployed leader? Every card choice should either serve that plan or buy time to execute it.</p>
+                <p><strong>Testing and iteration:</strong> Goldfish your deck alone to see if the curve works. Play practice games and note which cards are dead in your hand — those are cut candidates. Add one copy of a new card before committing to three. The Hand Simulator on this site is a fast way to check your opening hands without needing a partner.</p>
+                <p><strong>Preparing for organized play:</strong> Know the format&apos;s current card pool, watch for recently added sets, and study the leading leader combinations. Familiarity with common strategies lets you build decks that answer the meta rather than simply following it.</p>
+            </div>
+        ),
+    },
+};
+
+const RANK_ORDER = ['K1', 'K2', 'K3', 'K4'] as const;
+const RANK_LABELS: Record<string, string> = { K1: 'Cadet', K2: 'Pilot', K3: 'Flight Lead', K4: 'Squadron' };
+const CATEGORY_LABELS: Record<string, string> = {
+    decks: 'Deck Building',
+    collection: 'Collection',
+    social: 'Social',
+    training: 'Pilot Training',
+};
+const CATEGORY_ORDER = ['decks', 'collection', 'social', 'training'] as const;
+
+function AchievementsTab({
+    data,
+    expandedRank,
+    setExpandedRank,
+}: {
+    data: AchievementsResponse | null;
+    expandedRank: string | null;
+    setExpandedRank: (r: string | null) => void;
+}) {
+    const earnedSet = new Set(data?.achievements.filter(a => a.earned).map(a => a.key) ?? []);
+    const currentRank = data?.rank ?? null;
+    const totalPoints = data?.total_points ?? 0;
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 40 }}>
+            {/* ── Pilot Training ── */}
+            <div>
+                <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--ts-line)',
+                }}>
+                    <div className="ts-eyebrow">Pilot Training</div>
+                    {totalPoints > 0 && (
+                        <span className="ts-chip" style={{ color: 'var(--ts-amber)' }}>
+                            {totalPoints} pts
+                        </span>
+                    )}
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {RANK_ORDER.map(rank => {
+                        const rankKey = `rank_${rank.toLowerCase()}`;
+                        const earned = earnedSet.has(rankKey);
+                        const isExpanded = expandedRank === rank;
+                        const isCurrent = currentRank === rank;
+                        return (
+                            <div key={rank} style={{
+                                background: 'var(--ts-panel)',
+                                border: `1px solid ${earned ? 'var(--ts-amber)' : 'var(--ts-line)'}`,
+                                marginBottom: 8,
+                            }}>
+                                <div style={{
+                                    display: 'flex', alignItems: 'center', gap: 12,
+                                    padding: '12px 16px', cursor: 'pointer',
+                                }} onClick={() => setExpandedRank(isExpanded ? null : rank)}>
+                                    {/* Rank badge */}
+                                    <div style={{
+                                        fontFamily: 'var(--ts-font-mono)', fontSize: 9,
+                                        letterSpacing: '0.2em', padding: '3px 8px',
+                                        border: `1px solid ${earned ? 'var(--ts-amber)' : 'var(--ts-line-2)'}`,
+                                        color: earned ? 'var(--ts-amber)' : 'var(--ts-ink-4)',
+                                        flexShrink: 0,
+                                    }}>{rank}</div>
+                                    {/* Label */}
+                                    <div style={{ flex: 1 }}>
+                                        <div style={{
+                                            fontFamily: 'var(--ts-font-display)', fontSize: 16,
+                                            color: earned ? 'var(--ts-ink)' : 'var(--ts-ink-3)',
+                                        }}>
+                                            {RANK_LABELS[rank]}
+                                            {isCurrent && (
+                                                <span style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, color: 'var(--ts-amber)', marginLeft: 10, letterSpacing: '0.2em' }}>CURRENT</span>
+                                            )}
+                                        </div>
+                                        <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, color: 'var(--ts-ink-4)', marginTop: 2 }}>
+                                            {RANK_LESSONS[rank].gate}
+                                        </div>
+                                    </div>
+                                    {/* Status / toggle */}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                                        {earned && <span style={{ color: 'var(--ts-green)', fontFamily: 'var(--ts-font-mono)', fontSize: 10 }}>✓</span>}
+                                        <span style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 10, color: 'var(--ts-ink-4)' }}>
+                                            {isExpanded ? '▲' : '▼'} Lesson
+                                        </span>
+                                    </div>
+                                </div>
+                                {/* Lesson content */}
+                                {isExpanded && (
+                                    <div style={{
+                                        padding: '0 16px 16px',
+                                        fontFamily: 'var(--ts-font-body)', fontSize: 13,
+                                        lineHeight: 1.75, color: 'var(--ts-ink-2)',
+                                        borderTop: '1px solid var(--ts-line)',
+                                        paddingTop: 14,
+                                    }}>
+                                        {RANK_LESSONS[rank].lesson}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+
+            {/* ── Achievement grid ── */}
+            <div>
+                <div className="ts-eyebrow" style={{ marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--ts-line)' }}>
+                    Achievements
+                </div>
+                {!data ? (
+                    <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 11, color: 'var(--ts-ink-4)' }}>
+                        Loading…
+                    </div>
+                ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
+                        {CATEGORY_ORDER.map(cat => {
+                            const items = data.achievements.filter(a => a.category === cat);
+                            if (!items.length) return null;
+                            return (
+                                <div key={cat}>
+                                    <div className="ts-eyebrow" style={{ marginBottom: 12, fontSize: 9, color: 'var(--ts-ink-4)' }}>
+                                        {CATEGORY_LABELS[cat]}
+                                    </div>
+                                    <div style={{
+                                        display: 'grid',
+                                        gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+                                        gap: 10,
+                                    }}>
+                                        {items.map(ach => (
+                                            <div key={ach.key} style={{
+                                                background: 'var(--ts-panel)',
+                                                border: `1px solid ${ach.earned ? 'var(--ts-line)' : 'var(--ts-line)'}`,
+                                                padding: '14px 16px',
+                                                opacity: ach.earned ? 1 : 0.35,
+                                            }}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                                                    <span style={{ fontSize: 22 }}>{ach.icon}</span>
+                                                    <span style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, color: 'var(--ts-amber)' }}>
+                                                        {ach.points} pts
+                                                    </span>
+                                                </div>
+                                                <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 14, color: 'var(--ts-ink)', marginBottom: 4 }}>
+                                                    {ach.title}
+                                                </div>
+                                                <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, color: 'var(--ts-ink-3)', lineHeight: 1.6 }}>
+                                                    {ach.desc}
+                                                </div>
+                                                {ach.earned && ach.earned_at && (
+                                                    <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 8, color: 'var(--ts-ink-4)', marginTop: 8 }}>
+                                                        {new Date(ach.earned_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
 // ── Main page ───────────────────────────────────────────────────────────────
 
 const UserProfilePage = () => {
@@ -326,6 +545,8 @@ const UserProfilePage = () => {
     const [error, setError] = useState<string | null>(null);
     const [showAllCards, setShowAllCards] = useState(false);
     const [resendStatus, setResendStatus] = useState<'idle' | 'sending' | 'sent'>('idle');
+    const [achievementsData, setAchievementsData] = useState<AchievementsResponse | null>(null);
+    const [expandedRank, setExpandedRank] = useState<string | null>(null);
 
     const loadData = async () => {
         setIsPageLoading(true);
@@ -378,9 +599,17 @@ const UserProfilePage = () => {
                 console.error('[Profile] Error fetching wishlist:', wishlistError);
             }
 
+            let achievementsResult: AchievementsResponse | null = null;
+            try {
+                achievementsResult = await fetchUserAchievements();
+            } catch (achError) {
+                console.error('[Profile] Error fetching achievements:', achError);
+            }
+
             setDecks(decksData);
             setCollection(collectionData);
             setWishlist(wishlistData);
+            setAchievementsData(achievementsResult);
         } catch (err) {
             console.error('[Profile] Error loading profile data:', err);
             setError('Failed to load profile data. Please check your connection and try again.');
@@ -747,17 +976,12 @@ const UserProfilePage = () => {
                         )}
                     </TabsContent>
 
-                    {/* ── Achievements — Coming Soon ──────────────────── */}
+                    {/* ── Achievements ─────────────────────────────────── */}
                     <TabsContent value="achievements">
-                        <ComingSoonPanel
-                            title="Achievements & Pilot Training"
-                            description="Earn badges for deck-building milestones, tournament finishes, and collection goals. Pilot Training will guide new players through Twin Suns fundamentals with guided challenges."
-                            features={[
-                                'Milestone badges (first deck, first win, 100-card collection…)',
-                                'Pilot Training — guided challenges for new Twin Suns players',
-                                'Seasonal achievement tracks',
-                                'Badge showcase on your public profile',
-                            ]}
+                        <AchievementsTab
+                            data={achievementsData}
+                            expandedRank={expandedRank}
+                            setExpandedRank={setExpandedRank}
                         />
                     </TabsContent>
 

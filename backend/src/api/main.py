@@ -42,6 +42,22 @@ async def startup_event():
                 conn.commit()
                 logger.info("Migrated: added share_token to decks table")
 
+        with app_engine.connect() as conn:
+            tbls = [r[0] for r in conn.execute(_text("SELECT name FROM sqlite_master WHERE type='table'"))]
+            if 'user_achievements' not in tbls:
+                conn.execute(_text("""
+                    CREATE TABLE user_achievements (
+                        id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        key TEXT NOT NULL,
+                        earned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        source TEXT,
+                        UNIQUE(user_id, key)
+                    )
+                """))
+                conn.commit()
+                logger.info("Migrated: created user_achievements table")
+
         logger.info("App database initialized.")
     except Exception as e:
         logger.error(f"Failed to initialize app database: {e}")
@@ -123,6 +139,13 @@ try:
     logger.info("Successfully loaded public decks router")
 except Exception as e:
     logger.error(f"Failed to load public decks router: {str(e)}")
+
+try:
+    from src.routes.achievements import router as achievements_router
+    app.include_router(achievements_router, prefix="/api/me", tags=["achievements"])
+    logger.info("Successfully loaded achievements router")
+except Exception as e:
+    logger.error(f"Failed to load achievements router: {str(e)}")
 
 @app.get("/")
 async def root():

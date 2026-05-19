@@ -247,3 +247,31 @@ export async function fetchSharedDeck(shareToken: string): Promise<SavedDeck> {
   if (!res.ok) throw new Error(`Shared deck not found: ${res.status}`);
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Achievements
+// ---------------------------------------------------------------------------
+
+export interface AchievementDef {
+  key: string;
+  title: string;
+  desc: string;
+  icon: string;
+  category: 'decks' | 'collection' | 'social' | 'training';
+  points: number;
+  earned: boolean;
+  earned_at?: string;
+}
+
+export interface AchievementsResponse {
+  achievements: AchievementDef[];
+  total_points: number;
+  rank: 'K1' | 'K2' | 'K3' | 'K4' | null;
+}
+
+// Proxy handles auth via cookie — plain fetch is correct here
+export async function fetchUserAchievements(): Promise<AchievementsResponse> {
+  const res = await fetch('/api/me/achievements');
+  if (!res.ok) throw new Error(`Failed to fetch achievements: ${res.status}`);
+  return res.json();
+}

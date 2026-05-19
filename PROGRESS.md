@@ -6,6 +6,14 @@
 
 ## Current Status
 
+*(2026-05-19 session 19)* **Achievements system and Pilot Training.**
+
+14 auto-detected achievements across 4 categories (deck building, collection, social, training). `UserAchievement` model + `user_achievements` table with startup auto-migration. `GET /api/me/achievements` endpoint computes earned state from existing data (deck count, collection size, wishlist, shared decks, all-aspects cross-deck check), persists newly earned rows with `earned_at` timestamp, and returns the full catalog with earned/locked status + total points + current rank. Karabast future hook: `source` field on `UserAchievement` rows, no schema change needed later.
+
+Pilot Training: K1–K4 rank track on the profile Achievements tab now has real lesson content (expandable per rank, toggle open/close). Each rank's gate condition is derived from achievements: K1=first_deck, K2=K1+three_decks, K3=K2+all_aspects, K4=K3+ten_decks. Homepage rank track now connects to live achievement data for authenticated users; shows demo (all-0%) when logged out. `COMING_SOON` updated: Achievements removed (it exists), Karabast Import added.
+
+TypeScript: 0 errors. Backend: achievements router imports clean, 14 achievements defined.
+
 *(2026-05-19 session 18)* **Deck analysis panel, public deck sharing, and export modal with marketplace links.**
 
 Three new features fully implemented across backend and frontend. TypeScript compiles clean (0 errors).
@@ -179,9 +187,10 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 
 **Priority order — top item is immediately actionable:**
 
-1. **Deploy session 18 features to production** — `./deploy.sh` to push deck analysis, public sharing, and export modal. The `share_token` migration runs automatically on backend startup.
-2. **Verify UI in production** — confirm analysis panel renders, share button works end-to-end, export modal opens with correct sections, public deck URL shows deck without auth.
-3. **Consider adding `/decks/share/[token]` to the Navbar or homepage** — currently no discoverability path for shared decks from the public side.
+1. **Deploy sessions 18+19 to production** — `./deploy.sh`. Both the `share_token` and `user_achievements` migrations run automatically on backend startup.
+2. **Verify achievements in production** — navigate to Profile → Achievements tab; confirm rank panel shows with lesson content, achievement grid loads; build a deck and refresh to confirm `first_deck`/`rank_k1` earned.
+3. **Verify homepage rank track** — when logged in, confirm the progress bars reflect real achievement state (not all-0% demo).
+4. **Consider adding `/decks/share/[token]` discoverability** — no entry point from the public side yet.
 
 ---
 

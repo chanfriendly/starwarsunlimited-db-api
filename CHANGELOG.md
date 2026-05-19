@@ -4,6 +4,28 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-05-19: Achievements system and Pilot Training
+
+**Achievement catalog** — 14 auto-detected achievements across four categories (Deck Building, Collection, Social, Pilot Training). Definitions are hardcoded Python dicts in `backend/src/routes/achievements.py` — no DB table for definitions, which keeps them easy to add or adjust without migrations. Earned state is stored in `user_achievements` with an `earned_at` timestamp.
+
+**Lazy evaluation model** — `GET /api/me/achievements` computes all conditions fresh from existing data (deck count, collection count, wishlist count, shared decks, all-aspects check) on every call. Newly earned achievements are inserted with `INSERT OR IGNORE` so the endpoint is idempotent. This means `earned_at` reflects when the user first fetched achievements after meeting a condition, not the exact moment they triggered it — acceptable for this scale.
+
+**`all_aspects` condition** — queries `deck_cards` in `app_db` to get all card IDs across the user's decks, then queries `card_aspects` in `card_db` to check if all 6 aspects (Heroism, Villainy, Command, Aggression, Cunning, Vigilance) are covered. Heroism/Villainy only appear on leaders, so this requires having at least one Heroism deck and one Villainy deck in the user's collection. The cross-database query uses parameterized IN clauses since SQLite can't join across attached databases.
+
+**Rank gates (cumulative)** — K1 = `first_deck`; K2 = K1 + `three_decks`; K3 = K2 + `all_aspects`; K4 = K3 + `ten_decks`. The `rank` field in the response returns the highest earned rank key (`K4 > K3 > K2 > K1 > null`).
+
+**Karabast stub** — `source TEXT` column on `user_achievements` is the extension point. A future `POST /api/me/achievements/external` route can insert rows with `source='karabast'`. No schema change required. The column is nullable; all in-app earned rows get `source=NULL`.
+
+**Pilot Training lesson content** — static strings embedded in `profile/page.tsx` as `RANK_LESSONS`. Each K1–K4 rank row in the profile Achievements tab is expandable (toggle open/close). Content covers: K1 Twin Suns rules and deck structure; K2 resources, aspect penalties, mulligan decisions, initiative; K3 the six aspects and their identities, deckbuilding philosophy; K4 card advantage, win conditions, testing methodology, organized play prep.
+
+**Homepage rank track** — previously hardcoded with fake progress values. Now uses `fetchUserAchievements()` in a `useEffect` when authenticated; progress per track is derived from earned achievement keys. Logged-out users see all-0% demo values (was previously misleading fake 100%/60%/33%/0% data). `COMING_SOON` updated: "Achievements" removed (it now exists), "Karabast Import" added.
+
+**Export format correction** — `DeckExportModal` text export format updated for TCGPlayer compatibility: quantity is now a plain integer (no `x` suffix), card name includes subtitle when present (`Name - Subtitle`), set code appended in `[brackets]`. Old `cardRef()` helper removed; new `cardLine()` helper handles all three fields.
+
+**Set code grouping fix** — card browser query previously sorted by `c.name ASC` with no tiebreaker. Cards reprinted across sets (e.g., "Open Fire" in SOR and TWI) had undefined primary selection, causing decks to randomly receive the wrong set's card ID. Fixed by adding a canonical tiebreaker (`set_order_case ASC, CAST(card_number AS INTEGER) ASC`) to every sort mode. SOR (1) now always beats TWI (3), so original printings are consistently the grouped primary. 11 affected cards confirmed (Daring Raid, Open Fire, Outflank, Padawan Starfighter, Patrolling V-Wing, Resupply, Tactical Advantage, Take Captive, Vanquish, Volunteer Soldier, Waylay).
+
+---
+
 ### 2026-05-19: Deck analysis, public sharing, and export with marketplace links
 
 **Deck Analysis panel** — New `DeckAnalysisPanel` component renders below the card grid on both the authenticated deck view and the public share view. All computation is client-side via `useMemo` — no additional fetch calls. Cost curve uses the existing `ts-curve-chart`/`ts-curve-bar`/`ts-curve-bar-fill` CSS classes defined in `globals.css`. Price total covers leaders + base + main deck; shows "(N/M priced)" when some cards lack price data. Aspects use the `ts-aspect-pip` design system element.

@@ -1,8 +1,10 @@
 // src/app/page.tsx
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useAuth } from '@/contexts/AuthContext';
+import { fetchUserAchievements, AchievementsResponse } from '@/lib/api';
 
 const ASPECT_COLORS: Record<string, string> = {
   Command: '#c2453a', Aggression: '#d96f2d', Cunning: '#e2b342',
@@ -10,12 +12,39 @@ const ASPECT_COLORS: Record<string, string> = {
 };
 
 
-const TRAINING_TRACKS = [
-  { rank: 'K1', label: 'Cadet',       desc: 'Build your first deck and simulate an opening hand.', progress: 100, complete: true },
-  { rank: 'K2', label: 'Pilot',       desc: 'Save three decks and run five mulligan sessions.',     progress: 60,  complete: false },
-  { rank: 'K3', label: 'Flight Lead', desc: 'Build a deck in each of the six aspects.',             progress: 33,  complete: false },
-  { rank: 'K4', label: 'Squadron',    desc: 'Log a tournament result and reach 20 deck saves.',     progress: 0,   complete: false },
+// Static demo values shown to logged-out users
+const TRAINING_TRACKS_DEMO = [
+  { rank: 'K1', label: 'Cadet',       desc: 'Build your first deck.',                              progress: 0,   complete: false },
+  { rank: 'K2', label: 'Pilot',       desc: 'Save three decks.',                                   progress: 0,   complete: false },
+  { rank: 'K3', label: 'Flight Lead', desc: 'Build decks spanning all six aspects.',                progress: 0,   complete: false },
+  { rank: 'K4', label: 'Squadron',    desc: 'Save ten decks.',                                      progress: 0,   complete: false },
 ];
+
+function buildLiveTracks(ach: AchievementsResponse) {
+  const earned = new Set(ach.achievements.filter(a => a.earned).map(a => a.key));
+  return [
+    {
+      rank: 'K1', label: 'Cadet', desc: 'Build your first deck.',
+      complete: earned.has('rank_k1'),
+      progress: earned.has('rank_k1') ? 100 : earned.has('first_deck') ? 50 : 0,
+    },
+    {
+      rank: 'K2', label: 'Pilot', desc: 'Save three decks.',
+      complete: earned.has('rank_k2'),
+      progress: earned.has('rank_k2') ? 100 : earned.has('three_decks') ? 66 : earned.has('first_deck') ? 33 : 0,
+    },
+    {
+      rank: 'K3', label: 'Flight Lead', desc: 'Build decks spanning all six aspects.',
+      complete: earned.has('rank_k3'),
+      progress: earned.has('rank_k3') ? 100 : earned.has('all_aspects') ? 50 : earned.has('rank_k2') ? 25 : 0,
+    },
+    {
+      rank: 'K4', label: 'Squadron', desc: 'Save ten decks.',
+      complete: earned.has('rank_k4'),
+      progress: earned.has('rank_k4') ? 100 : earned.has('ten_decks') ? 50 : earned.has('rank_k3') ? 25 : 0,
+    },
+  ];
+}
 
 const ASPECTS_GRID = [
   { name: 'Command',    desc: 'Resources · Stability' },
@@ -27,10 +56,10 @@ const ASPECTS_GRID = [
 ];
 
 const COMING_SOON = [
-  { label: 'Achievements',    desc: 'Pilot training milestones and seasonal tracks' },
   { label: 'Tournament Log',  desc: 'Event results, ELO, head-to-head records' },
   { label: 'Trade Binder',    desc: 'Mark cards for trade, match with other players' },
   { label: 'Meta Reports',    desc: 'Win-rate trends, top builds, cycle analysis' },
+  { label: 'Karabast Import', desc: 'Sync match results from Karabast into achievements' },
 ];
 
 const FEATURES = [
@@ -55,6 +84,17 @@ const FEATURES = [
 ];
 
 export default function Home() {
+  const { isAuthenticated } = useAuth();
+  const [achievements, setAchievements] = useState<AchievementsResponse | null>(null);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchUserAchievements().then(setAchievements).catch(() => {/* silently ignore */});
+    }
+  }, [isAuthenticated]);
+
+  const trainingTracks = achievements ? buildLiveTracks(achievements) : TRAINING_TRACKS_DEMO;
+
   return (
     <div style={{ minHeight: '100vh', background: 'var(--ts-bg)' }}>
 
@@ -190,7 +230,7 @@ export default function Home() {
             </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1, background: 'var(--ts-line)' }}>
-            {TRAINING_TRACKS.map((track, i) => (
+            {trainingTracks.map((track, i) => (
               <div key={track.rank} style={{ background: track.complete ? 'var(--ts-bg-2)' : 'var(--ts-bg)', padding: '20px 24px', display: 'grid', gridTemplateColumns: '56px 1fr auto', gap: 20, alignItems: 'center', opacity: i > 1 ? 0.55 : 1 }}>
                 <div style={{ width: 44, height: 44, border: `1px solid ${track.complete ? 'var(--ts-amber)' : 'var(--ts-line-2)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--ts-font-mono)', fontSize: 11, letterSpacing: '0.1em', color: track.complete ? 'var(--ts-amber)' : 'var(--ts-ink-3)' }}>
                   {track.rank}
