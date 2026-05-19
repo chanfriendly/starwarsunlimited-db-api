@@ -101,6 +101,11 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 
 ## What's Done
 
+- [x] **[2026-05-19] Achievements system + Pilot Training** — `UserAchievement` model, `user_achievements` startup migration, `GET /api/me/achievements` endpoint (lazy eval, INSERT OR IGNORE), 14 achievements across 4 categories. Profile Achievements tab: rank panel with expandable K1–K4 lesson content, achievement grid with locked/earned states. Homepage rank track connected to live API. Karabast `source` hook designed in.
+- [x] **[2026-05-19] Set code grouping fix** — card query sort now includes `set_order_case ASC` tiebreaker on all sort modes; original printing always wins as grouped primary. Fixes 11 reprinted cards (Open Fire, Resupply, Tactical Advantage, etc.) incorrectly showing TWI set code.
+- [x] **[2026-05-19] Deck analysis panel** — `DeckAnalysisPanel` component: cost curve, type breakdown, aspect distribution, rarity counts, estimated price. Client-side `useMemo`. Used in both authenticated deck view and public share view.
+- [x] **[2026-05-19] Public deck sharing** — `share_token` on `Deck` model with startup migration; `POST/DELETE /api/me/decks/{id}/share`; `GET /api/decks/share/{token}` (no auth); Share/Revoke buttons; `PublicDeckViewClient` page.
+- [x] **[2026-05-19] Export modal with marketplace links** — `DeckExportModal`: plain-text deck list (TCGPlayer format: `N Name - Subtitle [SET]`), TCGPlayer + Card Kingdom per-card links, "Buy What You're Missing" collection diff.
 - [x] **[2026-05-06] DeckBuilderClient `power`/`hp` → `attack`/`health` — zero TypeScript errors**
   - Frontend now compiles clean with no errors at all
 - [x] **[2026-05-06] Docker dev compose: add missing `INTERNAL_API_URL=http://backend:8000`**
