@@ -4,6 +4,22 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-05-19: Deck analysis, public sharing, and export with marketplace links
+
+**Deck Analysis panel** — New `DeckAnalysisPanel` component renders below the card grid on both the authenticated deck view and the public share view. All computation is client-side via `useMemo` — no additional fetch calls. Cost curve uses the existing `ts-curve-chart`/`ts-curve-bar`/`ts-curve-bar-fill` CSS classes defined in `globals.css`. Price total covers leaders + base + main deck; shows "(N/M priced)" when some cards lack price data. Aspects use the `ts-aspect-pip` design system element.
+
+**Public deck sharing** — `share_token TEXT` column added to the `decks` table via `PRAGMA table_info()` startup migration (same pattern as the `token_version` migration in session 12). `share_token` is nullable and unique; `NULL` means the deck is not currently shared. Two new backend endpoints in `me.py`: `POST /api/me/decks/{id}/share` (idempotent — returns existing token if one already exists, generates `str(uuid.uuid4())` if not) and `DELETE /api/me/decks/{id}/share` (sets to NULL, returns 204). New `backend/src/routes/public_decks.py` with `GET /api/decks/share/{token}` — no auth, uses `enrich_card_with_relationships` from `db_helpers.py` (the fuller version with traits/arenas). Returns same shape as the authenticated deck endpoint.
+
+**Export modal** — `DeckExportModal` component follows the same `ts-modal-backdrop`/`ts-modal` pattern as `HandSimModal`. Text deck list groups cards by type (Unit → Event → Upgrade → Other), sorts within each group by `energy_cost` ascending. TCGPlayer URL: `https://www.tcgplayer.com/search/star-wars-unlimited/product?productLineName=star-wars-unlimited&q={name}&view=grid`. Card Kingdom URL: `https://www.cardkingdom.com/catalog/search?search=NM&filter[name]={name}&filter[game]=swu`. "Buy What You're Missing" section computes `needed = deck_quantity - owned_count` per card; only appears when the `collection` prop is passed (i.e., when the user is authenticated and collection has loaded lazily).
+
+**Pre-existing proxy bug fixed** — `DeckViewClient` was calling `fetchWithAuth('/api/me/decks/${deckId}')` but no Next.js route handler existed at `/api/me/decks/[id]`. This meant the individual deck view was broken before this session. Fixed by creating `app/api/me/decks/[id]/route.ts` as a GET proxy.
+
+**Why analysis is client-side** — The deck data is already fetched by `DeckViewClient`/`PublicDeckViewClient` on mount. Adding a second endpoint for analysis would require a round-trip for data already in memory. Client-side `useMemo` is faster, simpler, and keeps the backend stateless.
+
+**Why public sharing uses `share_token` not deck ID** — Exposing deck IDs in public URLs would allow enumeration of all decks in the database. A random UUID token is unguessable and revocable independently of the deck itself.
+
+---
+
 ### 2026-05-16: UX pass, email verification, design system completion, uptime monitoring
 
 **Collection completion % fix** — Profile header was always showing 100% because the collection endpoint only returned owned cards when `all_cards=false`, making numerator === denominator. Fix: always fetch `?all_cards=true`; the `showAllCards` toggle now only affects display filtering, not the fetch.

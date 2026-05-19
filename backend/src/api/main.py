@@ -35,6 +35,13 @@ async def startup_event():
                 conn.commit()
                 logger.info("Migrated: added email_verified to users table")
 
+        with app_engine.connect() as conn:
+            deck_cols = [row[1] for row in conn.execute(_text("PRAGMA table_info(decks)"))]
+            if 'share_token' not in deck_cols:
+                conn.execute(_text("ALTER TABLE decks ADD COLUMN share_token TEXT"))
+                conn.commit()
+                logger.info("Migrated: added share_token to decks table")
+
         logger.info("App database initialized.")
     except Exception as e:
         logger.error(f"Failed to initialize app database: {e}")
@@ -109,6 +116,13 @@ try:
     logger.info("Successfully loaded traits router")
 except Exception as e:
     logger.error(f"Failed to load traits router: {str(e)}")
+
+try:
+    from src.routes.public_decks import router as public_decks_router
+    app.include_router(public_decks_router, prefix="/api", tags=["public"])
+    logger.info("Successfully loaded public decks router")
+except Exception as e:
+    logger.error(f"Failed to load public decks router: {str(e)}")
 
 @app.get("/")
 async def root():

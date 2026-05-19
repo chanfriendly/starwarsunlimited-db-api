@@ -6,6 +6,20 @@
 
 ## Current Status
 
+*(2026-05-19 session 18)* **Deck analysis panel, public deck sharing, and export modal with marketplace links.**
+
+Three new features fully implemented across backend and frontend. TypeScript compiles clean (0 errors).
+
+**Deck Analysis** — `DeckAnalysisPanel` component (`src/components/DeckAnalysisPanel.tsx`) added. Computed client-side via `useMemo` from already-loaded deck data. Shows: cost curve (8 buckets, 0–7+, bar chart using `ts-curve-chart` CSS classes), type breakdown (Unit/Event/Upgrade/Other with stacked bar and percentages), aspect distribution (`ts-aspect-pip` per aspect with count), rarity counts (`ts-chip`), weighted average cost, and estimated price total. Price total includes leaders + base + main deck.
+
+**Public deck sharing** — `share_token` UUID column added to `Deck` model with startup auto-migration. Backend: `POST /api/me/decks/{id}/share` (generates/returns token) and `DELETE /api/me/decks/{id}/share` (revokes) in `me.py`. New `backend/src/routes/public_decks.py`: `GET /api/decks/share/{token}` (no auth required). Frontend: Share button in `DeckViewClient` generates token, copies URL to clipboard, shows "✓ Copied!" feedback for 3s; Revoke Link button appears when token is active. New proxy routes: `POST/DELETE /api/me/decks/[id]/share/route.ts` and `GET /api/decks/share/[token]/route.ts`. New pages: `app/decks/share/[token]/page.tsx` (server wrapper) + `PublicDeckViewClient.tsx` (read-only deck view, no auth).
+
+**Export with marketplace links** — `DeckExportModal` component (`src/components/DeckExportModal.tsx`). Three sections: (1) Plain-text deck list grouped by type, sorted by cost, with "Copy to Clipboard" button. (2) "Find Cards" — deduplicated list of all deck cards (leaders + base + main) with per-card TCGPlayer and Card Kingdom search links and price. (3) "Buy What You're Missing" — shown only when authenticated; compares deck quantities against user's collection, lists missing cards with "need Nx" label and estimated cost.
+
+**Pre-existing bug fixed** — `DeckViewClient` was calling `/api/me/decks/${deckId}` but no Next.js proxy route existed there. Created `app/api/me/decks/[id]/route.ts` as the GET proxy.
+
+**Note on UI verification** — Automated preview verification was blocked by a dev environment quirk: the preview backend runs from `backend/` without `DB_DIR` set, so it uses `~/.swu/swu_app.db` (not `./databases/swu_app.db`) with an unknown JWT secret. TypeScript compilation passed clean; backend logs confirmed migration and router load; public 404 endpoint verified. Production deploy will confirm UI correctness.
+
 *(2026-05-16 session 17)* **CardDetail design system migration, uptime monitoring, production deploy.**
 
 `CardDetail.tsx` (deck builder side panel) fully migrated off shadcn `Button` and Lucide icons. All Tailwind classes replaced with `ts-*` CSS vars and inline styles matching the design system. Art variant navigation uses `‹`/`›` characters instead of Lucide chevrons. Flip button uses amber border. Stats block uses amber/red/green `ts-*` accent colors. Keywords and card text use design system typography. Action button uses `ts-btn` with conditional amber/red/disabled states. Empty state uses design system placeholder. Zero new dependencies. Uptime monitoring added as `.github/workflows/uptime_check.yaml` — pings `/health` every 15 minutes via GitHub Actions cron; on failure, sends email via `dawidd6/action-send-mail`. Requires three GitHub secrets: `SMTP_USER`, `SMTP_PASSWORD` (same Gmail app password already in Bitwarden), `ALERT_EMAIL` (chanfriendly@gmail.com). All 🟡 and 🟢 production readiness items now resolved.
@@ -165,7 +179,9 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 
 **Priority order — top item is immediately actionable:**
 
-All known items resolved. No open backlog items at close of session 17.
+1. **Deploy session 18 features to production** — `./deploy.sh` to push deck analysis, public sharing, and export modal. The `share_token` migration runs automatically on backend startup.
+2. **Verify UI in production** — confirm analysis panel renders, share button works end-to-end, export modal opens with correct sections, public deck URL shows deck without auth.
+3. **Consider adding `/decks/share/[token]` to the Navbar or homepage** — currently no discoverability path for shared decks from the public side.
 
 ---
 

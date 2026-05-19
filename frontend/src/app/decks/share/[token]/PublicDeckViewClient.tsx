@@ -1,82 +1,23 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import {
-  SavedDeck, CollectionItem,
-  fetchUserCollection, shareUserDeck, revokeUserDeckShare,
-} from '@/lib/api';
-import { fetchWithAuth } from '@/lib/fetch-utils';
-import { useAuth } from '@/contexts/AuthContext';
+import { SavedDeck, fetchSharedDeck } from '@/lib/api';
 import { DeckAnalysisPanel } from '@/components/DeckAnalysisPanel';
-import { DeckExportModal } from '@/components/DeckExportModal';
 
-export function DeckViewClient({ deckId }: { deckId: string }) {
-  const router = useRouter();
-  const { isAuthenticated } = useAuth();
-
+export function PublicDeckViewClient({ shareToken }: { shareToken: string }) {
   const [deck, setDeck] = useState<SavedDeck | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Share state
-  const [shareToken, setShareToken] = useState<string | null>(null);
-  const [sharing, setSharing] = useState(false);
-  const [shareCopied, setShareCopied] = useState(false);
-  const [shareError, setShareError] = useState<string | null>(null);
-
-  // Export state
-  const [showExport, setShowExport] = useState(false);
-  const [collection, setCollection] = useState<CollectionItem[] | undefined>(undefined);
-
   useEffect(() => {
-    if (!deckId) return;
-    fetchWithAuth(`/api/me/decks/${encodeURIComponent(deckId)}`)
-      .then((data: SavedDeck) => { setDeck(data); setLoading(false); })
-      .catch((err: Error) => {
-        setError(err.message?.includes('401') ? 'Please log in to view this deck.' : 'Could not load deck.');
+    fetchSharedDeck(shareToken)
+      .then(data => { setDeck(data); setLoading(false); })
+      .catch(() => {
+        setError('This deck link may be invalid or has been revoked.');
         setLoading(false);
       });
-  }, [deckId]);
-
-  async function handleShare() {
-    setSharing(true);
-    setShareError(null);
-    try {
-      const { share_token } = await shareUserDeck(deckId);
-      setShareToken(share_token);
-      const url = `${window.location.origin}/decks/share/${share_token}`;
-      await navigator.clipboard.writeText(url);
-      setShareCopied(true);
-      setTimeout(() => setShareCopied(false), 3000);
-    } catch {
-      setShareError('Failed to generate share link.');
-    } finally {
-      setSharing(false);
-    }
-  }
-
-  async function handleRevoke() {
-    try {
-      await revokeUserDeckShare(deckId);
-      setShareToken(null);
-    } catch {
-      setShareError('Failed to revoke share link.');
-    }
-  }
-
-  async function handleOpenExport() {
-    setShowExport(true);
-    if (isAuthenticated && collection === undefined) {
-      try {
-        const data = await fetchUserCollection();
-        setCollection(data);
-      } catch {
-        setCollection([]);
-      }
-    }
-  }
+  }, [shareToken]);
 
   if (loading) {
     return (
@@ -106,24 +47,21 @@ export function DeckViewClient({ deckId }: { deckId: string }) {
             textTransform: 'uppercase', color: 'var(--ts-red)', border: '1px solid var(--ts-red)',
             padding: '4px 14px', marginBottom: 20, display: 'inline-block',
           }}>
-            Error
+            Not Found
           </div>
           <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 26, color: 'var(--ts-ink)', marginBottom: 12 }}>
-            Deck Not Found
+            Deck Unavailable
           </div>
           <p style={{ color: 'var(--ts-ink-3)', fontSize: 13, lineHeight: 1.7, marginBottom: 24 }}>
-            {error || 'Could not find or load the requested deck.'}
+            {error}
           </p>
-          <Link href="/decks" className="ts-btn" style={{ textDecoration: 'none' }}>← My Decks</Link>
+          <Link href="/" className="ts-btn" style={{ textDecoration: 'none' }}>← Home</Link>
         </div>
       </div>
     );
   }
 
   const totalCards = deck.cards.reduce((s, item) => s + (item.quantity || 1), 0);
-  const formattedUpdated = deck.updated_at
-    ? new Date(deck.updated_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
-    : 'Unknown';
   const formattedCreated = deck.created_at
     ? new Date(deck.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
     : 'Unknown';
@@ -137,49 +75,15 @@ export function DeckViewClient({ deckId }: { deckId: string }) {
         marginBottom: 32, paddingBottom: 20, borderBottom: '1px solid var(--ts-line)',
       }}>
         <div>
-          <div className="ts-eyebrow" style={{ marginBottom: 6 }}>Twin Suns Format</div>
+          <div className="ts-eyebrow" style={{ marginBottom: 6 }}>Shared Deck</div>
           <h1 style={{ fontFamily: 'var(--ts-font-display)', fontSize: 'clamp(24px,3.5vw,40px)', color: 'var(--ts-ink)', margin: 0 }}>
             {deck.name}
           </h1>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button
-            onClick={() => router.push(`/deck-builder?deckId=${deck.id}`)}
-            className="ts-btn ts-btn-sm"
-          >
-            Edit Deck
-          </button>
-          <button onClick={handleOpenExport} className="ts-btn ts-btn-sm">
-            Export
-          </button>
-          <button
-            onClick={handleShare}
-            className="ts-btn ts-btn-sm"
-            disabled={sharing}
-          >
-            {shareCopied ? '✓ Copied!' : sharing ? '…' : 'Share'}
-          </button>
-          {shareToken && (
-            <button
-              onClick={handleRevoke}
-              className="ts-btn ts-btn-sm"
-              style={{ color: 'var(--ts-red)', borderColor: 'var(--ts-red)' }}
-            >
-              Revoke Link
-            </button>
-          )}
-          <Link href="/decks" className="ts-btn ts-btn-sm" style={{ textDecoration: 'none' }}>
-            ← My Decks
-          </Link>
-        </div>
+        <Link href="/" className="ts-btn ts-btn-sm" style={{ textDecoration: 'none' }}>
+          Twin Suns ↗
+        </Link>
       </div>
-
-      {shareError && (
-        <div style={{
-          fontFamily: 'var(--ts-font-mono)', fontSize: 11,
-          color: 'var(--ts-red)', marginBottom: 16,
-        }}>{shareError}</div>
-      )}
 
       {/* Summary row */}
       <div style={{
@@ -242,7 +146,6 @@ export function DeckViewClient({ deckId }: { deckId: string }) {
             {[
               ['Format', 'Twin Suns'],
               ['Cards', `${totalCards}`],
-              ['Updated', formattedUpdated],
               ['Created', formattedCreated],
             ].map(([label, value]) => (
               <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
@@ -308,7 +211,7 @@ export function DeckViewClient({ deckId }: { deckId: string }) {
             padding: '48px 24px', textAlign: 'center',
           }}>
             <span style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 12, color: 'var(--ts-ink-4)' }}>
-              No cards in this deck yet.
+              No cards in this deck.
             </span>
           </div>
         )}
@@ -316,15 +219,6 @@ export function DeckViewClient({ deckId }: { deckId: string }) {
 
       {/* Analysis panel */}
       <DeckAnalysisPanel deck={deck} />
-
-      {/* Export modal */}
-      {showExport && (
-        <DeckExportModal
-          deck={deck}
-          collection={collection}
-          onClose={() => setShowExport(false)}
-        />
-      )}
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>

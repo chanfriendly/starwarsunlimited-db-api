@@ -50,7 +50,8 @@ class Deck(Base):
     description = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, onupdate=datetime.datetime.utcnow)
-    
+    share_token = Column(String, nullable=True, unique=True)
+
     user = relationship("User", back_populates="decks")
     cards = relationship("DeckCard", back_populates="deck", cascade="all, delete-orphan")
 

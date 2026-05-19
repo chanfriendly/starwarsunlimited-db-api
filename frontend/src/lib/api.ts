@@ -44,6 +44,7 @@ export interface Card {
   card_number?: string;
   rarity?: string;
   artist?: string;
+  price_usd?: number;
   epic_action?: string;
   deploy_box?: string;
   double_sided?: boolean;
@@ -230,4 +231,19 @@ export async function updateUserDeck(deckId: string, payload: SaveDeckPayload): 
 export async function deleteUserDeck(deckId: string): Promise<boolean> {
   await fetchWithAuth(`/api/decks/${deckId}`, { method: 'DELETE' });
   return true;
+}
+
+export async function shareUserDeck(deckId: string): Promise<{ share_token: string }> {
+  return fetchWithAuth(`/api/me/decks/${encodeURIComponent(deckId)}/share`, { method: 'POST' });
+}
+
+export async function revokeUserDeckShare(deckId: string): Promise<void> {
+  await fetchWithAuth(`/api/me/decks/${encodeURIComponent(deckId)}/share`, { method: 'DELETE' });
+}
+
+// No auth required — plain fetch
+export async function fetchSharedDeck(shareToken: string): Promise<SavedDeck> {
+  const res = await fetch(`/api/decks/share/${encodeURIComponent(shareToken)}`);
+  if (!res.ok) throw new Error(`Shared deck not found: ${res.status}`);
+  return res.json();
 }

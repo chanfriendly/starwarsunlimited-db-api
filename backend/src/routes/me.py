@@ -868,6 +868,44 @@ async def update_profile(
             detail="Failed to update profile"
         )
 
+@router.post("/decks/{deck_id}/share")
+async def share_deck(
+    deck_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_app_db)]
+):
+    """Generate (or return existing) share token for a deck. Auth required."""
+    deck = db.query(Deck).filter(
+        Deck.id == deck_id,
+        Deck.user_id == current_user.id
+    ).first()
+    if not deck:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deck not found")
+    if not deck.share_token:
+        deck.share_token = str(uuid.uuid4())
+        db.commit()
+        db.refresh(deck)
+    return {"share_token": deck.share_token}
+
+
+@router.delete("/decks/{deck_id}/share", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_deck_share(
+    deck_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_app_db)]
+):
+    """Clear the share token, revoking public access. Auth required."""
+    deck = db.query(Deck).filter(
+        Deck.id == deck_id,
+        Deck.user_id == current_user.id
+    ).first()
+    if not deck:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deck not found")
+    deck.share_token = None
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.delete("/account", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_account(
     current_user: Annotated[User, Depends(get_current_user)],

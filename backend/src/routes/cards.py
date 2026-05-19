@@ -254,29 +254,34 @@ async def get_cards(
             WHEN 'IBH'  THEN 41
             ELSE 99
         END"""
+        # Secondary tiebreaker: always sort by canonical set order ASC then card number
+        # so that when a card is reprinted across sets, the original printing is
+        # always returned first and becomes the "primary" in the grouping function.
+        canonical_tiebreak = f"{set_order_case} ASC, CAST(c.card_number AS INTEGER) ASC"
+
         order_by_clause = ""
         if sort:
             sort_map = {
-                "name_asc": "c.name ASC",
-                "name_desc": "c.name DESC",
-                "cost_asc": "c.energy_cost ASC, c.name ASC",
-                "cost_desc": "c.energy_cost DESC, c.name ASC",
-                "type_asc": "c.type ASC, c.name ASC",
+                "name_asc": f"c.name ASC, {canonical_tiebreak}",
+                "name_desc": f"c.name DESC, {canonical_tiebreak}",
+                "cost_asc": f"c.energy_cost ASC, c.name ASC, {canonical_tiebreak}",
+                "cost_desc": f"c.energy_cost DESC, c.name ASC, {canonical_tiebreak}",
+                "type_asc": f"c.type ASC, c.name ASC, {canonical_tiebreak}",
                 "set_newest": f"{set_order_case} DESC, CAST(c.card_number AS INTEGER) ASC",
                 "set_newest_desc": f"{set_order_case} DESC, CAST(c.card_number AS INTEGER) DESC",
                 "set_oldest": f"{set_order_case} ASC, CAST(c.card_number AS INTEGER) ASC",
                 "set_oldest_desc": f"{set_order_case} ASC, CAST(c.card_number AS INTEGER) DESC",
-                "rarity_rare": "CASE c.rarity WHEN 'Legendary' THEN 1 WHEN 'Rare' THEN 2 WHEN 'Uncommon' THEN 3 WHEN 'Common' THEN 4 ELSE 5 END, c.name ASC",
-                "rarity_common": "CASE c.rarity WHEN 'Common' THEN 1 WHEN 'Uncommon' THEN 2 WHEN 'Rare' THEN 3 WHEN 'Legendary' THEN 4 ELSE 5 END, c.name ASC"
+                "rarity_rare": f"CASE c.rarity WHEN 'Legendary' THEN 1 WHEN 'Rare' THEN 2 WHEN 'Uncommon' THEN 3 WHEN 'Common' THEN 4 ELSE 5 END, c.name ASC, {canonical_tiebreak}",
+                "rarity_common": f"CASE c.rarity WHEN 'Common' THEN 1 WHEN 'Uncommon' THEN 2 WHEN 'Rare' THEN 3 WHEN 'Legendary' THEN 4 ELSE 5 END, c.name ASC, {canonical_tiebreak}"
             }
             if sort in sort_map:
                 order_by_clause = f" ORDER BY {sort_map[sort]}"
             else:
                 # Default sort if sort param is invalid
-                order_by_clause = " ORDER BY c.name ASC"
+                order_by_clause = f" ORDER BY c.name ASC, {canonical_tiebreak}"
         else:
             # Default sort
-            order_by_clause = " ORDER BY c.name ASC"
+            order_by_clause = f" ORDER BY c.name ASC, {canonical_tiebreak}"
 
         base_sql += order_by_clause
         
