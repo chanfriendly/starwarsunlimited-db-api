@@ -6,6 +6,86 @@
 
 ## Current Status
 
+*(2026-05-20 session 22)* **Coordinate keyword implemented — abilities registry, engine hooks, UI indicator.**
+
+Four files added/modified, zero new dependencies:
+
+1. **`abilities.ts` (new)** — Per-card ability registry keyed by card name. Maps 12 Coordinate cards to typed effects: `STAT_BUFF`, `KEYWORD` grant, `ON_ATTACK_DRAW`, `ON_ATTACK_PREVENT_DAMAGE`. 10 more cards deferred (need target selection or event triggers — see registry comments).
+
+2. **`keywords.ts`** — New public API:
+   - `isCoordinateActive(state, ownerId)` — true when ≥3 units in both arenas combined.
+   - `getActiveCoordinateEffects(state, inst, ownerId)` — returns effects from registry if card has Coordinate keyword and threshold is met.
+   - `hasEffectiveKeyword(state, inst, ownerId, kw)` — checks native OR Coordinate-granted keyword.
+   - `getEffectiveKeywordValue(state, inst, ownerId, kw)` — native value, then Coordinate-granted.
+   - `effectiveHealth(state, inst, ownerId)` — card.health + STAT_BUFF HP bonus.
+   - `computePower` updated: Grit check uses `hasEffectiveKeyword`; Coordinate STAT_BUFF attack bonus added.
+   - `sentinelFilter` updated: uses `hasEffectiveKeyword` for Sentinel (catches Infantry of the 212th) and Saboteur bypass.
+   - `dispatchOnPlay` updated: triggers Coordinate keyword grants (e.g. Coruscant Guard Ambush) after native handlers, if threshold is met.
+   - `applyAttackFilters` updated: also runs filter handlers for Coordinate-granted keywords (dedup via `ranFilters` set).
+
+3. **`engine.ts`** — In `applyAttack`:
+   - `raidBonus` uses `getEffectiveKeywordValue` (catches Hevy Raid 2, Plo Koon Raid 3).
+   - Coordinate `ON_ATTACK_DRAW` fires at attack declaration — draws cards into hand.
+   - Coordinate `ON_ATTACK_PREVENT_DAMAGE` sets `preventSelfDamage` flag — attacker skips shield burn and takes 0 damage.
+   - Saboteur check uses `hasEffectiveKeyword` (catches Republic Commando).
+   - `checkDefeated` uses `effectiveHealth` (accounts for STAT_BUFF HP bonuses from 332nd Stalwart, Echo, 41st Elite Corps).
+
+4. **UI** — `useGame.ts` exposes `playerCoordinateActive: boolean`. `GameBoard` threads it to `YourMat`. `YourMat` shows a green `COORDINATE` badge in the Ground Arena zone label when active.
+
+**Implemented cards (12):**
+- STAT_BUFF: 332nd Stalwart (+1/+1), 41st Elite Corps (+0/+3), Clone Heavy Gunner (+2/+0), Echo (+2/+2)
+- KEYWORD: Coruscant Guard (Ambush), Hevy (Raid 2), Infantry of the 212th (Sentinel), Luminara Unduli (Grit), Plo Koon (Raid 3), Republic Commando (Saboteur)
+- ON_ATTACK_DRAW: Anakin Skywalker (draw 1)
+- ON_ATTACK_PREVENT_DAMAGE: Aayla Secura
+
+**Deferred (10 cards) — see `abilities.ts` comments and plan below.**
+
+TypeScript: 0 errors.
+
+*(2026-05-20 session 21)* **Game rules pass: resource mechanic, draw fix, Grit, Saboteur, visual card redesigns.**
+
+Six items implemented:
+
+1. **Regroup draw fix** — `resolveRegroup` now draws exactly 2 cards (`Math.min(2, p.deck.length)`) instead of "draw up to 6."
+
+2. **Resource selection mechanic** — Players now exhaust a hand card face-down during regroup to grow their resource pool. New `RESOURCE_CARD` action type. `hasResourced: boolean` added to `PlayerState`. `getLegalActions` (regroup branch) offers RESOURCE_CARD for each hand card + END_REGROUP (skip). `applyResourceCard` removes the card from hand, increments `resources.total`, marks `hasResourced`, then switches to AI or resolves. `applyEndRegroup` does the same two-phase handoff. AI auto-resources (random pick or skip). `isResourcePhase` exposed from `useGame.ts` — drives amber banner in `YourMat` and "SELECT RESOURCE ↓" status in `DividerBar`.
+
+3. **Grit keyword** — `computePower(state, inst, ownerId)` added to `keywords.ts`. Returns `base_attack + inst.damage` when unit has Grit (live computation so mid-combat pings apply). `applyAttack` in `engine.ts` uses `computePower(...) + raidBonus` instead of raw `card.attack + raidBonus`.
+
+4. **Saboteur keyword** — Two parts: (a) `sentinelFilter` in `keywords.ts` carves out Saboteur attackers before applying Sentinel targeting restriction. (b) `applyAttack` in `engine.ts` strips all defender shield tokens before damage when attacker has Saboteur — tracked via `let defenderShields` local so post-strip value propagates to the shield absorption check without re-reading stale state.
+
+5. **Native landscape BaseCard + LeaderCard** — Eliminated CSS rotation hacks. Both cards redesigned as natively horizontal (flex row: art left, info panel right). `sideways` prop removed from both. `TopOppMat` and `YourMat` callers updated.
+
+6. **Official SWU card back** — `CardBack` rewritten as SVG: deep navy gradient background, two crossing lightsaber beams with gradient strokes + glow filter, "STAR WARS / UNLIMITED" text centered. Old custom "Twin Suns Field Manual" design replaced.
+
+TypeScript: 0 errors after all changes.
+
+*(2026-05-20 session 20)* **Tabletop simulator — full board UI ported from Claude Design.**
+
+Ported the Claude Design prototype (`play-area.html`) into production React components. All interaction still wired to the real 2-player game engine from `useGame.ts`.
+
+New files:
+- `frontend/src/app/game/layout.tsx` — imports `play.css` scoped to the game route
+- `frontend/src/app/game/PlayCard.tsx` — `PlayCard`, `CardBack`, `BaseCard`, `LeaderCard`, `InitToken`; adapters `toPlayCardProps`, `toBaseData`, `toLeaderData`; hover event bus (`emitHoverCard`)
+- `frontend/src/app/game/BoardParts.tsx` — `ResourceLattice`, `CardPile`, `HpReadout`, `Counter`, `Stamp`
+- `frontend/src/app/game/DividerBar.tsx` — center bar with round/phase, initiative token, Take Counter button, resource readout, expandable action log
+- `frontend/src/app/game/YourMat.tsx` — full player mat (ground arena, base+leaders, space arena, resources, deck/discard/init, hand)
+- `frontend/src/app/game/TopOppMat.tsx` — opponent mat with compact header, face-down hand, small arena cards
+- `frontend/src/app/game/CardPreview.tsx` — hover preview overlay listening on `twin-suns:hover-card` custom event
+- `frontend/src/app/game/TweaksPanel.tsx` — palette (desert/imperial/cantina), vibe (manual/print/holo), exhaust angle slider; persists to `twin_suns_play_tweaks` in localStorage
+
+Rewrote: `frontend/src/app/game/GameBoard.tsx` — orchestrator using all above components; same interaction contract (attack select, play card, deploy leader, take counter).
+
+Modified earlier this session: `engine.ts` `log()` now adds timestamps + critical detection; `types.ts` `LogEntry` gets `time?` and `kind?` fields.
+
+Key implementation decisions:
+- `card.aspects.map(a => a.aspect_name)` → Title Case strings for `ts-aspect-pip` data-aspect; lowercase for CSS art gradient variables
+- Real card art images used when `image_uri` is present; falls back to aspect-gradient `CardArtFill` 
+- Hand card: single tap to select, second tap to play (no separate PLAY button)
+- `GameCard.tsx` is now unused (superseded by PlayCard.tsx) but left in place for safety
+
+TypeScript: 0 errors.
+
 *(2026-05-19 session 19)* **Achievements system and Pilot Training.**
 
 14 auto-detected achievements across 4 categories (deck building, collection, social, training). `UserAchievement` model + `user_achievements` table with startup auto-migration. `GET /api/me/achievements` endpoint computes earned state from existing data (deck count, collection size, wishlist, shared decks, all-aspects cross-deck check), persists newly earned rows with `earned_at` timestamp, and returns the full catalog with earned/locked status + total points + current rank. Karabast future hook: `source` field on `UserAchievement` rows, no schema change needed later.
@@ -101,6 +181,15 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 
 ## What's Done
 
+- [x] **[2026-05-20] Coordinate keyword** — `abilities.ts` registry + `isCoordinateActive` + `hasEffectiveKeyword` + `effectiveHealth`. 12 cards implemented across 4 effect types. `applyAttackFilters` extended to dispatch Coordinate-granted filter keywords. UI shows green COORDINATE badge in arena label when threshold met.
+
+- [x] **[2026-05-20] Regroup draw fix** — `resolveRegroup` draws exactly 2 cards, not "up to 6."
+- [x] **[2026-05-20] Resource selection mechanic** — `RESOURCE_CARD` action + `hasResourced` flag on `PlayerState`. Regroup phase now prompts player to exhaust a hand card face-down (or skip). AI auto-resources random card. Resource total grows by 1 per card placed; readied each round. `isResourcePhase` exposed from `useGame.ts`; drives amber banner in `YourMat` and "SELECT RESOURCE ↓" label in `DividerBar`.
+- [x] **[2026-05-20] Grit keyword** — `computePower()` helper in `keywords.ts` returns `base_attack + damage_counters` when unit has Grit (continuous, live computation). `applyAttack` in `engine.ts` uses this for attack power.
+- [x] **[2026-05-20] Saboteur keyword** — (1) `sentinelFilter` carves out Saboteur attackers before Sentinel restriction applies. (2) `applyAttack` strips all defender shield tokens before damage when attacker has Saboteur; uses `let defenderShields` local to propagate the post-strip value to shield absorption without stale reads.
+- [x] **[2026-05-20] Native landscape BaseCard + LeaderCard** — Both redesigned as natively horizontal (flex row: art left, stats right). Removes CSS rotation hack and makes HP/stats text naturally readable. `sideways` prop removed.
+- [x] **[2026-05-20] Official SWU card back** — `CardBack` rewritten as SVG with deep navy gradient, crossing lightsaber beams with glow filter, and "STAR WARS / UNLIMITED" text.
+
 - [x] **[2026-05-19] Achievements system + Pilot Training** — `UserAchievement` model, `user_achievements` startup migration, `GET /api/me/achievements` endpoint (lazy eval, INSERT OR IGNORE), 14 achievements across 4 categories. Profile Achievements tab: rank panel with expandable K1–K4 lesson content, achievement grid with locked/earned states. Homepage rank track connected to live API. Karabast `source` hook designed in.
 - [x] **[2026-05-19] Set code grouping fix** — card query sort now includes `set_order_case ASC` tiebreaker on all sort modes; original printing always wins as grouped primary. Fixes 11 reprinted cards (Open Fire, Resupply, Tactical Advantage, etc.) incorrectly showing TWI set code.
 - [x] **[2026-05-19] Deck analysis panel** — `DeckAnalysisPanel` component: cost curve, type breakdown, aspect distribution, rarity counts, estimated price. Client-side `useMemo`. Used in both authenticated deck view and public share view.
@@ -192,10 +281,33 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 
 **Priority order — top item is immediately actionable:**
 
-1. **Deploy sessions 18+19 to production** — `./deploy.sh`. Both the `share_token` and `user_achievements` migrations run automatically on backend startup.
+1. **Deploy sessions 18–22 to production** — `./deploy.sh`. The `share_token` and `user_achievements` migrations run automatically on backend startup. Sessions 21–22 are frontend-only (game engine + UI), no schema changes.
 2. **Verify achievements in production** — navigate to Profile → Achievements tab; confirm rank panel shows with lesson content, achievement grid loads; build a deck and refresh to confirm `first_deck`/`rank_k1` earned.
 3. **Verify homepage rank track** — when logged in, confirm the progress bars reflect real achievement state (not all-0% demo).
-4. **Consider adding `/decks/share/[token]` discoverability** — no entry point from the public side yet.
+4. **Continue Coordinate deferred cards** — see table above. Next most tractable: Clone Commander Cody aura (requires iterating all friendlies on each state evaluation) and Kit Fisto / Reckless Torrent (need a target-selection action type).
+5. **Consider adding `/decks/share/[token]` discoverability** — no entry point from the public side yet.
+
+---
+
+### Coordinate keyword — 12 of 22 cards implemented
+
+**Implemented in session 22.** Core system is in place. Remaining cards require capabilities not yet in the engine.
+
+**Deferred cards and what's needed:**
+
+| Card | Effect | Blocker |
+|------|--------|---------|
+| Clone Commander Cody | Each other friendly unit gets +1/+1 and Overwhelm | Continuous aura buff requires re-evaluating all friendly units on state change |
+| Clone Dive Trooper | While attacking, defender gets –2/–0 | Per-attack temp debuff on target requires a transient state layer |
+| Padmé Amidala (Pursuing Peace) | On Attack: give enemy –3/–0 for this phase | Phase-scoped debuff on a chosen unit |
+| Kit Fisto | On Attack: deal 3 damage to a chosen ground unit | Needs target selection UI |
+| Ki-Adi-Mundi | When opponent plays second card each phase: draw 2 | Needs per-player card-play counter and triggered-ability dispatch |
+| Pelta Supply Frigate | When Played: create a Clone Trooper token | Token creation system not yet built |
+| Reckless Torrent | When Played: deal 2 damage to a friendly and an enemy unit | Needs target selection UI |
+| Sanctioner's Shuttle | When Played: capture an enemy unit (cost ≤3) | Capture zone not yet modeled |
+| Ahsoka Tano (Leader) | Action [Exhaust]: attack with a unit, it gets +1/+0 | New leader action type |
+| Padmé Amidala (Leader) | Action [1, Exhaust]: search top 3 for Republic card | Deck search UI not yet built |
+| For The Republic (Upgrade) | Attached unit gains Coordinate Restore 2; costs 2 less with 3 Republic units | Upgrade with Coordinate Restore not hooked up |
 
 ---
 

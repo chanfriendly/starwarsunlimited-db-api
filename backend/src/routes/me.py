@@ -37,17 +37,35 @@ def enrich_card_with_relationships(db, card_dict):
     try:
         keywords_query = text("SELECT keyword FROM card_keywords WHERE card_id = :card_id")
         keywords_proxy = db.execute(keywords_query, {"card_id": card_dict['id']})
-        
+
         # Process keyword results
         keywords = []
         for keyword_row in keywords_proxy:
             keywords.append(keyword_row._mapping['keyword'])
-        
+
         card_dict['keywords'] = keywords
     except Exception as e:
         logger.error(f"Error getting keywords: {e}")
         card_dict['keywords'] = []
-        
+
+    # Get card arenas
+    try:
+        arenas_query = text("SELECT arena FROM card_arenas WHERE card_id = :card_id")
+        arenas_proxy = db.execute(arenas_query, {"card_id": card_dict['id']})
+        card_dict['arenas'] = [row._mapping['arena'] for row in arenas_proxy]
+    except Exception as e:
+        logger.error(f"Error getting arenas: {e}")
+        card_dict['arenas'] = []
+
+    # Get card traits
+    try:
+        traits_query = text("SELECT trait FROM card_traits WHERE card_id = :card_id")
+        traits_proxy = db.execute(traits_query, {"card_id": card_dict['id']})
+        card_dict['traits'] = [row._mapping['trait'] for row in traits_proxy]
+    except Exception as e:
+        logger.error(f"Error getting traits: {e}")
+        card_dict['traits'] = []
+
     return card_dict
 
 @router.get("/decks")

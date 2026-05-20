@@ -99,6 +99,13 @@ except Exception as e:
     logger.error(f"Failed to load me router: {str(e)}")
 
 try:
+    from src.routes.matches import router as matches_router
+    app.include_router(matches_router, prefix="/api/me", tags=["matches"])
+    logger.info("Successfully loaded matches router")
+except Exception as e:
+    logger.error(f"Failed to load matches router: {str(e)}")
+
+try:
     from src.routes.aspects import router as aspects_router
     app.include_router(aspects_router, prefix="/api/aspects", tags=["aspects"])
     logger.info("Successfully loaded aspects router")

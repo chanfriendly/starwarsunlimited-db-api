@@ -45,6 +45,11 @@ ACHIEVEMENTS = [
     {"key": "five_hundred_cards", "title": "War Chest",         "desc": "Own 500 cards.",                       "icon": "⬡",  "category": "collection", "points": 100},
     # Social
     {"key": "first_wishlist",     "title": "Target Acquired",   "desc": "Add a card to your wishlist.",         "icon": "🎯", "category": "social",     "points": 10},
+    # Gameplay
+    {"key": "first_game",         "title": "Into the Fray",     "desc": "Play your first game.",                "icon": "⚔",  "category": "gameplay",   "points": 10},
+    {"key": "first_win",          "title": "Victor",            "desc": "Win your first game.",                 "icon": "✦",  "category": "gameplay",   "points": 20},
+    {"key": "ten_wins",           "title": "Seasoned Commander","desc": "Win 10 games.",                        "icon": "◆",  "category": "gameplay",   "points": 50},
+    {"key": "cpu_crusher",        "title": "CPU Crusher",       "desc": "Beat the AI on Normal difficulty.",    "icon": "◈",  "category": "gameplay",   "points": 25},
     # Pilot Training rank gates (cumulative)
     {"key": "rank_k1",            "title": "Cadet",             "desc": "Complete K1 Cadet training.",          "icon": "◈",  "category": "training",   "points": 25},
     {"key": "rank_k2",            "title": "Pilot",             "desc": "Complete K2 Pilot training.",          "icon": "◈",  "category": "training",   "points": 50},
@@ -129,6 +134,27 @@ def _compute_earned_keys(
         else ("all_aspects" in already_earned)
     )
 
+    # gameplay counts — matches table may not exist yet on old DBs; guard gracefully
+    try:
+        total_games = app_db.execute(
+            text("SELECT COUNT(*) FROM matches WHERE player_id = :uid"),
+            {"uid": user_id},
+        ).scalar() or 0
+        total_wins = app_db.execute(
+            text("SELECT COUNT(*) FROM matches WHERE player_id = :uid AND result = 'win'"),
+            {"uid": user_id},
+        ).scalar() or 0
+        cpu_normal_wins = app_db.execute(
+            text("""
+                SELECT COUNT(*) FROM matches
+                WHERE player_id = :uid AND result = 'win'
+                  AND opponent_type = 'cpu' AND difficulty = 'normal'
+            """),
+            {"uid": user_id},
+        ).scalar() or 0
+    except Exception:
+        total_games = total_wins = cpu_normal_wins = 0
+
     conditions = {
         "first_deck":         deck_count >= 1,
         "three_decks":        deck_count >= 3,
@@ -140,6 +166,11 @@ def _compute_earned_keys(
         "hundred_cards":      coll_count >= 100,
         "five_hundred_cards": coll_count >= 500,
         "first_wishlist":     wish_count >= 1,
+        # gameplay
+        "first_game":         total_games >= 1,
+        "first_win":          total_wins >= 1,
+        "ten_wins":           total_wins >= 10,
+        "cpu_crusher":        cpu_normal_wins >= 1,
     }
 
     # Rank gates are cumulative

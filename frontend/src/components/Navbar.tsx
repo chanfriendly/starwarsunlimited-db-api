@@ -162,6 +162,7 @@ export function Navbar() {
     { href: '/cards', label: 'Cards' },
     { href: '/deck-builder', label: 'Deck Builder' },
     ...(isAuthenticated ? [{ href: '/decks', label: 'My Decks' }] : []),
+    ...(isAuthenticated ? [{ href: '/game', label: 'Play' }] : []),
     ...(isAuthenticated ? [{ href: '/profile', label: 'Profile' }] : []),
   ];
 

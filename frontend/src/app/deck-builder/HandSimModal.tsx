@@ -33,6 +33,7 @@ function buildPool(deckCards: DeckItem[]): CardType[] {
 }
 
 function MiniCard({ card }: { card: CardType }) {
+  const [imgError, setImgError] = React.useState(false);
   const aspects = card.aspects?.map(a => a.aspect_name) ?? [];
   const ASPECT_COLORS: Record<string, string> = {
     Command: '#c2453a', Aggression: '#d96f2d', Cunning: '#e2b342',
@@ -44,6 +45,8 @@ function MiniCard({ card }: { card: CardType }) {
     ? `linear-gradient(155deg, ${aspects.map(a => ASPECT_COLORS[a] ?? '#2c251a').join(', ')})`
     : 'linear-gradient(155deg, #2c251a, #1f1a12)';
 
+  const artSrc = card.image_uri || card.image_url || '';
+  const showArt = !!artSrc && !imgError;
   const cost = card.cost ?? card.energy_cost ?? '—';
 
   return (
@@ -52,13 +55,29 @@ function MiniCard({ card }: { card: CardType }) {
       style={{
         width: 90,
         aspectRatio: '5 / 7',
-        background: bg,
+        background: showArt ? '#000' : bg,
         border: '1px solid var(--ts-line-2)',
         position: 'relative',
         boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
         flexShrink: 0,
+        overflow: 'hidden',
       }}
     >
+      {showArt && (
+        <img
+          src={artSrc}
+          alt={card.name ?? ''}
+          onError={() => setImgError(true)}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            objectPosition: 'center top',
+          }}
+        />
+      )}
       {/* Cost */}
       <div
         style={{

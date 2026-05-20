@@ -190,3 +190,23 @@ class UserAchievement(Base):
 
     user = relationship("User", back_populates="achievements")
 
+
+class Match(Base):
+    __tablename__ = 'matches'
+
+    id            = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    player_id     = Column(String, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    opponent_type = Column(String, nullable=False)   # 'cpu' | 'human'
+    opponent_id   = Column(String, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    deck_id       = Column(String, ForeignKey('decks.id', ondelete='SET NULL'), nullable=True)
+    leader1_name  = Column(String, nullable=True)
+    leader2_name  = Column(String, nullable=True)
+    result        = Column(String, nullable=False)   # 'win' | 'loss' | 'draw'
+    turns         = Column(Integer, nullable=True)
+    match_type    = Column(String, default='casual') # 'casual' | 'ranked'
+    difficulty    = Column(String, nullable=True)    # 'easy' | 'normal' (cpu only)
+    elo_change    = Column(Integer, nullable=True)
+    created_at    = Column(DateTime, default=datetime.datetime.utcnow)
+
+    player = relationship("User", foreign_keys=[player_id])
+

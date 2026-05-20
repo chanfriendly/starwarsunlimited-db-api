@@ -197,8 +197,8 @@ export function DeckViewClient({ deckId }: { deckId: string }) {
           <div className="ts-eyebrow" style={{ marginBottom: 12 }}>Leaders</div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             {deck.leaders?.map(leader => (
-              <div key={leader.id} style={{ textAlign: 'center' }}>
-                <div style={{ width: 64, height: 90, overflow: 'hidden', border: '1px solid var(--ts-line-2)', marginBottom: 6 }}>
+              <div key={leader.id} style={{ textAlign: 'center', width: 120 }}>
+                <div style={{ width: 120, height: 168, overflow: 'hidden', border: '1px solid var(--ts-line-2)', marginBottom: 6 }}>
                   <img
                     src={leader.image_uri || leader.image_url || ''}
                     alt={leader.name}
@@ -206,7 +206,7 @@ export function DeckViewClient({ deckId }: { deckId: string }) {
                     onError={e => { e.currentTarget.style.display = 'none'; }}
                   />
                 </div>
-                <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, color: 'var(--ts-ink-3)', maxWidth: 64, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, color: 'var(--ts-ink-3)', maxWidth: 120, wordBreak: 'break-word' }}>
                   {leader.name}
                 </div>
               </div>
@@ -221,8 +221,8 @@ export function DeckViewClient({ deckId }: { deckId: string }) {
         <div style={{ background: 'var(--ts-panel)', border: '1px solid var(--ts-line)', padding: 16 }}>
           <div className="ts-eyebrow" style={{ marginBottom: 12 }}>Base</div>
           {deck.base ? (
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ width: 64, height: 90, overflow: 'hidden', border: '1px solid var(--ts-line-2)', marginBottom: 6 }}>
+            <div style={{ textAlign: 'center', width: 120 }}>
+              <div style={{ width: 120, height: 168, overflow: 'hidden', border: '1px solid var(--ts-line-2)', marginBottom: 6 }}>
                 <img
                   src={deck.base.image_uri || deck.base.image_url || ''}
                   alt={deck.base.name}
@@ -230,7 +230,7 @@ export function DeckViewClient({ deckId }: { deckId: string }) {
                   onError={e => { e.currentTarget.style.display = 'none'; }}
                 />
               </div>
-              <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, color: 'var(--ts-ink-3)', maxWidth: 64, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, color: 'var(--ts-ink-3)', maxWidth: 120, wordBreak: 'break-word' }}>
                 {deck.base.name}
               </div>
             </div>
