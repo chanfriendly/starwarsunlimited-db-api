@@ -204,6 +204,7 @@ async def get_user_decks(
                 "description": deck.description,
                 "created_at": deck.created_at,
                 "updated_at": deck.updated_at,
+                "share_token": deck.share_token,
                 "leaders": leaders,
                 "base": base,
                 "cards": cards
@@ -328,6 +329,7 @@ async def get_user_deck(
             "user_id": deck.user_id,
             "created_at": deck.created_at,
             "updated_at": deck.updated_at,
+            "share_token": deck.share_token,
             "leaders": leaders,
             "base": base,
             "cards": cards

@@ -220,6 +220,37 @@ export function PublicDeckViewClient({ shareToken }: { shareToken: string }) {
       {/* Analysis panel */}
       <DeckAnalysisPanel deck={deck} />
 
+      {/* Join CTA */}
+      <div style={{
+        marginTop: 48,
+        border: '1px solid var(--ts-line)',
+        background: 'var(--ts-panel)',
+        padding: '32px 28px',
+        display: 'flex',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 20,
+      }}>
+        <div>
+          <div className="ts-eyebrow" style={{ marginBottom: 8 }}>Twin Suns Deck Builder</div>
+          <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 22, color: 'var(--ts-ink)', marginBottom: 8 }}>
+            Build your own deck
+          </div>
+          <p style={{ fontFamily: 'var(--ts-font-body)', fontSize: 13, color: 'var(--ts-ink-3)', lineHeight: 1.7, margin: 0, maxWidth: 400 }}>
+            Browse 2,300+ cards, track your collection, and build Twin Suns format decks — free to use.
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <Link href="/signup" className="ts-btn ts-btn-primary" style={{ textDecoration: 'none' }}>
+            Create Account
+          </Link>
+          <Link href="/login" className="ts-btn ts-btn-sm" style={{ textDecoration: 'none' }}>
+            Log In
+          </Link>
+        </div>
+      </div>
+
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );

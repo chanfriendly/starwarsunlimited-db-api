@@ -33,7 +33,11 @@ export function DeckViewClient({ deckId }: { deckId: string }) {
   useEffect(() => {
     if (!deckId) return;
     fetchWithAuth(`/api/me/decks/${encodeURIComponent(deckId)}`)
-      .then((data: SavedDeck) => { setDeck(data); setLoading(false); })
+      .then((data: SavedDeck) => {
+        setDeck(data);
+        if (data.share_token) setShareToken(data.share_token);
+        setLoading(false);
+      })
       .catch((err: Error) => {
         setError(err.message?.includes('401') ? 'Please log in to view this deck.' : 'Could not load deck.');
         setLoading(false);
@@ -44,9 +48,9 @@ export function DeckViewClient({ deckId }: { deckId: string }) {
     setSharing(true);
     setShareError(null);
     try {
-      const { share_token } = await shareUserDeck(deckId);
-      setShareToken(share_token);
-      const url = `${window.location.origin}/decks/share/${share_token}`;
+      const token = shareToken ?? (await shareUserDeck(deckId)).share_token;
+      if (!shareToken) setShareToken(token);
+      const url = `${window.location.origin}/decks/share/${token}`;
       await navigator.clipboard.writeText(url);
       setShareCopied(true);
       setTimeout(() => setShareCopied(false), 3000);

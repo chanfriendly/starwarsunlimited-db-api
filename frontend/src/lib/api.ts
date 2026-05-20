@@ -78,6 +78,7 @@ export interface SavedDeck {
   user_id?: string;
   created_at?: string;
   updated_at?: string;
+  share_token?: string | null;
   leaders: Card[];
   base: Card | null;
   cards: DeckCardEntry[];
