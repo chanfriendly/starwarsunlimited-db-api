@@ -7,6 +7,7 @@ import { SavedDeck, deleteUserDeck, fetchUserAchievements, AchievementsResponse 
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { fetchWithAuth } from '@/lib/fetch-utils';
+import { AchievementBadge } from '@/components/AchievementBadge';
 
 interface CollectionItem {
     card: {
@@ -413,13 +414,7 @@ function AchievementsTab({
                                     padding: '12px 16px', cursor: 'pointer',
                                 }} onClick={() => setExpandedRank(isExpanded ? null : rank)}>
                                     {/* Rank badge */}
-                                    <div style={{
-                                        fontFamily: 'var(--ts-font-mono)', fontSize: 9,
-                                        letterSpacing: '0.2em', padding: '3px 8px',
-                                        border: `1px solid ${earned ? 'var(--ts-amber)' : 'var(--ts-line-2)'}`,
-                                        color: earned ? 'var(--ts-amber)' : 'var(--ts-ink-4)',
-                                        flexShrink: 0,
-                                    }}>{rank}</div>
+                                    <AchievementBadge name={rankKey} size={48} locked={!earned} />
                                     {/* Label */}
                                     <div style={{ flex: 1 }}>
                                         <div style={{
@@ -487,28 +482,44 @@ function AchievementsTab({
                                     }}>
                                         {items.map(ach => (
                                             <div key={ach.key} style={{
-                                                background: 'var(--ts-panel)',
-                                                border: `1px solid ${ach.earned ? 'var(--ts-line)' : 'var(--ts-line)'}`,
-                                                padding: '14px 16px',
-                                                opacity: ach.earned ? 1 : 0.35,
+                                                background: ach.earned ? 'var(--ts-panel)' : 'var(--ts-bg-2)',
+                                                border: `1px solid ${ach.earned ? 'var(--ts-line-2)' : 'var(--ts-line)'}`,
+                                                padding: '16px',
+                                                position: 'relative',
                                             }}>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                                                    <span style={{ fontSize: 22 }}>{ach.icon}</span>
-                                                    <span style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, color: 'var(--ts-amber)' }}>
-                                                        {ach.points} pts
-                                                    </span>
-                                                </div>
-                                                <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 14, color: 'var(--ts-ink)', marginBottom: 4 }}>
-                                                    {ach.title}
-                                                </div>
-                                                <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, color: 'var(--ts-ink-3)', lineHeight: 1.6 }}>
-                                                    {ach.desc}
-                                                </div>
-                                                {ach.earned && ach.earned_at && (
-                                                    <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 8, color: 'var(--ts-ink-4)', marginTop: 8 }}>
-                                                        {new Date(ach.earned_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                                {/* key label top-right */}
+                                                <span style={{
+                                                    position: 'absolute', top: 8, right: 10,
+                                                    fontFamily: 'var(--ts-font-mono)', fontSize: 8,
+                                                    color: 'var(--ts-ink-4)', letterSpacing: '0.16em',
+                                                    textTransform: 'uppercase',
+                                                }}>{ach.key}</span>
+
+                                                <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+                                                    <AchievementBadge name={ach.key} size={64} locked={!ach.earned} />
+                                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
+                                                            <div style={{ fontFamily: 'var(--ts-font-display)', fontSize: 16, color: 'var(--ts-ink)', lineHeight: 1.2 }}>
+                                                                {ach.title}
+                                                            </div>
+                                                            <span style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, color: 'var(--ts-amber)', flexShrink: 0 }}>
+                                                                {ach.points} pts
+                                                            </span>
+                                                        </div>
+                                                        <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, color: 'var(--ts-ink-3)', lineHeight: 1.6 }}>
+                                                            {ach.desc}
+                                                        </div>
+                                                        {ach.earned && ach.earned_at ? (
+                                                            <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, color: 'var(--ts-green)', letterSpacing: '0.16em', marginTop: 8 }}>
+                                                                ✓ {new Date(ach.earned_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                                            </div>
+                                                        ) : (
+                                                            <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 9, color: 'var(--ts-ink-4)', letterSpacing: '0.14em', marginTop: 8 }}>
+                                                                ◌ Locked
+                                                            </div>
+                                                        )}
                                                     </div>
-                                                )}
+                                                </div>
                                             </div>
                                         ))}
                                     </div>
