@@ -40,6 +40,8 @@ export interface LeaderData {
   power?: number;
   hp?: number;
   deployed: boolean;
+  /** True when the leader ability was used this round */
+  exhausted?: boolean;
   image_uri?: string;
   text?: string;
 }
@@ -86,6 +88,7 @@ export function toLeaderData(li: LeaderInstance): LeaderData {
     power: li.card.attack,
     hp: li.card.health,
     deployed: li.isDeployed,
+    exhausted: li.exhausted ?? false,
     image_uri: li.card.image_uri ?? li.card.image_url,
     text: li.card.text,
   };
@@ -339,9 +342,7 @@ const BASE_DIMS = {
 export function BaseCard({ base, isTarget = false, onClick, size = 'md', hoverable = true }: BaseCardProps) {
   const dims = BASE_DIMS[size];
   const hpPct    = base.maxHp > 0 ? base.hp / base.maxHp : 0;
-  const dmgLevel = hpPct > 0.66 ? 'hi' : hpPct > 0.33 ? 'mid' : 'low';
-  const dmgColor = dmgLevel === 'hi' ? 'var(--saber-green)' : dmgLevel === 'mid' ? 'var(--saber-amber)' : 'var(--saber-red)';
-  const artW     = Math.round(dims.w * 0.45);
+  const dmgColor = hpPct > 0.66 ? 'var(--saber-green)' : hpPct > 0.33 ? 'var(--saber-amber)' : 'var(--saber-red)';
 
   const hoverData: PlayCardData = {
     name: base.name, type: 'Base', aspects: [], hp: base.hp, maxHp: base.maxHp,
@@ -354,74 +355,62 @@ export function BaseCard({ base, isTarget = false, onClick, size = 'md', hoverab
     <div
       style={{
         width: dims.w, height: dims.h,
-        display: 'flex', flexDirection: 'row',
+        position: 'relative',
+        overflow: 'hidden',
+        border: `1.5px solid ${isTarget ? 'var(--saber-red)' : 'rgba(255,180,84,0.45)'}`,
+        borderRadius: 3,
+        flexShrink: 0,
+        cursor: onClick ? 'pointer' : 'default',
         background: 'var(--panel-2)',
-        border: `1px solid ${isTarget ? 'var(--saber-red)' : 'var(--line-2)'}`,
-        borderRadius: 3, overflow: 'hidden',
-        flexShrink: 0, cursor: onClick ? 'pointer' : 'default',
         boxShadow: isTarget ? '0 0 16px var(--saber-red-glow)' : undefined,
         animation: isTarget ? 'target-pulse 1.5s ease-in-out infinite' : undefined,
       }}
       onClick={onClick}
       {...hover}
     >
-      {/* Art */}
-      <div style={{ position: 'relative', width: artW, flexShrink: 0, overflow: 'hidden' }}>
-        {base.image_uri
-          ? <img src={base.image_uri} alt={base.name} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top' }} />
-          : (
-            <>
-              <div style={{
-                position: 'absolute', inset: 0,
-                background: `linear-gradient(135deg, ${base.color ?? 'var(--saber-amber)'}, var(--panel))`,
-                opacity: 0.4,
-              }} />
-              <svg viewBox="0 0 100 100" style={{ position: 'absolute', inset: 0, opacity: 0.55 }}>
-                <polygon points="50,15 80,40 80,80 20,80 20,40" fill="none" stroke="var(--ink-2)" strokeWidth="1.5" />
-                <line x1="35" y1="80" x2="35" y2="55" stroke="var(--ink-2)" strokeWidth="1" />
-                <line x1="65" y1="80" x2="65" y2="55" stroke="var(--ink-2)" strokeWidth="1" />
-                <rect x="42" y="65" width="16" height="15" fill="var(--ink-3)" opacity="0.6" />
-              </svg>
-            </>
-          )}
-      </div>
-
-      {/* Info panel */}
+      {/* Full-bleed art */}
+      {base.image_uri
+        ? <img src={base.image_uri} alt={base.name}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center' }} />
+        : (
+          <>
+            <div style={{
+              position: 'absolute', inset: 0,
+              background: `linear-gradient(135deg, ${base.color ?? 'var(--saber-amber)'}, var(--panel))`,
+              opacity: 0.4,
+            }} />
+            <div style={{
+              position: 'absolute', inset: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'var(--font-display)', fontSize: 10, color: 'var(--ink-2)',
+              textAlign: 'center', padding: '0 8px',
+            }}>
+              {base.name}
+            </div>
+          </>
+        )
+      }
+      {/* HP overlay bar at bottom */}
       <div style={{
-        flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-        padding: '5px 6px 5px 5px', background: 'var(--bg-2)',
-        borderLeft: '1px solid var(--line)',
-        minWidth: 0,
+        position: 'absolute', bottom: 0, left: 0, right: 0,
+        padding: '3px 6px',
+        background: 'rgba(0,0,0,0.75)',
+        display: 'flex', alignItems: 'center', gap: 6,
       }}>
         <div style={{
-          fontFamily: 'var(--font-display)', fontSize: 10, lineHeight: 1.2,
-          color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          flex: 1, height: 3,
+          background: 'rgba(0,0,0,0.5)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          overflow: 'hidden',
         }}>
-          {base.name}
-        </div>
-
-        {/* HP bar */}
-        <div style={{ height: 3, background: 'rgba(0,0,0,0.5)', border: '1px solid var(--line)', margin: '3px 0' }}>
           <div style={{ height: '100%', width: `${hpPct * 100}%`, background: dmgColor, transition: 'width 0.4s' }} />
         </div>
-
-        {/* HP readout */}
-        <div style={{
-          fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700,
-          color: dmgColor, textAlign: 'right',
-          padding: '1px 4px', border: `1px solid ${dmgColor}`,
-          background: 'var(--panel)', alignSelf: 'flex-end',
-          lineHeight: 1,
+        <span style={{
+          fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700,
+          color: dmgColor, lineHeight: 1, whiteSpace: 'nowrap',
         }}>
           {base.hp}/{base.maxHp}
-        </div>
-
-        <div style={{
-          fontFamily: 'var(--font-mono)', fontSize: 7, letterSpacing: '0.14em',
-          color: 'var(--ink-4)', textTransform: 'uppercase', marginTop: 2,
-        }}>
-          Base
-        </div>
+        </span>
       </div>
     </div>
   );
@@ -444,7 +433,6 @@ const LEADER_DIMS = {
 
 export function LeaderCard({ leader, size = 'md', hoverable = true }: LeaderCardProps) {
   const dims = LEADER_DIMS[size];
-  const artW = Math.round(dims.w * 0.42);
 
   const hoverData: PlayCardData = {
     name: leader.name, type: 'Leader', aspects: leader.aspects,
@@ -458,83 +446,57 @@ export function LeaderCard({ leader, size = 'md', hoverable = true }: LeaderCard
     <div
       style={{
         width: dims.w, height: dims.h,
-        display: 'flex', flexDirection: 'row',
-        background: 'var(--panel-2)',
-        border: '1px solid var(--saber-amber)',
-        borderRadius: 3, overflow: 'hidden',
-        flexShrink: 0,
-        opacity: leader.deployed ? 0.45 : 1,
         position: 'relative',
+        overflow: 'hidden',
+        border: `1px solid ${leader.exhausted && !leader.deployed ? 'rgba(255,180,84,0.3)' : 'var(--saber-amber)'}`,
+        borderRadius: 3,
+        flexShrink: 0,
+        background: 'var(--panel-2)',
+        opacity: leader.deployed ? 0.45 : leader.exhausted ? 0.6 : 1,
+        transition: 'opacity 0.3s, border-color 0.3s',
       }}
       {...hover}
     >
-      {/* Art */}
-      <div style={{ position: 'relative', width: artW, flexShrink: 0, overflow: 'hidden' }}>
-        {leader.image_uri
-          ? <img src={leader.image_uri} alt={leader.name} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top' }} />
-          : (
-            <>
-              <CardArtFill aspects={leader.aspects} />
-              <div style={{ position: 'absolute', inset: 1, border: '1px solid var(--saber-amber)', opacity: 0.6 }} />
-            </>
-          )}
-      </div>
-
-      {/* Info panel */}
-      <div style={{
-        flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-        padding: '5px 5px 4px 5px', background: 'var(--bg-2)',
-        borderLeft: '1px solid rgba(255,180,84,0.3)',
-        minWidth: 0,
-      }}>
-        <div style={{
-          fontFamily: 'var(--font-display)', fontSize: 9, lineHeight: 1.2,
-          color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {leader.name}
-        </div>
-
-        {/* Aspects */}
-        <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-          {leader.aspects.map((a, i) => (
-            <span key={i} className="ts-aspect-pip" data-aspect={a}
-              style={{ width: 10, height: 10, fontSize: 0 } as React.CSSProperties} />
-          ))}
-        </div>
-
-        {/* Power / HP */}
-        <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end', alignItems: 'center' }}>
-          {leader.power !== undefined && (
-            <span style={{
-              fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700,
-              color: 'var(--saber-red)', padding: '0 3px',
-              border: '1px solid var(--line-2)', background: 'var(--panel)',
-            }}>{leader.power}</span>
-          )}
-          {leader.hp !== undefined && (
-            <span style={{
-              fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700,
-              color: 'var(--saber-blue)', padding: '0 3px',
-              border: '1px solid var(--line-2)', background: 'var(--panel)',
-            }}>{leader.hp}</span>
-          )}
-        </div>
-
-        <div style={{
-          fontFamily: 'var(--font-mono)', fontSize: 6, letterSpacing: '0.14em',
-          color: 'var(--saber-amber)', textTransform: 'uppercase',
-        }}>
-          Leader
-        </div>
-      </div>
-
+      {/* Full-bleed art */}
+      {leader.image_uri
+        ? <img src={leader.image_uri} alt={leader.name}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top' }} />
+        : (
+          <>
+            <CardArtFill aspects={leader.aspects} />
+            <div style={{
+              position: 'absolute', inset: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'var(--font-display)', fontSize: 9, color: 'var(--ink-2)',
+              textAlign: 'center', padding: '0 6px',
+            }}>
+              {leader.name}
+            </div>
+          </>
+        )
+      }
+      {/* Deployed overlay */}
       {leader.deployed && (
         <div style={{
-          position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: 'rgba(0,0,0,0.55)', fontFamily: 'var(--font-mono)',
-          fontSize: 8, letterSpacing: '0.22em', color: 'var(--saber-amber)', textTransform: 'uppercase',
+          position: 'absolute', inset: 0,
+          background: 'rgba(0,0,0,0.55)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontFamily: 'var(--font-mono)', fontSize: 8, letterSpacing: '0.22em',
+          color: 'var(--saber-amber)', textTransform: 'uppercase',
         }}>
           Deployed
+        </div>
+      )}
+      {/* Exhausted overlay (ability used) */}
+      {!leader.deployed && leader.exhausted && (
+        <div style={{
+          position: 'absolute', bottom: 0, left: 0, right: 0,
+          padding: '2px 4px',
+          background: 'rgba(0,0,0,0.7)',
+          fontFamily: 'var(--font-mono)', fontSize: 7, letterSpacing: '0.18em',
+          color: 'var(--ink-3)', textTransform: 'uppercase', textAlign: 'center',
+        }}>
+          exhausted
         </div>
       )}
     </div>

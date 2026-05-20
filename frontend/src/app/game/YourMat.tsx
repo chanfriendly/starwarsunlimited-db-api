@@ -11,8 +11,16 @@ interface YourMatProps {
   hasInitiative: boolean;
   selectedIid: string | null;
   pendingAttackerIid: string | null;
+  /** iid of the event card waiting for a target (shows targeting banner) */
+  pendingEventIid: string | null;
   canPlayIids: Set<string>;
   legalDeployIds: Set<string>;
+  /** Leader card ids that have a usable ability this turn */
+  legalLeaderAbilityIds: Set<string>;
+  /** Leader card id whose ability is waiting for a target */
+  pendingLeaderAbilityId: string | null;
+  /** My unit iids that are valid targets for a pending ability or event */
+  abilityTargetIids: Set<string>;
   /** True during the opening setup phase (select up to 2 resources before round 1) */
   isSetupPhase: boolean;
   isResourcePhase: boolean;
@@ -21,14 +29,16 @@ interface YourMatProps {
   onUnitClick: (iid: string) => void;
   onHandCardClick: (iid: string) => void;
   onDeployLeader: (cardId: string) => void;
+  onLeaderAbility: (cardId: string) => void;
   onResourceCard: (iid: string) => void;
   onSkipResource: () => void;
 }
 
 export function YourMat({
-  player, round, hasInitiative, selectedIid, pendingAttackerIid,
-  canPlayIids, legalDeployIds, isSetupPhase, isResourcePhase, coordinateActive,
-  onUnitClick, onHandCardClick, onDeployLeader, onResourceCard, onSkipResource,
+  player, round, hasInitiative, selectedIid, pendingAttackerIid, pendingEventIid,
+  canPlayIids, legalDeployIds, legalLeaderAbilityIds, pendingLeaderAbilityId,
+  abilityTargetIids, isSetupPhase, isResourcePhase, coordinateActive,
+  onUnitClick, onHandCardClick, onDeployLeader, onLeaderAbility, onResourceCard, onSkipResource,
 }: YourMatProps) {
   const base = toBaseData(player.base);
   // Only show the Coordinate badge when both: threshold met AND a Coordinate unit is in play
@@ -61,15 +71,18 @@ export function YourMat({
           {player.groundArena.length === 0
             ? <div className="arena-empty">No ground units deployed</div>
             : player.groundArena.map(ci => {
-                const canAttack = !ci.exhausted;
+                const isAbilityTarget = abilityTargetIids.has(ci.iid);
+                const canAttack = !ci.exhausted && !isAbilityTarget;
+                const isClickable = isAbilityTarget || canAttack;
                 return (
                   <PlayCard
                     key={ci.iid}
                     card={toPlayCardProps(ci)}
                     size="md"
-                    clickable={canAttack}
+                    clickable={isClickable}
                     selected={pendingAttackerIid === ci.iid}
-                    onClick={canAttack ? () => onUnitClick(ci.iid) : undefined}
+                    target={isAbilityTarget}
+                    onClick={isClickable ? () => onUnitClick(ci.iid) : undefined}
                   />
                 );
               })}
@@ -86,19 +99,33 @@ export function YourMat({
           <span className="zone-label">Leaders</span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {player.leaders.map(li => {
-              const canDeploy = !li.isDeployed && legalDeployIds.has(li.card.id);
+              const canDeploy    = !li.isDeployed && legalDeployIds.has(li.card.id);
+              const canAbility   = !li.isDeployed && legalLeaderAbilityIds.has(li.card.id);
+              const isAbilityPending = pendingLeaderAbilityId === li.card.id;
               return (
                 <div key={li.card.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}>
                   <LeaderCard leader={toLeaderData(li)} size="sm" />
-                  {canDeploy && (
-                    <button
-                      onClick={() => onDeployLeader(li.card.id)}
-                      className="div-btn"
-                      style={{ fontSize: 8, padding: '2px 10px' }}
-                    >
-                      DEPLOY
-                    </button>
-                  )}
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    {canDeploy && (
+                      <button
+                        onClick={() => onDeployLeader(li.card.id)}
+                        className="div-btn"
+                        style={{ fontSize: 8, padding: '2px 10px' }}
+                      >
+                        DEPLOY
+                      </button>
+                    )}
+                    {canAbility && (
+                      <button
+                        onClick={() => onLeaderAbility(li.card.id)}
+                        className={'div-btn' + (isAbilityPending ? ' is-active' : '')}
+                        style={{ fontSize: 8, padding: '2px 10px' }}
+                        title={isAbilityPending ? 'Select a target — click again to cancel' : 'Use leader ability'}
+                      >
+                        {isAbilityPending ? 'CANCEL' : 'ABILITY'}
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -113,15 +140,18 @@ export function YourMat({
           {player.spaceArena.length === 0
             ? <div className="arena-empty">No vehicles in space</div>
             : player.spaceArena.map(ci => {
-                const canAttack = !ci.exhausted;
+                const isAbilityTarget = abilityTargetIids.has(ci.iid);
+                const canAttack = !ci.exhausted && !isAbilityTarget;
+                const isClickable = isAbilityTarget || canAttack;
                 return (
                   <PlayCard
                     key={ci.iid}
                     card={toPlayCardProps(ci)}
                     size="md"
-                    clickable={canAttack}
+                    clickable={isClickable}
                     selected={pendingAttackerIid === ci.iid}
-                    onClick={canAttack ? () => onUnitClick(ci.iid) : undefined}
+                    target={isAbilityTarget}
+                    onClick={isClickable ? () => onUnitClick(ci.iid) : undefined}
                   />
                 );
               })}
@@ -215,26 +245,39 @@ export function YourMat({
             <div style={{
               position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)',
               fontFamily: 'var(--font-mono)', fontSize: 9, letterSpacing: '0.24em',
-              color: 'var(--ink-3)', textTransform: 'uppercase',
-              background: 'var(--bg)', padding: '2px 14px', border: '1px solid var(--line)',
+              color: pendingEventIid ? 'var(--saber-amber)' : 'var(--ink-3)',
+              textTransform: 'uppercase',
+              background: 'var(--bg)', padding: '2px 14px',
+              border: `1px solid ${pendingEventIid ? 'var(--saber-amber)' : 'var(--line)'}`,
               zIndex: 2, whiteSpace: 'nowrap',
             }}>
-              Hand · {player.hand.length} cards
-              {selectedIid && canPlayIids.has(selectedIid) && (
-                <span style={{ color: 'var(--saber-amber)', marginLeft: 8 }}>· tap again to play</span>
-              )}
+              {pendingEventIid
+                ? `▸ Select a target — click the card again to cancel`
+                : (
+                  <>
+                    Hand · {player.hand.length} cards
+                    {selectedIid && canPlayIids.has(selectedIid) && (
+                      <span style={{ color: 'var(--saber-amber)', marginLeft: 8 }}>· tap again to play</span>
+                    )}
+                  </>
+                )
+              }
             </div>
             <div className="hand-row">
-              {player.hand.map(ci => (
-                <PlayCard
-                  key={ci.iid}
-                  card={toPlayCardProps(ci)}
-                  size="md"
-                  clickable={canPlayIids.has(ci.iid)}
-                  selected={selectedIid === ci.iid}
-                  onClick={canPlayIids.has(ci.iid) ? () => onHandCardClick(ci.iid) : undefined}
-                />
-              ))}
+              {player.hand.map(ci => {
+                const isPlayable = canPlayIids.has(ci.iid);
+                const isEventPending = pendingEventIid === ci.iid;
+                return (
+                  <PlayCard
+                    key={ci.iid}
+                    card={toPlayCardProps(ci)}
+                    size="md"
+                    clickable={isPlayable}
+                    selected={selectedIid === ci.iid || isEventPending}
+                    onClick={isPlayable ? () => onHandCardClick(ci.iid) : undefined}
+                  />
+                );
+              })}
             </div>
           </>
         )}

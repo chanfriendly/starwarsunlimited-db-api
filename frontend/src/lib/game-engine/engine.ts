@@ -10,6 +10,9 @@ import {
   hasEffectiveKeyword, getEffectiveKeywordValue, getActiveCoordinateEffects,
   dispatchOnPlay, dispatchOnDefeated, applyAttackFilters,
 } from './keywords';
+import {
+  LEADER_ABILITIES, EVENT_EFFECTS, AbilityEffect, TargetKind,
+} from './abilities';
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -115,6 +118,145 @@ function addToDiscard(state: GameState, ownerId: PlayerId, inst: CardInstance): 
 
 function removeFromHand(state: GameState, ownerId: PlayerId, iid: string): GameState {
   return updatePlayer(state, ownerId, p => ({ ...p, hand: p.hand.filter(c => c.iid !== iid) }));
+}
+
+/** Map a CardInstance anywhere in both players' arenas (by iid). */
+function mapCardInArenas(
+  state: GameState,
+  iid: string,
+  fn: (c: CardInstance) => CardInstance,
+): GameState {
+  const mapArr = (arr: CardInstance[]) => arr.map(c => c.iid === iid ? fn(c) : c);
+  return {
+    ...state,
+    players: {
+      player1: {
+        ...state.players.player1,
+        groundArena: mapArr(state.players.player1.groundArena),
+        spaceArena:  mapArr(state.players.player1.spaceArena),
+      },
+      player2: {
+        ...state.players.player2,
+        groundArena: mapArr(state.players.player2.groundArena),
+        spaceArena:  mapArr(state.players.player2.spaceArena),
+      },
+    },
+  };
+}
+
+/**
+ * Returns the iids (or the string 'base') of all units that satisfy targetKind
+ * from the perspective of playerId.
+ */
+function getValidTargets(
+  state: GameState,
+  playerId: PlayerId,
+  targetKind: TargetKind,
+): string[] {
+  const opp = opponent(playerId);
+  const me  = state.players[playerId];
+  const oppPlayer = state.players[opp];
+
+  switch (targetKind) {
+    case 'FRIENDLY_UNIT':
+      return [...me.groundArena, ...me.spaceArena].map(c => c.iid);
+    case 'ENEMY_UNIT':
+      return [...oppPlayer.groundArena, ...oppPlayer.spaceArena].map(c => c.iid);
+    case 'ANY_UNIT':
+      return [
+        ...me.groundArena, ...me.spaceArena,
+        ...oppPlayer.groundArena, ...oppPlayer.spaceArena,
+      ].map(c => c.iid);
+    case 'ENEMY_UNIT_OR_BASE':
+      return [
+        ...oppPlayer.groundArena, ...oppPlayer.spaceArena,
+      ].map(c => c.iid).concat(['base']);
+  }
+}
+
+/**
+ * Resolve a single AbilityEffect in the current state.
+ * playerId is the player who triggered the effect.
+ * targetIid is the chosen target iid (or 'base' for opponent's base).
+ */
+function applyAbilityEffect(
+  state: GameState,
+  playerId: PlayerId,
+  effect: AbilityEffect,
+  targetIid?: string,
+): GameState {
+  const opp = opponent(playerId);
+  let s = state;
+
+  switch (effect.type) {
+    case 'DRAW': {
+      s = updatePlayer(s, playerId, p => {
+        const draws = Math.min(effect.count, p.deck.length);
+        return {
+          ...p,
+          hand: [...p.hand, ...p.deck.slice(0, draws)],
+          deck: p.deck.slice(draws),
+        };
+      });
+      s = log(s, playerId, `Drew ${effect.count} card(s).`);
+      break;
+    }
+    case 'PHASE_BUFF_UNIT': {
+      if (!targetIid) break;
+      s = mapCardInArenas(s, targetIid, c => ({
+        ...c,
+        phaseAtk: (c.phaseAtk ?? 0) + effect.atk,
+        phaseHp:  (c.phaseHp  ?? 0) + effect.hp,
+      }));
+      const parts = [];
+      if (effect.atk !== 0) parts.push(`+${effect.atk} attack`);
+      if (effect.hp  !== 0) parts.push(`+${effect.hp} HP`);
+      s = log(s, playerId, `Gave unit ${parts.join(', ')} until end of phase.`);
+      break;
+    }
+    case 'DEAL_DAMAGE_UNIT': {
+      if (!targetIid) break;
+      s = mapCardInArenas(s, targetIid, c => ({ ...c, damage: c.damage + effect.amount }));
+      s = log(s, playerId, `Dealt ${effect.amount} damage to a unit.`);
+      s = checkDefeated(s);
+      break;
+    }
+    case 'DEAL_DAMAGE_ANY': {
+      if (!targetIid) break;
+      if (targetIid === 'base') {
+        s = updatePlayer(s, opp, p => ({
+          ...p, base: { ...p.base, damage: p.base.damage + effect.amount },
+        }));
+        s = log(s, playerId, `Dealt ${effect.amount} damage to opponent's base.`);
+      } else {
+        s = mapCardInArenas(s, targetIid, c => ({ ...c, damage: c.damage + effect.amount }));
+        s = log(s, playerId, `Dealt ${effect.amount} damage to a unit.`);
+        s = checkDefeated(s);
+      }
+      break;
+    }
+    case 'HEAL_BASE': {
+      s = updatePlayer(s, playerId, p => ({
+        ...p, base: { ...p.base, damage: Math.max(0, p.base.damage - effect.amount) },
+      }));
+      s = log(s, playerId, `Healed own base for ${effect.amount}.`);
+      break;
+    }
+    case 'EXHAUST_UNIT': {
+      if (!targetIid) break;
+      s = mapCardInArenas(s, targetIid, c => ({ ...c, exhausted: true }));
+      s = log(s, playerId, `Exhausted a unit.`);
+      break;
+    }
+    case 'GIVE_SHIELD_FRIENDLY': {
+      if (!targetIid) break;
+      s = mapCardInArenas(s, targetIid, c => ({ ...c, shieldTokens: c.shieldTokens + 1 }));
+      s = log(s, playerId, `Gave a shield token to a unit.`);
+      break;
+    }
+  }
+
+  return s;
 }
 
 // ---------------------------------------------------------------------------
@@ -266,13 +408,26 @@ function getLegalActions(state: GameState, playerId: PlayerId): GameAction[] {
   for (const c of me.hand) {
     const cost = c.card.cost ?? c.card.energy_cost ?? 0;
     if (me.resources.available >= cost) {
-      if (c.card.type?.toLowerCase() === 'upgrade') {
+      const cardType = c.card.type?.toLowerCase() ?? '';
+      if (cardType === 'upgrade') {
         // Find friendly units to attach to
         const targets = [...me.groundArena, ...me.spaceArena];
         if (targets.length > 0) {
           for (const t of targets) {
             actions.push({ type: 'PLAY_CARD', iid: c.iid, targetIid: t.iid });
           }
+        }
+      } else if (cardType === 'event') {
+        const evtDef = EVENT_EFFECTS[c.card.name];
+        if (evtDef?.targetKind) {
+          // Targeted event — generate one action per valid target
+          const targets = getValidTargets(state, playerId, evtDef.targetKind);
+          for (const targetId of targets) {
+            actions.push({ type: 'PLAY_CARD', iid: c.iid, targetIid: targetId });
+          }
+        } else {
+          // No-target event
+          actions.push({ type: 'PLAY_CARD', iid: c.iid });
         }
       } else {
         actions.push({ type: 'PLAY_CARD', iid: c.iid });
@@ -287,6 +442,23 @@ function getLegalActions(state: GameState, playerId: PlayerId): GameAction[] {
       if (me.resources.available >= cost) {
         actions.push({ type: 'DEPLOY_LEADER', leaderCardId: leader.card.id });
       }
+    }
+  }
+
+  // Leader abilities (non-deployed, non-exhausted, affordable)
+  for (const leader of me.leaders) {
+    if (leader.isDeployed || leader.exhausted) continue;
+    const ability = LEADER_ABILITIES[leader.card.name];
+    if (!ability) continue;
+    if (me.resources.available < ability.resourceCost) continue;
+
+    if (ability.targetKind) {
+      const targets = getValidTargets(state, playerId, ability.targetKind);
+      for (const targetId of targets) {
+        actions.push({ type: 'LEADER_ABILITY', leaderCardId: leader.card.id, targetIid: targetId });
+      }
+    } else {
+      actions.push({ type: 'LEADER_ABILITY', leaderCardId: leader.card.id });
     }
   }
 
@@ -336,9 +508,15 @@ function applyPlayCard(state: GameState, playerId: PlayerId, iid: string, target
   const type = card.card.type?.toLowerCase() ?? '';
 
   if (type === 'event') {
-    // Events resolve and go to discard immediately
+    // Look up a registered effect — if none, just discard with a note
+    const evtDef = EVENT_EFFECTS[card.card.name];
+    if (evtDef) {
+      s = applyAbilityEffect(s, playerId, evtDef.effect, targetIid);
+      s = log(s, playerId, `Played event: ${card.card.name}.`);
+    } else {
+      s = log(s, playerId, `Played event: ${card.card.name} (effect not yet implemented).`);
+    }
     s = addToDiscard(s, playerId, { ...card, exhausted: true });
-    s = log(s, playerId, `Played event: ${card.card.name}.`);
   } else if (type === 'upgrade' && targetIid) {
     // Attach upgrade to target unit
     const target = findCard(s, targetIid);
@@ -553,6 +731,47 @@ function applyDeployLeader(state: GameState, playerId: PlayerId, leaderCardId: s
   return switchActivePlayer(s, playerId);
 }
 
+function applyLeaderAbility(
+  state: GameState,
+  playerId: PlayerId,
+  leaderCardId: string,
+  targetIid?: string,
+): GameState {
+  const me = state.players[playerId];
+  const leader = me.leaders.find(l => l.card.id === leaderCardId && !l.isDeployed && !l.exhausted);
+  if (!leader) return state;
+
+  const ability = LEADER_ABILITIES[leader.card.name];
+  if (!ability) return state;
+
+  if (me.resources.available < ability.resourceCost) return state;
+
+  let s = state;
+
+  // Pay resource cost
+  if (ability.resourceCost > 0) {
+    s = updatePlayer(s, playerId, p => ({
+      ...p,
+      resources: { ...p.resources, available: p.resources.available - ability.resourceCost },
+    }));
+  }
+
+  // Exhaust the leader
+  s = updatePlayer(s, playerId, p => ({
+    ...p,
+    leaders: p.leaders.map(l =>
+      l.card.id === leaderCardId ? { ...l, exhausted: true } : l,
+    ),
+  }));
+
+  // Resolve the effect
+  s = applyAbilityEffect(s, playerId, ability.effect, targetIid);
+  s = log(s, playerId, `${leader.card.name}: used leader ability.`);
+  s = checkWinCondition(s);
+
+  return switchActivePlayer(s, playerId);
+}
+
 function applyTakeCounter(state: GameState, playerId: PlayerId): GameState {
   let s = updatePlayer(state, playerId, p => ({ ...p, hasCountered: true }));
   s = log(s, playerId, `${playerId} takes the counter.`);
@@ -667,7 +886,13 @@ function resolveRegroup(state: GameState): GameState {
       const newDeck = p.deck.slice(draws);
 
       const ready = (arr: CardInstance[]) =>
-        arr.map(c => ({ ...c, exhausted: false, deployedThisTurn: false }));
+        arr.map(c => ({
+          ...c,
+          exhausted: false,
+          deployedThisTurn: false,
+          phaseAtk: undefined,
+          phaseHp:  undefined,
+        }));
 
       return {
         ...p,
@@ -676,6 +901,8 @@ function resolveRegroup(state: GameState): GameState {
         resources: { total: p.resources.total, available: p.resources.total },
         groundArena: ready(p.groundArena),
         spaceArena:  ready(p.spaceArena),
+        // Un-exhaust all leaders so their abilities are available next round
+        leaders: p.leaders.map(l => ({ ...l, exhausted: false })),
         hasCountered: false,
         hasResourced: false,
       };
@@ -740,6 +967,8 @@ export class GameEngine {
         return applyAttack(state, playerId, action.attackerIid, action.defenderIid);
       case 'DEPLOY_LEADER':
         return applyDeployLeader(state, playerId, action.leaderCardId);
+      case 'LEADER_ABILITY':
+        return applyLeaderAbility(state, playerId, action.leaderCardId, action.targetIid);
       case 'TAKE_COUNTER':
       case 'PASS_PRIORITY':
         return applyTakeCounter(state, playerId);

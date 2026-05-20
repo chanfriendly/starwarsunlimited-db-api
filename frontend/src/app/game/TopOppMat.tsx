@@ -2,7 +2,7 @@
 import React from 'react';
 import type { PlayerState } from '@/lib/game-engine/types';
 import { PlayCard, toPlayCardProps, BaseCard, toBaseData, LeaderCard, toLeaderData, InitToken, CardBack } from './PlayCard';
-import { HpReadout, Counter } from './BoardParts';
+import { HpReadout, Counter, ResourceLattice } from './BoardParts';
 
 interface TopOppMatProps {
   player: PlayerState;
@@ -28,7 +28,7 @@ export function TopOppMat({
       style={{
         display: 'grid',
         gridTemplateColumns: '1.2fr 148px 1.2fr',
-        gridTemplateRows: 'auto auto minmax(120px, 1fr)',
+        gridTemplateRows: 'auto auto minmax(120px, 1fr) auto',
         gap: 12,
         padding: 10,
         flex: 1, minHeight: 0,
@@ -48,7 +48,6 @@ export function TopOppMat({
           <Counter label="Hand" value={player.hand.length} />
           <Counter label="Deck" value={player.deck.length} />
           <Counter label="Disc" value={player.discard.length} />
-          <Counter label="Res"  value={`${player.resources.available}/${player.resources.total}`} />
           {hasInitiative && <InitToken hasInit round={round} />}
         </div>
       </div>
@@ -124,6 +123,18 @@ export function TopOppMat({
                 );
               })}
         </div>
+      </div>
+
+      {/* ── Resources ────────────────────────────────────────────── */}
+      <div className="zone" style={{ gridColumn: '1 / 4', gridRow: 4, height: 48 }}>
+        <span className="zone-label">
+          ◆ Resources · {player.resources.available} ready · {player.resources.total} total
+        </span>
+        <ResourceLattice
+          total={player.resources.total}
+          available={player.resources.available}
+          compact
+        />
       </div>
     </div>
   );

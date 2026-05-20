@@ -424,31 +424,15 @@
    RESOURCES
    ============================================================ */
 .resources-strip {
-  display: flex; gap: 3px; align-items: center;
-  padding: 14px 12px 10px;
+  display: flex; gap: 6px; align-items: center;
+  padding: 10px 12px 8px;
   overflow-x: auto;
   height: 100%;
 }
-.res-card {
-  width: 32px; height: 46px;
-  background: linear-gradient(135deg, var(--panel-2), var(--panel));
-  border: 1px solid var(--line-2);
-  border-radius: 2px;
-  flex-shrink: 0;
-  position: relative;
-  transform: rotate(-90deg);
-  margin: 0 8px;
-}
-.res-card::before {
-  content: "";
-  position: absolute; inset: 3px;
-  border: 1px solid var(--line);
-  background: radial-gradient(circle at center, rgba(255,180,84,0.05), transparent 70%);
-}
-.res-card.is-spent {
-  transform: rotate(-90deg) translateY(8px);
-  opacity: 0.5;
-  filter: grayscale(1);
+.resources-strip.is-compact {
+  padding: 4px 8px;
+  height: auto;
+  gap: 4px;
 }
 
 /* ============================================================

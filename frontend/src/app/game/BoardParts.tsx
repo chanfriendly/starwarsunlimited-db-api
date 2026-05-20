@@ -2,6 +2,49 @@
 import React from 'react';
 import { CardBack } from './PlayCard';
 
+// ── ResCard — card-back-art mini card for resource display ────────────────────
+
+function ResCard({ w, h }: { w: number; h: number }) {
+  return (
+    <div style={{
+      width: w, height: h,
+      position: 'relative',
+      background: [
+        'radial-gradient(1px 1px at 15% 15%, rgba(220,235,255,0.9) 50%, transparent)',
+        'radial-gradient(1px 1px at 65% 22%, rgba(200,220,255,0.7) 50%, transparent)',
+        'radial-gradient(1px 1px at 82% 68%, rgba(220,235,255,0.8) 50%, transparent)',
+        'radial-gradient(1px 1px at 28% 78%, rgba(180,210,255,0.6) 50%, transparent)',
+        'radial-gradient(1px 1px at 48% 48%, rgba(210,228,255,0.65) 50%, transparent)',
+        'radial-gradient(1px 1px at 90% 12%, rgba(200,230,255,0.6) 50%, transparent)',
+        'linear-gradient(160deg, #03060e, #06101e, #020508)',
+      ].join(', '),
+      border: '1px solid rgba(100,140,200,0.28)',
+      borderRadius: 2,
+      overflow: 'hidden',
+      flexShrink: 0,
+    }}>
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <line
+          x1={w * 0.1} y1={h * 0.08} x2={w * 0.9} y2={h * 0.92}
+          stroke="rgba(180,210,255,0.68)" strokeWidth="1.4"
+        />
+        <line
+          x1={w * 0.9} y1={h * 0.08} x2={w * 0.1} y2={h * 0.92}
+          stroke="rgba(200,220,255,0.62)" strokeWidth="1.4"
+        />
+        <rect
+          x={w * 0.06} y={h * 0.05} width={w * 0.88} height={h * 0.9}
+          fill="none" stroke="rgba(180,200,255,0.2)" strokeWidth="0.6" rx="1"
+        />
+      </svg>
+    </div>
+  );
+}
+
 // ── ResourceLattice ───────────────────────────────────────────────────────────
 
 interface ResourceLatticeProps {
@@ -11,15 +54,41 @@ interface ResourceLatticeProps {
 }
 
 export function ResourceLattice({ total, available, compact }: ResourceLatticeProps) {
+  // Portrait dimensions (ready = upright, spent = rotated -90deg = landscape)
+  const W = compact ? 18 : 26;  // portrait width
+  const H = compact ? 26 : 38;  // portrait height
+
   return (
-    <div className="resources-strip" style={compact ? { padding: '8px 6px' } : undefined}>
-      {Array.from({ length: total }, (_, i) => (
-        <div
-          key={i}
-          className={'res-card' + (i >= available ? ' is-spent' : '')}
-          title={i < available ? 'ready' : 'spent'}
-        />
-      ))}
+    <div className={'resources-strip' + (compact ? ' is-compact' : '')}>
+      {Array.from({ length: total }, (_, i) => {
+        const isReady = i < available;
+        // Wrapper sized to match the card's visual footprint after rotation.
+        // Ready: portrait (W × H). Spent: landscape (H × W).
+        return (
+          <div
+            key={i}
+            title={isReady ? 'ready' : 'spent'}
+            style={{
+              position: 'relative',
+              flexShrink: 0,
+              width:  isReady ? W : H,
+              height: isReady ? H : W,
+              opacity: isReady ? 1 : 0.42,
+              filter: isReady ? 'none' : 'grayscale(0.55)',
+              transition: 'opacity 0.3s, filter 0.3s',
+            }}
+          >
+            <div style={{
+              position: 'absolute',
+              left: '50%', top: '50%',
+              transform: `translate(-50%, -50%)${isReady ? '' : ' rotate(-90deg)'}`,
+              transition: 'transform 0.35s ease',
+            }}>
+              <ResCard w={W} h={H} />
+            </div>
+          </div>
+        );
+      })}
       {total === 0 && (
         <span style={{
           fontFamily: 'var(--font-mono)', fontSize: 9,

@@ -139,6 +139,9 @@ export function computePower(
 ): number {
   let power = inst.card.attack ?? 0;
 
+  // Phase-temporary attack bonus (from leader abilities or event buffs)
+  power += inst.phaseAtk ?? 0;
+
   // Grit (native or Coordinate-granted): +1 power per damage counter on this unit.
   // Computed live so mid-combat pings are reflected before final damage resolution.
   if (hasEffectiveKeyword(state, inst, ownerId, 'Grit')) {
@@ -163,6 +166,10 @@ export function effectiveHealth(
   ownerId: PlayerId,
 ): number {
   let hp = inst.card.health ?? 1;
+
+  // Phase-temporary HP bonus (from leader abilities or event buffs)
+  hp += inst.phaseHp ?? 0;
+
   for (const e of getActiveCoordinateEffects(state, inst, ownerId)) {
     if (e.type === 'STAT_BUFF') hp += e.hp;
   }

@@ -79,7 +79,7 @@ export function DividerBar({
           )}
           {!winner && canTakeCounter && (
             <button className="div-btn is-primary" onClick={onTakeCounter}>
-              Take Counter
+              Take Initiative
             </button>
           )}
           {!winner && !canTakeCounter && isMyTurn && (

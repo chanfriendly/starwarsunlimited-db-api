@@ -13,6 +13,10 @@ export interface CardInstance {
   shieldTokens: number;
   /** Prevents attacking the turn a leader is deployed */
   deployedThisTurn?: boolean;
+  /** Phase-temporary attack bonus (cleared at regroup) */
+  phaseAtk?: number;
+  /** Phase-temporary HP bonus (cleared at regroup) */
+  phaseHp?: number;
 }
 
 export interface LeaderInstance {
@@ -20,6 +24,8 @@ export interface LeaderInstance {
   isDeployed: boolean;
   /** iid of the CardInstance added to arena on deploy */
   unitIid?: string;
+  /** True when the leader ability has been used this round (cleared at regroup) */
+  exhausted?: boolean;
 }
 
 export interface BaseInstance {
