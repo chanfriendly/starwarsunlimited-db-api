@@ -58,18 +58,28 @@ export type CardAbility = CoordinateAbility;
 export type AbilityEffect =
   /** Draw N cards from own deck */
   | { type: 'DRAW'; count: number }
-  /** Give a chosen unit +atk/+hp until end of phase */
+  /** Give a chosen unit +atk/+hp (or negative for debuffs) until end of phase */
   | { type: 'PHASE_BUFF_UNIT'; atk: number; hp: number }
   /** Deal N damage to a chosen unit */
   | { type: 'DEAL_DAMAGE_UNIT'; amount: number }
   /** Deal N damage to a chosen unit OR the opponent's base */
   | { type: 'DEAL_DAMAGE_ANY'; amount: number }
+  /** Deal N damage directly to the opponent's base (no target selection) */
+  | { type: 'DEAL_DAMAGE_OPP_BASE'; amount: number }
   /** Restore N HP to own base */
   | { type: 'HEAL_BASE'; amount: number }
   /** Exhaust a chosen non-leader unit */
   | { type: 'EXHAUST_UNIT' }
   /** Give a chosen friendly unit a Shield token */
-  | { type: 'GIVE_SHIELD_FRIENDLY' };
+  | { type: 'GIVE_SHIELD_FRIENDLY' }
+  /** Immediately defeat a chosen non-leader unit (no damage, straight to discard) */
+  | { type: 'DEFEAT_UNIT' }
+  /**
+   * "Attack with a unit. It gets +N/+N for this attack."
+   * Triggers the PLAY_ATTACK_EVENT two-step flow — not resolved via applyAbilityEffect.
+   * grantKeywords is noted but not yet implemented (complex temporary-keyword system needed).
+   */
+  | { type: 'TRIGGER_ATTACK_WITH'; atkBonus: number; hpBonus: number; grantKeywords?: string[] };
 
 /**
  * Describes who the player must pick as the ability target.
@@ -160,6 +170,13 @@ export const EVENT_EFFECTS: Record<string, EventEffect> = {
   'Battle Meditation':      { effect: { type: 'HEAL_BASE', amount: 3 } },
   'Force Heal':             { effect: { type: 'HEAL_BASE', amount: 4 } },
   'Medic Support':          { effect: { type: 'HEAL_BASE', amount: 2 } },
+
+  // ── Defeat non-leader unit ────────────────────────────────────────────────
+  // "Defeat a non-leader unit." Text confirmed from SWU card database.
+  'Vanquish':               { effect: { type: 'DEFEAT_UNIT' }, targetKind: 'ENEMY_UNIT' },
+  'Lost and Forgotten':     { effect: { type: 'DEFEAT_UNIT' }, targetKind: 'ENEMY_UNIT' },
+  "It's Worse":             { effect: { type: 'DEFEAT_UNIT' }, targetKind: 'ENEMY_UNIT' },
+  'Lethal Crackdown':       { effect: { type: 'DEFEAT_UNIT' }, targetKind: 'ENEMY_UNIT' },
 };
 
 /** True if a leader ability requires the player to pick a target. */
@@ -167,9 +184,89 @@ export function needsLeaderAbilityTarget(cardName: string): boolean {
   return !!LEADER_ABILITIES[cardName]?.targetKind;
 }
 
+// ---------------------------------------------------------------------------
+// Event text parser
+//
+// Parses a single-clause event card text into an EventEffect.
+// Returns null if the text is multi-clause or uses an unrecognised pattern.
+// Called only as a fallback when the card is NOT found in EVENT_EFFECTS.
+// All patterns use ^ and $ anchors so multi-line text returns null.
+// ---------------------------------------------------------------------------
+
+function parseEventText(text: string): EventEffect | null {
+  const t = text.trim();
+
+  let m: RegExpMatchArray | null;
+
+  // Draw N cards.
+  m = t.match(/^Draw (\d+) cards?\.$/);
+  if (m) return { effect: { type: 'DRAW', count: parseInt(m[1], 10) } };
+
+  // Deal N damage to a unit or base.
+  m = t.match(/^Deal (\d+) damage to a unit or base\.$/);
+  if (m) return { effect: { type: 'DEAL_DAMAGE_ANY', amount: parseInt(m[1], 10) }, targetKind: 'ENEMY_UNIT_OR_BASE' };
+
+  // Deal N damage to an (enemy) unit.
+  m = t.match(/^Deal (\d+) damage to an? (?:enemy )?unit\.$/);
+  if (m) return { effect: { type: 'DEAL_DAMAGE_UNIT', amount: parseInt(m[1], 10) }, targetKind: 'ENEMY_UNIT' };
+
+  // Deal N damage to your opponent's / the enemy base.
+  m = t.match(/^Deal (\d+) damage to (?:your opponent's|the opponent's|the enemy) base\.$/);
+  if (m) return { effect: { type: 'DEAL_DAMAGE_OPP_BASE', amount: parseInt(m[1], 10) } };
+
+  // Heal N damage from your/a base.
+  m = t.match(/^Heal (\d+) damage from (?:your|a) base\.$/);
+  if (m) return { effect: { type: 'HEAL_BASE', amount: parseInt(m[1], 10) } };
+
+  // Give a (friendly) unit +N/+N for this phase.  (buff → FRIENDLY_UNIT)
+  m = t.match(/^Give a (?:friendly )?unit \+(\d+)\/\+(\d+) for this phase\.$/);
+  if (m) return { effect: { type: 'PHASE_BUFF_UNIT', atk: parseInt(m[1], 10), hp: parseInt(m[2], 10) }, targetKind: 'FRIENDLY_UNIT' };
+
+  // Give an (enemy) unit –N/–N for this phase.  (en-dash or hyphen, debuff)
+  m = t.match(/^Give an? (enemy )?unit [–-](\d+)\/[–-](\d+) for this phase\.$/);
+  if (m) {
+    const targetKind: TargetKind = m[1] ? 'ENEMY_UNIT' : 'FRIENDLY_UNIT';
+    return {
+      effect: { type: 'PHASE_BUFF_UNIT', atk: -parseInt(m[2], 10), hp: -parseInt(m[3], 10) },
+      targetKind,
+    };
+  }
+
+  // Exhaust an (enemy) (ground|space) unit.
+  m = t.match(/^Exhaust an? (?:enemy )?(?:ground |space )?unit\.$/);
+  if (m) return { effect: { type: 'EXHAUST_UNIT' }, targetKind: 'ENEMY_UNIT' };
+
+  // Give a/N Shield token(s) to a (friendly) unit.
+  m = t.match(/^Give (?:\d+|a) Shield tokens? to a (?:friendly )?unit\.$/);
+  if (m) return { effect: { type: 'GIVE_SHIELD_FRIENDLY' }, targetKind: 'FRIENDLY_UNIT' };
+
+  // Defeat a non-leader unit.
+  m = t.match(/^Defeat a non-leader unit\.$/);
+  if (m) return { effect: { type: 'DEFEAT_UNIT' }, targetKind: 'ENEMY_UNIT' };
+
+  // Attack with a (ground|space) unit. It gets +N/+N for this attack.
+  m = t.match(/^Attack with a (?:ground |space )?unit\. It gets \+(\d+)\/\+(\d+) for this attack\.$/);
+  if (m) return { effect: { type: 'TRIGGER_ATTACK_WITH', atkBonus: parseInt(m[1], 10), hpBonus: parseInt(m[2], 10) } };
+
+  // Attack with a (ground|space) unit. It gets +N/+N and gains KEYWORD for this attack.
+  m = t.match(/^Attack with a (?:ground |space )?unit\. It gets \+(\d+)\/\+(\d+) and gains ([\w ]+?) for this attack\.$/);
+  if (m) return { effect: { type: 'TRIGGER_ATTACK_WITH', atkBonus: parseInt(m[1], 10), hpBonus: parseInt(m[2], 10), grantKeywords: [m[3]] } };
+
+  return null;
+}
+
+/**
+ * Look up the effect for an event card.
+ * Tries the manual registry first (authoritative); falls back to text parsing.
+ * Returns null if neither source covers the card.
+ */
+export function getEventEffect(name: string, text: string): EventEffect | null {
+  return EVENT_EFFECTS[name] ?? parseEventText(text);
+}
+
 /** True if an event card requires the player to pick a target. */
-export function needsEventTarget(cardName: string): boolean {
-  return !!EVENT_EFFECTS[cardName]?.targetKind;
+export function needsEventTarget(cardName: string, cardText = ''): boolean {
+  return !!getEventEffect(cardName, cardText)?.targetKind;
 }
 
 // ---------------------------------------------------------------------------

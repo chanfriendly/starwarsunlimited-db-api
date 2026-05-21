@@ -6,6 +6,67 @@
 
 ## Current Status
 
+*(2026-05-20 session 24)* **Event parser + attack-event flow (PLAY_ATTACK_EVENT) implemented. ~47 additional events auto-parsed, defeat/debuff/direct-base-damage effects live.**
+
+Six files modified, zero new dependencies. TypeScript: 0 errors.
+
+1. **`abilities.ts`** — Three new `AbilityEffect` variants:
+   - `DEFEAT_UNIT` — immediately defeats chosen non-leader unit (no damage path)
+   - `DEAL_DAMAGE_OPP_BASE` — deals N damage directly to opponent's base (no target selection)
+   - `TRIGGER_ATTACK_WITH` — triggers the PLAY_ATTACK_EVENT two-step UI flow (atkBonus, hpBonus, optional grantKeywords note)
+   - `EVENT_EFFECTS` registry extended: Vanquish, Lost and Forgotten, It's Worse, Lethal Crackdown (all `DEFEAT_UNIT`)
+   - `parseEventText(text)` — regex fallback covering: Draw, DEAL_DAMAGE_ANY, DEAL_DAMAGE_UNIT, DEAL_DAMAGE_OPP_BASE, HEAL_BASE, PHASE_BUFF_UNIT (positive and negative, en-dash aware), EXHAUST_UNIT, GIVE_SHIELD_FRIENDLY, DEFEAT_UNIT, TRIGGER_ATTACK_WITH (with and without keyword grant)
+   - `getEventEffect(name, text)` — tries registry first, falls back to parser
+   - `needsEventTarget(name, text?)` — updated to use `getEventEffect`
+
+2. **`actions.ts`** — New `PLAY_ATTACK_EVENT { iid, attackerIid, defenderIid }` action type. One action per legal (event × attack) combination. Inherits Sentinel filtering automatically.
+
+3. **`keywords.ts`** — `computePower` now clamps to `Math.max(0, power)` so debuffs can't push attack below zero.
+
+4. **`engine.ts`** — Multiple additions:
+   - `defeatUnitByIid(state, iid)` — helper shared by DEFEAT_UNIT effect and future use
+   - `applyAbilityEffect` — new cases for `DEAL_DAMAGE_OPP_BASE`, `DEFEAT_UNIT`, `TRIGGER_ATTACK_WITH` (no-op sentinel), fixed negative stat log formatting
+   - `getLegalActions` — updated event branch to use `getEventEffect`; TRIGGER_ATTACK_WITH events skip PLAY_CARD actions; post-filter PLAY_ATTACK_EVENT actions generated for each (event × filtered-attack) pair
+   - `applyPlayCard` — uses `getEventEffect` fallback; guards against routing TRIGGER_ATTACK_WITH through PLAY_CARD
+   - `applyPlayAttackEvent` — pays for event, applies temporary phaseAtk/phaseHp buff, calls `applyAttack` (which handles exhaustion + turn switch), then removes buff (no-op if attacker died)
+   - Dispatcher: `PLAY_ATTACK_EVENT` → `applyPlayAttackEvent`
+
+5. **`GameBoard.tsx`** — Full two-step attack-event state machine:
+   - New state: `pendingAttackEventIid`
+   - New derived sets: `canPlayAttackEventIids`, `attackEventAttackerIids`, `attackEventTargetIids`, `canAttackEventTargetBase`
+   - `effectiveOppTargetIids`: step 2 uses `attackEventTargetIids`
+   - `friendlyTargetIids`: step 1 uses `attackEventAttackerIids` (so valid attackers highlight)
+   - `effectiveCanTargetBase`: routes through attack-event base check in step 2
+   - All click handlers updated for attack-event priority routing
+   - `handleHandCardClick` recognizes `canPlayAttackEventIids` cards as clickable
+   - New props passed to `YourMat`
+
+6. **`YourMat.tsx`** — New props `canPlayAttackEventIids`, `pendingAttackEventIid`. Hand cards with attack-event actions are clickable. Attack-event pending card shows `selected` state. Banner shows "▸ Select a unit to attack with — click the card again to cancel" in step 1.
+
+*(2026-05-20 session 23)* **Leader abilities, event card effects, and targeting mode UI fully implemented.**
+
+Seven files modified, zero new dependencies. TypeScript: 0 errors.
+
+1. **`types.ts`** — `CardInstance.phaseAtk/phaseHp` (cleared at regroup); `LeaderInstance.exhausted` (cleared at regroup).
+
+2. **`actions.ts`** — New `LEADER_ABILITY` action type (`leaderCardId`, optional `targetIid`).
+
+3. **`abilities.ts`** — Three new systems added above the Coordinate registry:
+   - `AbilityEffect` union: `DRAW`, `PHASE_BUFF_UNIT`, `DEAL_DAMAGE_UNIT`, `DEAL_DAMAGE_ANY`, `HEAL_BASE`, `EXHAUST_UNIT`, `GIVE_SHIELD_FRIENDLY`
+   - `TargetKind`: `FRIENDLY_UNIT`, `ENEMY_UNIT`, `ANY_UNIT`, `ENEMY_UNIT_OR_BASE`
+   - `LEADER_ABILITIES` registry: Chirrut Îmwe (+0/+2 to unit for phase), Admiral Ackbar (exhaust enemy unit for 1 resource)
+   - `EVENT_EFFECTS` registry: Strategic Analysis (draw 3), Daring Raid (2 to unit/base), Open Fire (4 to unit), We're In Trouble, Shoot First, Precision Fire, Force Lightning, Orbital Bombardment, Tactical Advantage, Battle Meditation, and ~10 more
+
+4. **`keywords.ts`** — `computePower` adds `phaseAtk`, `effectiveHealth` adds `phaseHp`.
+
+5. **`engine.ts`** — `mapCardInArenas`, `getValidTargets(state, playerId, targetKind)`, `applyAbilityEffect` (unified resolver), `applyLeaderAbility` (pays cost, exhausts leader, resolves effect, switches turn). `getLegalActions` now offers `LEADER_ABILITY` with one action per valid target for targeted abilities; events in `EVENT_EFFECTS` with `targetKind` generate `PLAY_CARD { iid, targetIid }` per valid target. `applyPlayCard` resolves registered event effects. `resolveRegroup` clears `phaseAtk/phaseHp` and un-exhausts all leaders.
+
+6. **`PlayCard.tsx`** — `LeaderData.exhausted` field; `toLeaderData` passes it; `LeaderCard` shows dimmed border + bottom "exhausted" strip when ability used.
+
+7. **`GameBoard.tsx`** — Full targeting state machine: `pendingLeaderAbilityId`, `pendingEventIid`; derived sets (`leaderAbilityTargetIids`, `eventTargetIids`, `effectiveOppTargetIids`, `friendlyTargetIids`); all click handlers updated to route through ability/event targeting before normal attack logic.
+
+8. **`YourMat.tsx`** — ABILITY button on leaders (toggles to CANCEL while targeting). Friendly units highlight as targets. Hand banner turns amber "▸ Select a target" when event targeting mode is active.
+
 *(2026-05-20 session 22)* **Coordinate keyword implemented — abilities registry, engine hooks, UI indicator.**
 
 Four files added/modified, zero new dependencies:
@@ -181,6 +242,14 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 
 ## What's Done
 
+- [x] **[2026-05-20] Event parser + attack-event flow** — `parseEventText` regex parser (~47 events auto-covered); `getEventEffect` registry+fallback lookup; `TRIGGER_ATTACK_WITH` / `DEFEAT_UNIT` / `DEAL_DAMAGE_OPP_BASE` effect types; `PLAY_ATTACK_EVENT` action type; `defeatUnitByIid` helper; `applyPlayAttackEvent` (pays event, applies temporary phaseAtk/hpBonus buff, executes attack, removes buff); `getLegalActions` generates `PLAY_ATTACK_EVENT` per (event × filtered-attack) pair; `computePower` clamped to Math.max(0) so debuffs can't push attack negative; full two-step UI state machine in `GameBoard` (`pendingAttackEventIid` → pick attacker → pick defender); `YourMat` updated for attack-event card highlighting and banner.
+
+- [x] **[2026-05-20] Leader abilities + event card effects + targeting mode** — `LEADER_ABILITY` action type; `AbilityEffect`/`TargetKind` type system; `LEADER_ABILITIES` and `EVENT_EFFECTS` registries; `applyLeaderAbility`; event effects resolved in `applyPlayCard`; `phaseAtk/phaseHp` on `CardInstance` (cleared at regroup); `LeaderInstance.exhausted` (cleared at regroup); `GameBoard` targeting state machine with `pendingLeaderAbilityId`/`pendingEventIid`; ABILITY button + targeting highlights in `YourMat`; exhausted leader visual in `LeaderCard`.
+
+- [x] **[2026-05-20] UI polish pass** — Resources portrait/landscape orientation with card-back art (`ResCard`, SVG crossed lines, no ID collision). Opponent mat resource lattice. `BaseCard`/`LeaderCard` redesigned as full-bleed image cards (HP overlay bar on base, deployed overlay on leader). "Take Initiative" label for 1v1. Card hover text fixed (data pipeline complete: backend arenas/traits enrichment → full deck fetch on game start → `text` field through `toPlayCardProps`/`toBaseData`/`toLeaderData`).
+
+- [x] **[2026-05-20] 5 gameplay bugs fixed** — Root cause: setup screen used slim deck list endpoint missing `type`, `energy_cost`, `arenas`, `text`. Fixed by: (1) backend `enrich_card_with_relationships` adds arenas + traits; (2) frontend fetches full deck detail (`/api/decks/{id}`) before game start; (3) `BaseCard`/`LeaderCard` hover data includes `image_uri` + `text`.
+
 - [x] **[2026-05-20] Coordinate keyword** — `abilities.ts` registry + `isCoordinateActive` + `hasEffectiveKeyword` + `effectiveHealth`. 12 cards implemented across 4 effect types. `applyAttackFilters` extended to dispatch Coordinate-granted filter keywords. UI shows green COORDINATE badge in arena label when threshold met.
 
 - [x] **[2026-05-20] Regroup draw fix** — `resolveRegroup` draws exactly 2 cards, not "up to 6."
@@ -281,11 +350,21 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 
 **Priority order — top item is immediately actionable:**
 
-1. **Deploy sessions 18–22 to production** — `./deploy.sh`. The `share_token` and `user_achievements` migrations run automatically on backend startup. Sessions 21–22 are frontend-only (game engine + UI), no schema changes.
-2. **Verify achievements in production** — navigate to Profile → Achievements tab; confirm rank panel shows with lesson content, achievement grid loads; build a deck and refresh to confirm `first_deck`/`rank_k1` earned.
-3. **Verify homepage rank track** — when logged in, confirm the progress bars reflect real achievement state (not all-0% demo).
-4. **Continue Coordinate deferred cards** — see table above. Next most tractable: Clone Commander Cody aura (requires iterating all friendlies on each state evaluation) and Kit Fisto / Reckless Torrent (need a target-selection action type).
-5. **Consider adding `/decks/share/[token]` discoverability** — no entry point from the public side yet.
+1. **Play-test the parser** — Run a game with an "Attack with a unit" event (e.g. Improvised Detonation, Breaking In, Shoot First, One Way Out) and verify the two-step attack-event flow works. Verify debuffs (–N/–N cards) apply correctly. Verify Vanquish/Lost and Forgotten defeat instantly. The parser covers ~47 events; confirm the "effect not yet implemented" fallback is rare in practice.
+
+2. **Expand the event registry for common misses** — After play-testing, query `swu_cards.db` for events still hitting the "not yet implemented" path. Add them to `EVENT_EFFECTS` in `abilities.ts`. Focus on cost-1 and cost-2 events (highest play frequency). Common patterns to check: "Draw 1 card." (not in registry), "Give all friendly units +1/+0 for this phase" (aura buff — not parseable, needs custom implementation).
+
+3. **Deferred Coordinate cards now unblocked by targeting system:**
+   - **Kit Fisto** — On Attack: deal 3 to a chosen ground unit → `ON_ATTACK_DEAL_DAMAGE` effect type with target selection mid-attack
+   - **Reckless Torrent** — When Played: deal 2 to one friendly + one enemy unit → dual target selection in `dispatchOnPlay`
+   - **Padmé (Pursuing Peace)** — On Attack: give enemy –3/–0 for this phase → negative `phaseAtk` via `applyAbilityEffect`
+   - **Clone Commander Cody** — Aura: all other friendlies get +1/+1 + Overwhelm while Coordinate active → computed live in `computePower`/`effectiveHealth` (no state needed), new `AURA_BUFF` coordinate effect type
+
+4. **AI improvements** — AI currently plays random legal actions. Basic heuristics would improve gameplay significantly: prefer attacking high-HP/attack threats over base when threatened; prefer playing high-value units early; use events efficiently. Even a 50-line priority scorer would make the game feel challenging.
+
+5. **Deploy sessions 18–24 to production** — `./deploy.sh`. Sessions 21–24 are frontend-only (game engine + UI), no schema changes.
+6. **Verify achievements in production** — navigate to Profile → Achievements tab; confirm rank panel shows with lesson content, achievement grid loads; build a deck and refresh to confirm `first_deck`/`rank_k1` earned.
+7. **Consider adding `/decks/share/[token]` discoverability** — no entry point from the public side yet.
 
 ---
 

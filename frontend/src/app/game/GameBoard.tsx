@@ -19,11 +19,17 @@ export function GameBoard({
   playerCoordinateActive, legalActions,
   playerName, onGameEnd,
 }: GameBoardProps) {
-  const [pendingAttackerIid,   setPendingAttackerIid]   = useState<string | null>(null);
+  const [pendingAttackerIid,      setPendingAttackerIid]      = useState<string | null>(null);
   /** leaderCardId of the leader whose ability is waiting for a target */
-  const [pendingLeaderAbilityId, setPendingLeaderAbilityId] = useState<string | null>(null);
-  /** iid of the event card waiting for a target */
-  const [pendingEventIid,      setPendingEventIid]      = useState<string | null>(null);
+  const [pendingLeaderAbilityId,  setPendingLeaderAbilityId]  = useState<string | null>(null);
+  /** iid of the targeted event card waiting for a target (non-attack events) */
+  const [pendingEventIid,         setPendingEventIid]         = useState<string | null>(null);
+  /**
+   * iid of the "Attack with a unit" event card that was clicked.
+   * Step 1: event selected (pendingAttackEventIid set, pendingAttackerIid null) → pick attacker.
+   * Step 2: attacker selected (both set) → pick defender via effectiveOppTargetIids.
+   */
+  const [pendingAttackEventIid,   setPendingAttackEventIid]   = useState<string | null>(null);
 
   const p1 = state.players.player1;
   const p2 = state.players.player2;
@@ -130,6 +136,61 @@ export function GameBoard({
     );
   }, [pendingEventIid, legalActions]);
 
+  /** Set of event-card iids that have PLAY_ATTACK_EVENT actions (i.e. "Attack with" events). */
+  const canPlayAttackEventIids = useMemo(
+    () => new Set(
+      legalActions
+        .filter(a => a.type === 'PLAY_ATTACK_EVENT')
+        .map(a => (a as Extract<GameAction, { type: 'PLAY_ATTACK_EVENT' }>).iid),
+    ),
+    [legalActions],
+  );
+
+  /**
+   * Step 1: friendly unit iids that can be the attacker for pendingAttackEventIid.
+   * Derived from PLAY_ATTACK_EVENT actions for the selected event card.
+   */
+  const attackEventAttackerIids = useMemo((): Set<string> => {
+    if (!pendingAttackEventIid) return new Set();
+    return new Set(
+      legalActions
+        .filter(a =>
+          a.type === 'PLAY_ATTACK_EVENT' &&
+          (a as Extract<GameAction, { type: 'PLAY_ATTACK_EVENT' }>).iid === pendingAttackEventIid,
+        )
+        .map(a => (a as Extract<GameAction, { type: 'PLAY_ATTACK_EVENT' }>).attackerIid),
+    );
+  }, [pendingAttackEventIid, legalActions]);
+
+  /**
+   * Step 2: valid defender iids for the chosen event + chosen attacker.
+   * Excludes 'base' (handled by canAttackEventTargetBase).
+   */
+  const attackEventTargetIids = useMemo((): Set<string> => {
+    if (!pendingAttackEventIid || !pendingAttackerIid) return new Set();
+    return new Set(
+      legalActions
+        .filter(a =>
+          a.type === 'PLAY_ATTACK_EVENT' &&
+          (a as Extract<GameAction, { type: 'PLAY_ATTACK_EVENT' }>).iid === pendingAttackEventIid &&
+          (a as Extract<GameAction, { type: 'PLAY_ATTACK_EVENT' }>).attackerIid === pendingAttackerIid &&
+          (a as Extract<GameAction, { type: 'PLAY_ATTACK_EVENT' }>).defenderIid !== 'base',
+        )
+        .map(a => (a as Extract<GameAction, { type: 'PLAY_ATTACK_EVENT' }>).defenderIid as string),
+    );
+  }, [pendingAttackEventIid, pendingAttackerIid, legalActions]);
+
+  const canAttackEventTargetBase = useMemo(() => {
+    if (!pendingAttackEventIid || !pendingAttackerIid) return false;
+    return legalActions.some(
+      a =>
+        a.type === 'PLAY_ATTACK_EVENT' &&
+        (a as Extract<GameAction, { type: 'PLAY_ATTACK_EVENT' }>).iid === pendingAttackEventIid &&
+        (a as Extract<GameAction, { type: 'PLAY_ATTACK_EVENT' }>).attackerIid === pendingAttackerIid &&
+        (a as Extract<GameAction, { type: 'PLAY_ATTACK_EVENT' }>).defenderIid === 'base',
+    );
+  }, [pendingAttackEventIid, pendingAttackerIid, legalActions]);
+
   // ── Effective targeting sets (attack, ability, or event) ─────────────────
 
   /** Enemy unit iids that should be highlighted/clickable right now */
@@ -141,10 +202,17 @@ export function GameBoard({
     if (pendingEventIid) {
       return new Set([...eventTargetIids].filter(id => id !== 'base'));
     }
+    // Attack-event step 2: show valid defenders for event + chosen attacker
+    if (pendingAttackEventIid && pendingAttackerIid) {
+      return attackEventTargetIids;
+    }
     return attackTargetIids;
-  }, [pendingLeaderAbilityId, pendingEventIid, leaderAbilityTargetIids, eventTargetIids, attackTargetIids, p2]);
+  }, [
+    pendingLeaderAbilityId, pendingEventIid, pendingAttackEventIid, pendingAttackerIid,
+    leaderAbilityTargetIids, eventTargetIids, attackEventTargetIids, attackTargetIids, p2,
+  ]);
 
-  /** My unit iids that should be highlighted as ability/event targets */
+  /** My unit iids that should be highlighted as ability/event/attacker targets */
   const friendlyTargetIids = useMemo((): Set<string> => {
     const myUnitIids = new Set([...p1.groundArena, ...p1.spaceArena].map(c => c.iid));
     if (pendingLeaderAbilityId) {
@@ -153,11 +221,21 @@ export function GameBoard({
     if (pendingEventIid) {
       return new Set([...eventTargetIids].filter(id => myUnitIids.has(id)));
     }
+    // Attack-event step 1: highlight valid attackers so player knows who can use the event
+    if (pendingAttackEventIid && !pendingAttackerIid) {
+      return attackEventAttackerIids;
+    }
     return new Set();
-  }, [pendingLeaderAbilityId, pendingEventIid, leaderAbilityTargetIids, eventTargetIids, p1]);
+  }, [
+    pendingLeaderAbilityId, pendingEventIid, pendingAttackEventIid, pendingAttackerIid,
+    leaderAbilityTargetIids, eventTargetIids, attackEventAttackerIids, p1,
+  ]);
 
   /** Whether the opponent's base is a valid target right now */
-  const effectiveCanTargetBase = pendingEventIid ? canEventTargetBase : canAttackBase;
+  const effectiveCanTargetBase =
+    pendingAttackEventIid && pendingAttackerIid ? canAttackEventTargetBase :
+    pendingEventIid ? canEventTargetBase :
+    canAttackBase;
 
   const canTakeCounter = !state.winner && isMyTurn && legalActions.some(a => a.type === 'TAKE_COUNTER');
 
@@ -167,9 +245,15 @@ export function GameBoard({
     setPendingAttackerIid(null);
     setPendingLeaderAbilityId(null);
     setPendingEventIid(null);
+    setPendingAttackEventIid(null);
   }, []);
 
   const handleMyUnitClick = useCallback((iid: string) => {
+    // Attack-event step 1: select which friendly unit will attack
+    if (pendingAttackEventIid && !pendingAttackerIid && attackEventAttackerIids.has(iid)) {
+      setPendingAttackerIid(iid);
+      return;
+    }
     // Leader ability targeting a friendly unit
     if (pendingLeaderAbilityId && leaderAbilityTargetIids.has(iid)) {
       handleAction({ type: 'LEADER_ABILITY', leaderCardId: pendingLeaderAbilityId, targetIid: iid });
@@ -188,13 +272,21 @@ export function GameBoard({
     setPendingAttackerIid(prev => prev === iid ? null : iid);
     setPendingLeaderAbilityId(null);
     setPendingEventIid(null);
+    setPendingAttackEventIid(null);
     setSelectedIid(null);
   }, [
+    pendingAttackEventIid, pendingAttackerIid, attackEventAttackerIids,
     pendingLeaderAbilityId, pendingEventIid, leaderAbilityTargetIids, eventTargetIids,
     isMyTurn, legalActions, handleAction, setSelectedIid,
   ]);
 
   const handleOppUnitClick = useCallback((iid: string) => {
+    // Attack-event step 2: select the defender
+    if (pendingAttackEventIid && pendingAttackerIid && attackEventTargetIids.has(iid)) {
+      handleAction({ type: 'PLAY_ATTACK_EVENT', iid: pendingAttackEventIid, attackerIid: pendingAttackerIid, defenderIid: iid });
+      clearPending();
+      return;
+    }
     // Leader ability targeting an enemy unit
     if (pendingLeaderAbilityId && leaderAbilityTargetIids.has(iid)) {
       handleAction({ type: 'LEADER_ABILITY', leaderCardId: pendingLeaderAbilityId, targetIid: iid });
@@ -212,12 +304,19 @@ export function GameBoard({
     handleAction({ type: 'ATTACK', attackerIid: pendingAttackerIid, defenderIid: iid });
     setPendingAttackerIid(null);
   }, [
+    pendingAttackEventIid, pendingAttackerIid, attackEventTargetIids,
     pendingLeaderAbilityId, pendingEventIid, leaderAbilityTargetIids, eventTargetIids,
-    pendingAttackerIid, attackTargetIids, handleAction,
+    attackTargetIids, handleAction, clearPending,
   ]);
 
   const handleAttackBase = useCallback(() => {
-    // Event that can target opponent's base
+    // Attack-event step 2: the base is the defender
+    if (pendingAttackEventIid && pendingAttackerIid && canAttackEventTargetBase) {
+      handleAction({ type: 'PLAY_ATTACK_EVENT', iid: pendingAttackEventIid, attackerIid: pendingAttackerIid, defenderIid: 'base' });
+      clearPending();
+      return;
+    }
+    // Targeted event that can hit the opponent's base
     if (pendingEventIid && canEventTargetBase) {
       handleAction({ type: 'PLAY_CARD', iid: pendingEventIid, targetIid: 'base' });
       setPendingEventIid(null);
@@ -226,22 +325,45 @@ export function GameBoard({
     if (!pendingAttackerIid || !canAttackBase) return;
     handleAction({ type: 'ATTACK', attackerIid: pendingAttackerIid, defenderIid: 'base' });
     setPendingAttackerIid(null);
-  }, [pendingEventIid, canEventTargetBase, pendingAttackerIid, canAttackBase, handleAction]);
+  }, [
+    pendingAttackEventIid, pendingAttackerIid, canAttackEventTargetBase,
+    pendingEventIid, canEventTargetBase, canAttackBase, handleAction, clearPending,
+  ]);
 
   const handleHandCardClick = useCallback((iid: string) => {
-    if (!isMyTurn || !canPlayIids.has(iid)) return;
+    const isNormalPlayable    = canPlayIids.has(iid);
+    const isAttackEventCard   = canPlayAttackEventIids.has(iid);
+    if (!isMyTurn || (!isNormalPlayable && !isAttackEventCard)) return;
 
-    // Cancel event targeting if same card tapped again
+    // Cancel attack-event if same card tapped again
+    if (pendingAttackEventIid === iid) {
+      setPendingAttackEventIid(null);
+      setPendingAttackerIid(null);
+      return;
+    }
+
+    // "Attack with a unit" event → enter two-step attack-event mode
+    if (isAttackEventCard) {
+      setPendingAttackEventIid(iid);
+      setPendingAttackerIid(null);
+      setPendingLeaderAbilityId(null);
+      setPendingEventIid(null);
+      setSelectedIid(null);
+      return;
+    }
+
+    // Cancel targeted event if same card tapped again
     if (pendingEventIid === iid) {
       setPendingEventIid(null);
       return;
     }
 
-    // Events that need a target → enter targeting mode
+    // Targeted events → enter targeting mode
     if (canPlayEventTargeted.has(iid)) {
       setPendingEventIid(iid);
       setPendingAttackerIid(null);
       setPendingLeaderAbilityId(null);
+      setPendingAttackEventIid(null);
       setSelectedIid(null);
       return;
     }
@@ -255,9 +377,11 @@ export function GameBoard({
       setPendingAttackerIid(null);
       setPendingLeaderAbilityId(null);
       setPendingEventIid(null);
+      setPendingAttackEventIid(null);
     }
   }, [
-    isMyTurn, canPlayIids, selectedIid, pendingEventIid, canPlayEventTargeted,
+    isMyTurn, canPlayIids, canPlayAttackEventIids, selectedIid,
+    pendingEventIid, pendingAttackEventIid, canPlayEventTargeted,
     handleAction, setSelectedIid,
   ]);
 
@@ -371,7 +495,9 @@ export function GameBoard({
         selectedIid={selectedIid}
         pendingAttackerIid={pendingAttackerIid}
         pendingEventIid={pendingEventIid}
+        pendingAttackEventIid={pendingAttackEventIid}
         canPlayIids={canPlayIids}
+        canPlayAttackEventIids={canPlayAttackEventIids}
         legalDeployIds={legalDeployIds}
         legalLeaderAbilityIds={legalLeaderAbilityIds}
         pendingLeaderAbilityId={pendingLeaderAbilityId}

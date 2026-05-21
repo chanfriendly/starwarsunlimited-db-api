@@ -153,7 +153,8 @@ export function computePower(
     if (e.type === 'STAT_BUFF') power += e.atk;
   }
 
-  return power;
+  // Attack can never go below 0 (phase debuffs may produce negative intermediate values)
+  return Math.max(0, power);
 }
 
 /**

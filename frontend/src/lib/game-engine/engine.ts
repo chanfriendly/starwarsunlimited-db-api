@@ -11,7 +11,7 @@ import {
   dispatchOnPlay, dispatchOnDefeated, applyAttackFilters,
 } from './keywords';
 import {
-  LEADER_ABILITIES, EVENT_EFFECTS, AbilityEffect, TargetKind,
+  LEADER_ABILITIES, AbilityEffect, TargetKind, getEventEffect,
 } from './abilities';
 
 // ---------------------------------------------------------------------------
@@ -175,6 +175,28 @@ function getValidTargets(
 }
 
 /**
+ * Immediately defeat a unit by iid — bypasses damage thresholds, goes straight
+ * to discard. Calls dispatchOnDefeated, clears deployed-leader link, and checks
+ * win condition. Callers log the action before calling this.
+ */
+function defeatUnitByIid(state: GameState, iid: string): GameState {
+  const found = findCard(state, iid);
+  if (!found || (found.arena !== 'ground' && found.arena !== 'space')) return state;
+  let s = state;
+  s = dispatchOnDefeated(s, found.card, found.owner);
+  s = removeFromArena(s, found.owner, iid);
+  s = addToDiscard(s, found.owner, found.card);
+  s = log(s, undefined, `${found.card.card.name} is defeated.`);
+  s = updatePlayer(s, found.owner, p => ({
+    ...p,
+    leaders: p.leaders.map(l =>
+      l.unitIid === iid ? { ...l, unitIid: undefined, isDeployed: false } : l,
+    ),
+  }));
+  return checkWinCondition(s);
+}
+
+/**
  * Resolve a single AbilityEffect in the current state.
  * playerId is the player who triggered the effect.
  * targetIid is the chosen target iid (or 'base' for opponent's base).
@@ -208,9 +230,10 @@ function applyAbilityEffect(
         phaseAtk: (c.phaseAtk ?? 0) + effect.atk,
         phaseHp:  (c.phaseHp  ?? 0) + effect.hp,
       }));
-      const parts = [];
-      if (effect.atk !== 0) parts.push(`+${effect.atk} attack`);
-      if (effect.hp  !== 0) parts.push(`+${effect.hp} HP`);
+      const fmtStat = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
+      const parts: string[] = [];
+      if (effect.atk !== 0) parts.push(`${fmtStat(effect.atk)} attack`);
+      if (effect.hp  !== 0) parts.push(`${fmtStat(effect.hp)} HP`);
       s = log(s, playerId, `Gave unit ${parts.join(', ')} until end of phase.`);
       break;
     }
@@ -252,6 +275,25 @@ function applyAbilityEffect(
       if (!targetIid) break;
       s = mapCardInArenas(s, targetIid, c => ({ ...c, shieldTokens: c.shieldTokens + 1 }));
       s = log(s, playerId, `Gave a shield token to a unit.`);
+      break;
+    }
+    case 'DEAL_DAMAGE_OPP_BASE': {
+      // No target selection — always damages the opponent's base directly.
+      s = updatePlayer(s, opp, p => ({
+        ...p, base: { ...p.base, damage: p.base.damage + effect.amount },
+      }));
+      s = log(s, playerId, `Dealt ${effect.amount} damage to opponent's base.`);
+      s = checkWinCondition(s);
+      break;
+    }
+    case 'DEFEAT_UNIT': {
+      if (!targetIid) break;
+      s = log(s, playerId, `Defeated a unit with an event.`);
+      s = defeatUnitByIid(s, targetIid);
+      break;
+    }
+    case 'TRIGGER_ATTACK_WITH': {
+      // Handled entirely by applyPlayAttackEvent — should never reach here.
       break;
     }
   }
@@ -418,8 +460,14 @@ function getLegalActions(state: GameState, playerId: PlayerId): GameAction[] {
           }
         }
       } else if (cardType === 'event') {
-        const evtDef = EVENT_EFFECTS[c.card.name];
-        if (evtDef?.targetKind) {
+        const evtDef = getEventEffect(c.card.name, c.card.text ?? '');
+        if (!evtDef) {
+          // Unknown event — allow playing but no effect
+          actions.push({ type: 'PLAY_CARD', iid: c.iid });
+        } else if (evtDef.effect.type === 'TRIGGER_ATTACK_WITH') {
+          // Attack-event: PLAY_ATTACK_EVENT actions generated after attack filtering below.
+          // Do NOT add a PLAY_CARD action for these — the two-step UI uses PLAY_ATTACK_EVENT.
+        } else if (evtDef.targetKind) {
           // Targeted event — generate one action per valid target
           const targets = getValidTargets(state, playerId, evtDef.targetKind);
           for (const targetId of targets) {
@@ -483,7 +531,31 @@ function getLegalActions(state: GameState, playerId: PlayerId): GameAction[] {
     actions.push({ type: 'ATTACK', attackerIid: attacker.iid, defenderIid: 'base' });
   }
 
-  return applyAttackFilters(state, actions, playerId);
+  // Apply Sentinel and other attack filters first so PLAY_ATTACK_EVENT inherits constraints.
+  const filteredActions = applyAttackFilters(state, actions, playerId);
+  const filteredAttacks = filteredActions.filter(
+    (a): a is Extract<GameAction, { type: 'ATTACK' }> => a.type === 'ATTACK',
+  );
+
+  // "Attack with a unit" events — generate one PLAY_ATTACK_EVENT per (event × attack) pair.
+  const attackEventActions: GameAction[] = [];
+  for (const c of me.hand) {
+    if (c.card.type?.toLowerCase() !== 'event') continue;
+    const cost = c.card.cost ?? c.card.energy_cost ?? 0;
+    if (me.resources.available < cost) continue;
+    const evtDef = getEventEffect(c.card.name, c.card.text ?? '');
+    if (evtDef?.effect.type !== 'TRIGGER_ATTACK_WITH') continue;
+    for (const atk of filteredAttacks) {
+      attackEventActions.push({
+        type: 'PLAY_ATTACK_EVENT',
+        iid: c.iid,
+        attackerIid: atk.attackerIid,
+        defenderIid: atk.defenderIid,
+      });
+    }
+  }
+
+  return [...filteredActions, ...attackEventActions];
 }
 
 // ---------------------------------------------------------------------------
@@ -508,14 +580,15 @@ function applyPlayCard(state: GameState, playerId: PlayerId, iid: string, target
   const type = card.card.type?.toLowerCase() ?? '';
 
   if (type === 'event') {
-    // Look up a registered effect — if none, just discard with a note
-    const evtDef = EVENT_EFFECTS[card.card.name];
-    if (evtDef) {
+    // Look up effect via registry + parser fallback — if none, just discard with a note.
+    const evtDef = getEventEffect(card.card.name, card.card.text ?? '');
+    if (evtDef && evtDef.effect.type !== 'TRIGGER_ATTACK_WITH') {
       s = applyAbilityEffect(s, playerId, evtDef.effect, targetIid);
       s = log(s, playerId, `Played event: ${card.card.name}.`);
-    } else {
+    } else if (!evtDef) {
       s = log(s, playerId, `Played event: ${card.card.name} (effect not yet implemented).`);
     }
+    // TRIGGER_ATTACK_WITH events go through PLAY_ATTACK_EVENT — should not reach here.
     s = addToDiscard(s, playerId, { ...card, exhausted: true });
   } else if (type === 'upgrade' && targetIid) {
     // Attach upgrade to target unit
@@ -920,6 +993,59 @@ function resolveRegroup(state: GameState): GameState {
   return s;
 }
 
+function applyPlayAttackEvent(
+  state: GameState,
+  playerId: PlayerId,
+  iid: string,
+  attackerIid: string,
+  defenderIid: string | 'base',
+): GameState {
+  const found = findCard(state, iid);
+  if (!found || found.arena !== 'hand' || found.owner !== playerId) return state;
+
+  const { card } = found;
+  const cost = card.card.cost ?? card.card.energy_cost ?? 0;
+  const me = state.players[playerId];
+  if (me.resources.available < cost) return state;
+
+  const evtDef = getEventEffect(card.card.name, card.card.text ?? '');
+  if (!evtDef || evtDef.effect.type !== 'TRIGGER_ATTACK_WITH') return state;
+
+  const effect = evtDef.effect; // TRIGGER_ATTACK_WITH
+
+  // Pay resource cost and move event to discard.
+  let s = updatePlayer(state, playerId, p => ({
+    ...p,
+    resources: { ...p.resources, available: p.resources.available - cost },
+  }));
+  s = removeFromHand(s, playerId, iid);
+  s = addToDiscard(s, playerId, { ...card, exhausted: true });
+  s = log(s, playerId, `Played event: ${card.card.name}.`);
+
+  // Apply temporary stat bonus to the attacker ("for this attack").
+  if (effect.atkBonus !== 0 || effect.hpBonus !== 0) {
+    s = mapCardInArenas(s, attackerIid, c => ({
+      ...c,
+      phaseAtk: (c.phaseAtk ?? 0) + effect.atkBonus,
+      phaseHp:  (c.phaseHp  ?? 0) + effect.hpBonus,
+    }));
+  }
+
+  // Execute the attack (exhausts attacker, deals damage, checks defeat, switches player).
+  s = applyAttack(s, playerId, attackerIid, defenderIid);
+
+  // Remove the temporary bonus (if the unit survived — mapCardInArenas is a no-op otherwise).
+  if (effect.atkBonus !== 0 || effect.hpBonus !== 0) {
+    s = mapCardInArenas(s, attackerIid, c => ({
+      ...c,
+      phaseAtk: (c.phaseAtk ?? 0) - effect.atkBonus,
+      phaseHp:  (c.phaseHp  ?? 0) - effect.hpBonus,
+    }));
+  }
+
+  return s;
+}
+
 // ---------------------------------------------------------------------------
 // Turn management
 // ---------------------------------------------------------------------------
@@ -963,6 +1089,8 @@ export class GameEngine {
     switch (action.type) {
       case 'PLAY_CARD':
         return applyPlayCard(state, playerId, action.iid, action.targetIid);
+      case 'PLAY_ATTACK_EVENT':
+        return applyPlayAttackEvent(state, playerId, action.iid, action.attackerIid, action.defenderIid);
       case 'ATTACK':
         return applyAttack(state, playerId, action.attackerIid, action.defenderIid);
       case 'DEPLOY_LEADER':

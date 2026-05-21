@@ -11,15 +11,19 @@ interface YourMatProps {
   hasInitiative: boolean;
   selectedIid: string | null;
   pendingAttackerIid: string | null;
-  /** iid of the event card waiting for a target (shows targeting banner) */
+  /** iid of the targeted event card waiting for a target (non-attack events) */
   pendingEventIid: string | null;
+  /** iid of the "Attack with a unit" event card in progress (step 1 or 2) */
+  pendingAttackEventIid: string | null;
   canPlayIids: Set<string>;
+  /** iid of event cards with PLAY_ATTACK_EVENT actions available */
+  canPlayAttackEventIids: Set<string>;
   legalDeployIds: Set<string>;
   /** Leader card ids that have a usable ability this turn */
   legalLeaderAbilityIds: Set<string>;
   /** Leader card id whose ability is waiting for a target */
   pendingLeaderAbilityId: string | null;
-  /** My unit iids that are valid targets for a pending ability or event */
+  /** My unit iids that are valid targets for a pending ability, event, or attack-event attacker */
   abilityTargetIids: Set<string>;
   /** True during the opening setup phase (select up to 2 resources before round 1) */
   isSetupPhase: boolean;
@@ -35,9 +39,10 @@ interface YourMatProps {
 }
 
 export function YourMat({
-  player, round, hasInitiative, selectedIid, pendingAttackerIid, pendingEventIid,
-  canPlayIids, legalDeployIds, legalLeaderAbilityIds, pendingLeaderAbilityId,
-  abilityTargetIids, isSetupPhase, isResourcePhase, coordinateActive,
+  player, round, hasInitiative, selectedIid, pendingAttackerIid,
+  pendingEventIid, pendingAttackEventIid,
+  canPlayIids, canPlayAttackEventIids, legalDeployIds, legalLeaderAbilityIds,
+  pendingLeaderAbilityId, abilityTargetIids, isSetupPhase, isResourcePhase, coordinateActive,
   onUnitClick, onHandCardClick, onDeployLeader, onLeaderAbility, onResourceCard, onSkipResource,
 }: YourMatProps) {
   const base = toBaseData(player.base);
@@ -245,13 +250,15 @@ export function YourMat({
             <div style={{
               position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)',
               fontFamily: 'var(--font-mono)', fontSize: 9, letterSpacing: '0.24em',
-              color: pendingEventIid ? 'var(--saber-amber)' : 'var(--ink-3)',
+              color: (pendingEventIid || pendingAttackEventIid) ? 'var(--saber-amber)' : 'var(--ink-3)',
               textTransform: 'uppercase',
               background: 'var(--bg)', padding: '2px 14px',
-              border: `1px solid ${pendingEventIid ? 'var(--saber-amber)' : 'var(--line)'}`,
+              border: `1px solid ${(pendingEventIid || pendingAttackEventIid) ? 'var(--saber-amber)' : 'var(--line)'}`,
               zIndex: 2, whiteSpace: 'nowrap',
             }}>
-              {pendingEventIid
+              {pendingAttackEventIid
+                ? `▸ Select a unit to attack with — click the card again to cancel`
+                : pendingEventIid
                 ? `▸ Select a target — click the card again to cancel`
                 : (
                   <>
@@ -265,15 +272,16 @@ export function YourMat({
             </div>
             <div className="hand-row">
               {player.hand.map(ci => {
-                const isPlayable = canPlayIids.has(ci.iid);
+                const isPlayable = canPlayIids.has(ci.iid) || canPlayAttackEventIids.has(ci.iid);
                 const isEventPending = pendingEventIid === ci.iid;
+                const isAttackEventPending = pendingAttackEventIid === ci.iid;
                 return (
                   <PlayCard
                     key={ci.iid}
                     card={toPlayCardProps(ci)}
                     size="md"
                     clickable={isPlayable}
-                    selected={selectedIid === ci.iid || isEventPending}
+                    selected={selectedIid === ci.iid || isEventPending || isAttackEventPending}
                     onClick={isPlayable ? () => onHandCardClick(ci.iid) : undefined}
                   />
                 );
