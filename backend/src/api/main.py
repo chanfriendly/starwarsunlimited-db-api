@@ -3,9 +3,37 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from src.utils.rate_limiter import RateLimitMiddleware
 import logging
+import json
 import os
+import sys
+import time
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class _JsonFormatter(logging.Formatter):
+    """Emit one JSON object per log record for structured log aggregation."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict = {
+            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exc"] = self.formatException(record.exc_info)
+        return json.dumps(payload)
+
+
+def _configure_logging() -> None:
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(_JsonFormatter())
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    # Replace any handlers added by earlier basicConfig calls
+    root.handlers = [handler]
+
+
+_configure_logging()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Star Wars Unlimited API")

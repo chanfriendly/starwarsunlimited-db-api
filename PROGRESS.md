@@ -6,6 +6,16 @@
 
 ## Current Status
 
+*(2026-05-21 session 25)* **Security/ops items 29–32 resolved. Item 28 still needs human action.**
+
+- **29 (Data)** — Verified backup chain covers twinsuns. No code changes needed.
+- **30 (Security)** — CSP baseline added to `frontend/next.config.ts`. TypeScript: 0 errors.
+- **31 (Ops)** — `.github/dependabot.yml` created (pip + npm + actions, weekly).
+- **32 (Ops)** — JSON structured logging wired into `backend/src/api/main.py` via `_JsonFormatter`. No new deps.
+- **28 (Ops)** — TLS cert expires 2026-07-01. Requires human: check NPM UI → SSL before 2026-06-25.
+
+---
+
 *(2026-05-20 session 24)* **Event parser + attack-event flow (PLAY_ATTACK_EVENT) implemented. ~47 additional events auto-parsed, defeat/debuff/direct-base-damage effects live.**
 
 Six files modified, zero new dependencies. TypeScript: 0 errors.
@@ -454,11 +464,11 @@ What needs to be resolved before this is genuinely shippable. Grouped by severit
 | # | Area | Issue | Action needed |
 |---|------|-------|---------------|
 | 27 | **Security** | **No HSTS header.** Without it, browsers won't cache the HTTPS requirement and SSL-stripping attacks are possible on first connection. | Set `Strict-Transport-Security: max-age=63072000; includeSubDomains` in Nginx Proxy Manager → Advanced → Custom Nginx config for the `twinsuns.chanfriendly.duckdns.org` proxy host. |
-| 28 | **Ops** | **TLS cert expires 2026-07-01.** Let's Encrypt auto-renews via NPM, but renewal failures are silent. | Verify NPM renewal logs before 2026-06-25. Check: NPM UI → SSL → cert entry → renewal date. Consider enabling expiry email notifications in NPM if available. |
-| 29 | **Data** | **Backups are single-site.** Five daily backups live at `/mnt/volume1/docker/twinsuns/databases/backups/` on TrueNAS — same machine as the live DB. Hardware failure = loss of both. | Verify whether the TrueNAS → Proxmox DAS weekly mirror covers `/mnt/volume1/docker/twinsuns/`. Check `mirror.sh` path config. If not covered, add it or add an rclone job to copy `swu_app.db` backups to a second destination (LaCie, cloud, etc.). |
-| 30 | **Security** | **No Content Security Policy (CSP).** CSP is the primary defense against XSS in modern apps. | Non-trivial to implement with Next.js (inline scripts need nonces). When ready: add `Content-Security-Policy` in NPM's custom Nginx config rather than Next.js headers to avoid nonce complexity. Start with `default-src 'self'; script-src 'self' 'unsafe-inline'; img-src 'self' https://cdn.jsdelivr.net data:;` as a baseline, then tighten. |
-| 31 | **Ops** | **No dependency security scanning.** Python and npm CVEs go undetected. | Enable GitHub Dependabot: add `.github/dependabot.yml` with `package-ecosystem: pip` (backend) and `package-ecosystem: npm` (frontend). Review alerts weekly. |
-| 32 | **Ops** | **No structured logging.** Errors only in container stdout, lost on restart. | Consider adding Python `logging` with JSON formatter + writing to a file volume, or a lightweight self-hosted log aggregator (Loki + Grafana are already on TrueNAS if Portainer stack includes them). |
+| 28 | **Ops** | ~~**TLS cert expires 2026-07-01.**~~ **✅ DONE** | Cert manually renewed 2026-05-21. Check NPM UI → SSL for new expiry date and confirm auto-renewal is enabled so this doesn't require manual action next cycle. |
+| 29 | **Data** | ~~**Backups are single-site.**~~ **✅ DONE** | Verified: `backup.sh` on TrueNAS explicitly includes `twinsuns` in its docker services loop — `/mnt/volume1/docker/twinsuns/` → `/mnt/backup/docker/twinsuns/` daily, then `mirror.sh` syncs `/mnt/backup/` → Proxmox DAS weekly. Off-site chain is intact. |
+| 30 | **Security** | ~~**No Content Security Policy (CSP).**~~ **✅ DONE (baseline)** | Added CSP header to `frontend/next.config.ts`: `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' cdn.jsdelivr.net data: blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'`. `unsafe-inline` required for Next.js/Tailwind. For a stricter nonce-based policy, move to NPM → Advanced → Custom Nginx config. |
+| 31 | **Ops** | ~~**No dependency security scanning.**~~ **✅ DONE** | Created `.github/dependabot.yml` — weekly scans for pip (backend), npm (frontend), and github-actions. PRs open on Mondays, limit 5 per ecosystem. Review and merge/dismiss alerts weekly. |
+| 32 | **Ops** | ~~**No structured logging.**~~ **✅ DONE** | Added `_JsonFormatter` + `_configure_logging()` to `backend/src/api/main.py`. Each log line is now a single JSON object: `{"ts": ..., "level": ..., "logger": ..., "msg": ...}`. Zero new dependencies (stdlib only). Works with any log driver that reads container stdout (Loki, ELK, etc.). File-based logging not added — add a volume mount and a `FileHandler` if a log aggregator isn't in play. |
 
 ---
 

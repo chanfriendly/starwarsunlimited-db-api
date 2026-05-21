@@ -4,6 +4,20 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-05-21: Production readiness hardening — infra items 28–32
+
+**TLS cert renewed (item 28)** — Let's Encrypt cert for `twinsuns.chanfriendly.duckdns.org` manually renewed. Prior cert expired 2026-07-01. Confirm auto-renewal is enabled in NPM so future cycles don't require manual action.
+
+**Backup chain verified (item 29)** — Confirmed via SSH to TrueNAS that `backup.sh` already includes the `twinsuns` Docker service in its loop. Data flows: `/mnt/volume1/docker/twinsuns/` → `/mnt/backup/docker/twinsuns/` daily, then `mirror.sh` syncs `/mnt/backup/` → Proxmox DAS weekly. No code changes needed.
+
+**CSP baseline added (item 30)** — `Content-Security-Policy` header added to `frontend/next.config.ts`. Policy: `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https://cdn.jsdelivr.net data: blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'`. `unsafe-inline` is required by Next.js (inline script tags for hydration) and Tailwind (inline styles). Moving to a nonce-based policy that eliminates `unsafe-inline` would require shifting the header to NPM's custom Nginx config — noted in a code comment.
+
+**Dependabot enabled (item 31)** — `.github/dependabot.yml` created covering pip (backend), npm (frontend), and github-actions. Weekly schedule on Mondays, 5-PR cap per ecosystem. PRs will auto-open for outdated or vulnerable dependencies.
+
+**Structured JSON logging (item 32)** — `_JsonFormatter` and `_configure_logging()` added to `backend/src/api/main.py`. All log output from the backend is now `{"ts": ..., "level": ..., "logger": ..., "msg": ...}` — a single JSON object per line, compatible with Loki, ELK, or any container log driver. No new dependencies (stdlib `logging` + `json`). File-based logging deliberately omitted; add a `FileHandler` with a volume mount when/if a log aggregator is introduced.
+
+---
+
 ### 2026-05-21: Production readiness hardening — auth, security headers, deploy
 
 **`PATCH /api/me/password`** — New endpoint in `me.py`. Requires `current_password` (verified via bcrypt) + `new_password` (same validation rules as registration: 8–100 chars, at least one letter, one digit). On success, calls `revoke_user_tokens` to bump `token_version`, which invalidates all other active sessions — important so that a password change from a trusted device closes any stolen sessions. Frontend proxy at `PATCH /api/me/password/route.ts`. Profile page UI is not yet wired; that's a separate task (item 22 in checklist).
