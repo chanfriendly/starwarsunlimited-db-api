@@ -5,4 +5,4 @@ qdrant-client==1.13.2
 sentence-transformers==3.4.1
 numpy==2.2.3
 torch==2.6.0
-transformers==4.49.0
+transformers==5.9.0
