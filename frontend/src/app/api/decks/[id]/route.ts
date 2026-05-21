@@ -6,10 +6,10 @@ const API_URL = process.env.INTERNAL_API_URL || 'http://localhost:8000';
 // GET /api/decks/[id]
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = params.id;
+    const { id } = await params;
     const cookieStore = await cookies();
     const token = cookieStore.get('auth_token');
 
@@ -49,10 +49,10 @@ export async function GET(
 // PUT /api/decks/[id]
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = params.id;
+    const { id } = await params;
     const cookieStore = await cookies();
     const token = cookieStore.get('auth_token');
 
@@ -97,10 +97,10 @@ export async function PUT(
 // DELETE /api/decks/[id]
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = params.id;
+    const { id } = await params;
     const cookieStore = await cookies();
     const token = cookieStore.get('auth_token');
 

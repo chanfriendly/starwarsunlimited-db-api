@@ -5,15 +5,16 @@ const API_URL = process.env.INTERNAL_API_URL || 'http://localhost:8000';
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const cookieStore = await cookies();
     const token = cookieStore.get('auth_token');
     if (!token?.value) {
       return NextResponse.json({ detail: 'Not authenticated' }, { status: 401 });
     }
-    const res = await fetch(`${API_URL}/api/me/decks/${params.id}/share`, {
+    const res = await fetch(`${API_URL}/api/me/decks/${id}/share`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token.value}` },
     });
@@ -28,15 +29,16 @@ export async function POST(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const cookieStore = await cookies();
     const token = cookieStore.get('auth_token');
     if (!token?.value) {
       return NextResponse.json({ detail: 'Not authenticated' }, { status: 401 });
     }
-    const res = await fetch(`${API_URL}/api/me/decks/${params.id}/share`, {
+    const res = await fetch(`${API_URL}/api/me/decks/${id}/share`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token.value}` },
     });

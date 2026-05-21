@@ -5,15 +5,16 @@ const API_URL = process.env.INTERNAL_API_URL || 'http://localhost:8000';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const cookieStore = await cookies();
     const token = cookieStore.get('auth_token');
     if (!token?.value) {
       return NextResponse.json({ detail: 'Not authenticated' }, { status: 401 });
     }
-    const res = await fetch(`${API_URL}/api/me/decks/${params.id}`, {
+    const res = await fetch(`${API_URL}/api/me/decks/${id}`, {
       headers: { Authorization: `Bearer ${token.value}` },
     });
     if (!res.ok) {

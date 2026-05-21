@@ -4,10 +4,11 @@ const API_URL = process.env.INTERNAL_API_URL || 'http://localhost:8000';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { token: string } }
+  { params }: { params: Promise<{ token: string }> }
 ) {
   try {
-    const res = await fetch(`${API_URL}/api/decks/share/${params.token}`);
+    const { token } = await params;
+    const res = await fetch(`${API_URL}/api/decks/share/${token}`);
     if (!res.ok) {
       return NextResponse.json({ detail: 'Deck not found' }, { status: res.status });
     }
