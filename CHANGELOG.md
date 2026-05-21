@@ -4,6 +4,26 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-05-21: Production readiness hardening — auth, security headers, deploy
+
+**`PATCH /api/me/password`** — New endpoint in `me.py`. Requires `current_password` (verified via bcrypt) + `new_password` (same validation rules as registration: 8–100 chars, at least one letter, one digit). On success, calls `revoke_user_tokens` to bump `token_version`, which invalidates all other active sessions — important so that a password change from a trusted device closes any stolen sessions. Frontend proxy at `PATCH /api/me/password/route.ts`. Profile page UI is not yet wired; that's a separate task (item 22 in checklist).
+
+**`PATCH /api/me/email`** — New endpoint in `me.py`. Requires `current_password` as confirmation (prevents a stolen session from locking the real user out of their email). Validates format via regex, enforces uniqueness, sets `email_verified=False`, and sends a new verification email. Why require current_password for email change but not profile update: email is the recovery channel — if someone can silently reroute it they own the account. Frontend proxy at `PATCH /api/me/email/route.ts`. Profile page UI deferred (item 22).
+
+**`avatar_url` validation** — `PATCH /api/me/profile` now rejects any `avatar_url` that doesn't start with `https://`. Previously any URL string was accepted. Without this, users could supply `http://` URLs that they control to beacon profile views (any browser rendering the avatar makes a request to that URL, leaking IP + timing). The fix is minimal: a string prefix check before committing.
+
+**`me.py` new imports** — `verify_password`, `get_password_hash`, `revoke_user_tokens`, `create_email_verification_token` from `src.auth.auth`; `_send_verification_email` from `src.auth.routes`; `re` stdlib. The cross-module import from `auth.routes` is a minor coupling smell — if the email send helpers are ever needed in more places, move them to a shared `src/auth/email.py`. Not worth the refactor now.
+
+**`typescript: { ignoreBuildErrors: true }` removed** — This flag was silently suppressing TypeScript errors during `next build`. `tsc --noEmit` confirms 0 errors, so the flag was a leftover from an earlier debugging session. Removed. Builds will now correctly fail on type errors.
+
+**Security headers** — Added `Referrer-Policy: strict-origin-when-cross-origin` and `Permissions-Policy: camera=(), microphone=(), geolocation=()` to `next.config.ts`. The existing three headers (X-Content-Type-Options, X-Frame-Options, X-XSS-Protection) are unchanged. Still missing: HSTS (must be set in NPM, not Next.js — see PROGRESS item 27) and CSP (complex with Next.js inline scripts — see item 30).
+
+**`deploy.sh` SHA tagging** — Each build now produces two Docker tags: `:latest` (for Portainer auto-pull) and `:<git-sha>` (for rollback). Previously only `:latest` was pushed, meaning a bad deploy had no rollback path. To roll back: `docker pull <image>:<sha>` on TrueNAS, retag as `:latest`, trigger Portainer redeploy. The SHA is derived from `git rev-parse --short HEAD` at deploy time.
+
+**Fan-site disclaimer** — Added to homepage footer: "Fan-made tool. Not affiliated with or endorsed by Fantasy Flight Games, Asmodee, or Lucasfilm Ltd. Star Wars: Unlimited and all related properties are trademarks of Lucasfilm Ltd." Standard convention for fan/community tools built on IP-licensed games. Required the moment the URL is shared with anyone outside the household.
+
+---
+
 ### 2026-05-19: Achievements system and Pilot Training
 
 **Achievement catalog** — 14 auto-detected achievements across four categories (Deck Building, Collection, Social, Pilot Training). Definitions are hardcoded Python dicts in `backend/src/routes/achievements.py` — no DB table for definitions, which keeps them easy to add or adjust without migrations. Earned state is stored in `user_achievements` with an `earned_at` timestamp.

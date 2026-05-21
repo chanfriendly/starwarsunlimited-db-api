@@ -321,6 +321,10 @@ export default function Home() {
         <p style={{ marginTop: 32, fontFamily: 'var(--ts-font-mono)', fontSize: 10, color: 'var(--ts-ink-4)', letterSpacing: '0.14em', textTransform: 'uppercase' }}>
           Free · No ads · Star Wars Unlimited · Twin Suns Format
         </p>
+        <p style={{ marginTop: 16, fontFamily: 'var(--ts-font-mono)', fontSize: 9, color: 'var(--ts-ink-5)', maxWidth: 560, margin: '16px auto 0', lineHeight: 1.6 }}>
+          Fan-made tool. Not affiliated with or endorsed by Fantasy Flight Games, Asmodee, or Lucasfilm Ltd.
+          Star Wars: Unlimited and all related properties are trademarks of Lucasfilm Ltd. / © & ™ Lucasfilm Ltd.
+        </p>
       </section>
 
     </div>

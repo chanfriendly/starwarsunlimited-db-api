@@ -440,6 +440,25 @@ What needs to be resolved before this is genuinely shippable. Grouped by severit
 | 16 | **UX** | ~~No loading skeleton / placeholder images.~~ **✅ DONE** | `ts-skeleton` shimmer class in `globals.css`; card browser, profile decks tab, and profile collection tab all use skeleton grids on load. |
 | 17 | **Ops** | No structured logging or request tracing. Errors surface only in container stdout. |
 | 18 | **Ops** | ~~No uptime monitoring.~~ **✅ DONE** | `.github/workflows/uptime_check.yaml` — pings `/health` every 15 min, emails alert on failure. Requires GitHub secrets: `SMTP_USER`, `SMTP_PASSWORD`, `ALERT_EMAIL`. |
+| 19 | **Auth** | ~~No change-password endpoint (authenticated users must use reset flow).~~ **✅ DONE** | `PATCH /api/me/password` added (requires current_password + new_password, bumps token_version to invalidate other sessions). Frontend proxy at `/api/me/password`. Profile page UI not yet wired — see item 22. |
+| 20 | **Auth** | ~~No email-update endpoint (typo at registration = permanently stuck).~~ **✅ DONE** | `PATCH /api/me/email` added (requires current_password, validates format, checks uniqueness, resets email_verified, sends verification email). Frontend proxy at `/api/me/email`. Profile page UI not yet wired — see item 22. |
+| 21 | **Security** | ~~`avatar_url` accepted any string.~~ **✅ DONE** | `PATCH /api/me/profile` now rejects `avatar_url` that doesn't start with `https://`. |
+| 22 | **UX** | Profile page has no UI for change-password or change-email. | Add "Security" settings section to the profile page with forms for both. Backend endpoints exist at `PATCH /api/me/password` and `PATCH /api/me/email`. |
+| 23 | **Security** | ~~`typescript: { ignoreBuildErrors: true }` in `next.config.ts`.~~ **✅ DONE** | Removed — `tsc --noEmit` confirmed 0 errors. Build will now fail on TypeScript errors, as it should. |
+| 24 | **Security** | ~~Missing Referrer-Policy and Permissions-Policy headers.~~ **✅ DONE** | Both added to `next.config.ts` security headers block. |
+| 25 | **Legal** | ~~No fan-site disclaimer.~~ **✅ DONE** | Disclaimer added to homepage footer: "Fan-made tool. Not affiliated with or endorsed by FFG, Asmodee, or Lucasfilm Ltd." |
+| 26 | **Ops** | ~~Docker images only tagged `:latest` — no rollback path.~~ **✅ DONE** | `deploy.sh` now tags each build with both `:latest` and the git SHA. To roll back: `docker pull <image>:<sha>`, retag as `:latest`, redeploy. |
+
+### 🔵 Infrastructure — requires hands-on access (cannot be done from code)
+
+| # | Area | Issue | Action needed |
+|---|------|-------|---------------|
+| 27 | **Security** | **No HSTS header.** Without it, browsers won't cache the HTTPS requirement and SSL-stripping attacks are possible on first connection. | Set `Strict-Transport-Security: max-age=63072000; includeSubDomains` in Nginx Proxy Manager → Advanced → Custom Nginx config for the `twinsuns.chanfriendly.duckdns.org` proxy host. |
+| 28 | **Ops** | **TLS cert expires 2026-07-01.** Let's Encrypt auto-renews via NPM, but renewal failures are silent. | Verify NPM renewal logs before 2026-06-25. Check: NPM UI → SSL → cert entry → renewal date. Consider enabling expiry email notifications in NPM if available. |
+| 29 | **Data** | **Backups are single-site.** Five daily backups live at `/mnt/volume1/docker/twinsuns/databases/backups/` on TrueNAS — same machine as the live DB. Hardware failure = loss of both. | Verify whether the TrueNAS → Proxmox DAS weekly mirror covers `/mnt/volume1/docker/twinsuns/`. Check `mirror.sh` path config. If not covered, add it or add an rclone job to copy `swu_app.db` backups to a second destination (LaCie, cloud, etc.). |
+| 30 | **Security** | **No Content Security Policy (CSP).** CSP is the primary defense against XSS in modern apps. | Non-trivial to implement with Next.js (inline scripts need nonces). When ready: add `Content-Security-Policy` in NPM's custom Nginx config rather than Next.js headers to avoid nonce complexity. Start with `default-src 'self'; script-src 'self' 'unsafe-inline'; img-src 'self' https://cdn.jsdelivr.net data:;` as a baseline, then tighten. |
+| 31 | **Ops** | **No dependency security scanning.** Python and npm CVEs go undetected. | Enable GitHub Dependabot: add `.github/dependabot.yml` with `package-ecosystem: pip` (backend) and `package-ecosystem: npm` (frontend). Review alerts weekly. |
+| 32 | **Ops** | **No structured logging.** Errors only in container stdout, lost on restart. | Consider adding Python `logging` with JSON formatter + writing to a file volume, or a lightweight self-hosted log aggregator (Loki + Grafana are already on TrueNAS if Portainer stack includes them). |
 
 ---
 

@@ -6,8 +6,10 @@ from pydantic import BaseModel
 import uuid
 from src.database.db import get_app_db, get_card_db
 from src.database.models import User, Deck, DeckCard, Card, UserCollection, UserWishlist
-from src.auth.auth import get_current_user
+from src.auth.auth import get_current_user, verify_password, get_password_hash, revoke_user_tokens, create_email_verification_token
+from src.auth.routes import _send_verification_email
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -868,10 +870,13 @@ async def update_profile(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_app_db)]
 ):
-    """Update the authenticated user's profile fields."""
+    """Update avatar URL. Must start with https:// or be empty."""
     try:
         if data.avatar_url is not None:
-            current_user.avatar_url = data.avatar_url or None
+            url = data.avatar_url.strip() if data.avatar_url else None
+            if url and not url.startswith("https://"):
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="avatar_url must start with https://")
+            current_user.avatar_url = url or None
         db.commit()
         return {
             "id": current_user.id,
@@ -880,12 +885,89 @@ async def update_profile(
             "avatar_url": current_user.avatar_url,
             "created_at": current_user.created_at,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         logger.error(f"Error updating profile {current_user.id}: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update profile"
+        )
+
+
+_EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+class EmailUpdate(BaseModel):
+    current_password: str
+    new_email: str
+
+@router.patch("/email", status_code=status.HTTP_200_OK)
+async def update_email(
+    data: EmailUpdate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_app_db)]
+):
+    """Change the authenticated user's email address. Requires current password."""
+    if not verify_password(data.current_password, current_user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
+    new_email = data.new_email.strip().lower()
+    if not _EMAIL_RE.match(new_email):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid email format")
+    if db.query(User).filter(User.email == new_email, User.id != current_user.id).first():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already in use")
+    try:
+        current_user.email = new_email
+        current_user.email_verified = False
+        db.commit()
+        verification_token = create_email_verification_token(db, current_user)
+        _send_verification_email(new_email, verification_token)
+        return {"message": "Email updated. Check your inbox to verify the new address."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating email for {current_user.id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update email"
+        )
+
+
+from pydantic import Field, validator as pydantic_validator
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=8, max_length=100)
+
+    @pydantic_validator('new_password')
+    def validate_password(cls, v):
+        if not any(c.isdigit() for c in v):
+            raise ValueError('Password must contain at least one number')
+        if not any(c.isalpha() for c in v):
+            raise ValueError('Password must contain at least one letter')
+        return v
+
+@router.patch("/password", status_code=status.HTTP_200_OK)
+async def change_password(
+    data: PasswordChange,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_app_db)]
+):
+    """Change the authenticated user's password. Requires current password. Invalidates all other sessions."""
+    if not verify_password(data.current_password, current_user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
+    try:
+        current_user.password_hash = get_password_hash(data.new_password)
+        revoke_user_tokens(db, current_user)
+        db.commit()
+        return {"message": "Password updated. Other sessions have been signed out."}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error changing password for {current_user.id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update password"
         )
 
 @router.post("/decks/{deck_id}/share")

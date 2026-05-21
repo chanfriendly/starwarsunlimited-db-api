@@ -26,6 +26,7 @@ DOCKER_USERNAME="chanfriendly"
 IMAGE_BASE="starwarsunlimited-db-api"
 FRONTEND_IMAGE="${DOCKER_USERNAME}/${IMAGE_BASE}-frontend"
 BACKEND_IMAGE="${DOCKER_USERNAME}/${IMAGE_BASE}-backend"
+GIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
 # ---------------------------------------------------------------------------
 # Colour helpers
@@ -100,16 +101,18 @@ build_and_push() {
   local image_name=$2
   local dockerfile_path=$3
 
-  step "Building ${image_name}:latest"
+  step "Building ${image_name}:latest (sha: ${GIT_SHA})"
   docker build \
     --platform linux/amd64 \
     -t "${image_name}:latest" \
+    -t "${image_name}:${GIT_SHA}" \
     -f "$dockerfile_path" \
     "$context_dir"
   success "Built ${image_name}"
 
-  step "Pushing ${image_name}:latest"
+  step "Pushing ${image_name}:latest and :${GIT_SHA}"
   docker push "${image_name}:latest"
+  docker push "${image_name}:${GIT_SHA}"
   success "Pushed ${image_name}"
 }
 
@@ -217,8 +220,9 @@ portainer_redeploy
 # Summary
 # ---------------------------------------------------------------------------
 step "Deployment complete"
-echo "  Frontend : ${FRONTEND_IMAGE}:latest"
-echo "  Backend  : ${BACKEND_IMAGE}:latest"
+echo "  Frontend : ${FRONTEND_IMAGE}:latest (${GIT_SHA})"
+echo "  Backend  : ${BACKEND_IMAGE}:latest (${GIT_SHA})"
+echo "  To roll back: docker pull <image>:<previous-sha> && tag as :latest, then redeploy"
 echo ""
 echo "  Production: http://192.168.1.124:4000"
 echo "  Wait ~30s for containers to restart, then smoke-test:"
