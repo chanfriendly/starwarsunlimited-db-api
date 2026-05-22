@@ -18,6 +18,12 @@ interface YourMatProps {
   canPlayIids: Set<string>;
   /** iid of event cards with PLAY_ATTACK_EVENT actions available */
   canPlayAttackEventIids: Set<string>;
+  /** iid of hand cards with WHEN_PLAYED_DAMAGE_DUAL Coordinate variants */
+  canPlayDualIids: Set<string>;
+  /** iid of the dual-target unit in mid-play */
+  pendingDualPlayIid: string | null;
+  /** chosen friendly target after dual step 1 */
+  pendingDualFriendlyIid: string | null;
   legalDeployIds: Set<string>;
   /** Leader card ids that have a usable ability this turn */
   legalLeaderAbilityIds: Set<string>;
@@ -41,7 +47,9 @@ interface YourMatProps {
 export function YourMat({
   player, round, hasInitiative, selectedIid, pendingAttackerIid,
   pendingEventIid, pendingAttackEventIid,
-  canPlayIids, canPlayAttackEventIids, legalDeployIds, legalLeaderAbilityIds,
+  canPlayIids, canPlayAttackEventIids, canPlayDualIids,
+  pendingDualPlayIid, pendingDualFriendlyIid,
+  legalDeployIds, legalLeaderAbilityIds,
   pendingLeaderAbilityId, abilityTargetIids, isSetupPhase, isResourcePhase, coordinateActive,
   onUnitClick, onHandCardClick, onDeployLeader, onLeaderAbility, onResourceCard, onSkipResource,
 }: YourMatProps) {
@@ -250,13 +258,17 @@ export function YourMat({
             <div style={{
               position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)',
               fontFamily: 'var(--font-mono)', fontSize: 9, letterSpacing: '0.24em',
-              color: (pendingEventIid || pendingAttackEventIid) ? 'var(--saber-amber)' : 'var(--ink-3)',
+              color: (pendingEventIid || pendingAttackEventIid || pendingDualPlayIid) ? 'var(--saber-amber)' : 'var(--ink-3)',
               textTransform: 'uppercase',
               background: 'var(--bg)', padding: '2px 14px',
-              border: `1px solid ${(pendingEventIid || pendingAttackEventIid) ? 'var(--saber-amber)' : 'var(--line)'}`,
+              border: `1px solid ${(pendingEventIid || pendingAttackEventIid || pendingDualPlayIid) ? 'var(--saber-amber)' : 'var(--line)'}`,
               zIndex: 2, whiteSpace: 'nowrap',
             }}>
-              {pendingAttackEventIid
+              {pendingDualPlayIid && !pendingDualFriendlyIid
+                ? `▸ Select a friendly unit — tap card again to skip the effect`
+                : pendingDualPlayIid && pendingDualFriendlyIid
+                ? `▸ Select an enemy unit — tap card again to re-pick friendly`
+                : pendingAttackEventIid
                 ? `▸ Select a unit to attack with — click the card again to cancel`
                 : pendingEventIid
                 ? `▸ Select a target — click the card again to cancel`
@@ -272,16 +284,17 @@ export function YourMat({
             </div>
             <div className="hand-row">
               {player.hand.map(ci => {
-                const isPlayable = canPlayIids.has(ci.iid) || canPlayAttackEventIids.has(ci.iid);
+                const isPlayable = canPlayIids.has(ci.iid) || canPlayAttackEventIids.has(ci.iid) || canPlayDualIids.has(ci.iid);
                 const isEventPending = pendingEventIid === ci.iid;
                 const isAttackEventPending = pendingAttackEventIid === ci.iid;
+                const isDualPending = pendingDualPlayIid === ci.iid;
                 return (
                   <PlayCard
                     key={ci.iid}
                     card={toPlayCardProps(ci)}
                     size="md"
                     clickable={isPlayable}
-                    selected={selectedIid === ci.iid || isEventPending || isAttackEventPending}
+                    selected={selectedIid === ci.iid || isEventPending || isAttackEventPending || isDualPending}
                     onClick={isPlayable ? () => onHandCardClick(ci.iid) : undefined}
                   />
                 );

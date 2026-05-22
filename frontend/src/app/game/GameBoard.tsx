@@ -30,6 +30,22 @@ export function GameBoard({
    * Step 2: attacker selected (both set) → pick defender via effectiveOppTargetIids.
    */
   const [pendingAttackEventIid,   setPendingAttackEventIid]   = useState<string | null>(null);
+  /**
+   * Coord-on-attack target selection state. Active when pendingAttackerIid is
+   * a unit with an active ON_ATTACK_DEAL_DAMAGE_TARGET or ON_ATTACK_DEBUFF_TARGET
+   * Coordinate effect and the user hasn't picked/skipped yet.
+   * - coordChoiceMade: true once user has either picked a target or skipped.
+   * - chosenCoordTargetIid: the picked target's iid, or null if skipped.
+   */
+  const [coordChoiceMade,         setCoordChoiceMade]         = useState(false);
+  const [chosenCoordTargetIid,    setChosenCoordTargetIid]    = useState<string | null>(null);
+  /**
+   * Dual-target play state (Reckless Torrent's WHEN_PLAYED_DAMAGE_DUAL).
+   * - pendingDualPlayIid: card-in-hand iid awaiting target selection.
+   * - pendingDualFriendlyIid: chosen friendly target after step 1; null in step 1.
+   */
+  const [pendingDualPlayIid,      setPendingDualPlayIid]      = useState<string | null>(null);
+  const [pendingDualFriendlyIid,  setPendingDualFriendlyIid]  = useState<string | null>(null);
 
   const p1 = state.players.player1;
   const p2 = state.players.player2;
@@ -46,21 +62,105 @@ export function GameBoard({
 
   // ── Derived legal-action sets ────────────────────────────────────────────
 
+  /**
+   * Valid coord-effect targets for the pending attacker, before the user has
+   * picked one. Empty when no coord-on-attack target effect is active.
+   */
+  const coordTargetIids = useMemo((): Set<string> => {
+    if (!pendingAttackerIid || coordChoiceMade) return new Set();
+    const targets = new Set<string>();
+    for (const a of legalActions) {
+      if (a.type !== 'ATTACK' || a.attackerIid !== pendingAttackerIid) continue;
+      if (a.coordDamageTarget)  targets.add(a.coordDamageTarget);
+      if (a.coordDebuffTarget) targets.add(a.coordDebuffTarget);
+    }
+    return targets;
+  }, [pendingAttackerIid, coordChoiceMade, legalActions]);
+
+  /** Whether the pending attacker's coord-on-attack effect is OPTIONAL (Kit Fisto "You may"). */
+  const coordIsOptional = useMemo(() => {
+    if (!pendingAttackerIid || coordChoiceMade) return false;
+    // Optional = a legal ATTACK exists for this attacker WITHOUT any coord target,
+    //           even though coord targets are also available.
+    const hasCoordVariant = legalActions.some(
+      a => a.type === 'ATTACK' && a.attackerIid === pendingAttackerIid &&
+        (a.coordDamageTarget || a.coordDebuffTarget),
+    );
+    const hasPlainVariant = legalActions.some(
+      a => a.type === 'ATTACK' && a.attackerIid === pendingAttackerIid &&
+        !a.coordDamageTarget && !a.coordDebuffTarget,
+    );
+    return hasCoordVariant && hasPlainVariant;
+  }, [pendingAttackerIid, coordChoiceMade, legalActions]);
+
+  /** True when we should be showing coord targets, NOT defenders. */
+  const coordTargetingPhase = coordTargetIids.size > 0;
+
+  /**
+   * Match an ATTACK action to the user's chosen coord state. Returns true if
+   * `a` is consistent with chosenCoordTargetIid (either both as the damage
+   * target or both as the debuff target, or both as no coord target).
+   */
+  const attackMatchesCoord = useCallback((a: Extract<GameAction, { type: 'ATTACK' }>) => {
+    const aHasCoord = !!(a.coordDamageTarget || a.coordDebuffTarget);
+    if (!coordChoiceMade) return !aHasCoord; // pre-choice: only show plain variant defenders
+    if (chosenCoordTargetIid === null) return !aHasCoord; // user skipped
+    return a.coordDamageTarget === chosenCoordTargetIid || a.coordDebuffTarget === chosenCoordTargetIid;
+  }, [coordChoiceMade, chosenCoordTargetIid]);
+
   const attackTargetIids = useMemo((): Set<string> => {
     if (!pendingAttackerIid) return new Set();
+    if (coordTargetingPhase) return new Set(); // hide defenders until coord target picked / skipped
     return new Set(
       legalActions
-        .filter(a => a.type === 'ATTACK' && a.attackerIid === pendingAttackerIid && a.defenderIid !== 'base')
+        .filter(a => a.type === 'ATTACK' && a.attackerIid === pendingAttackerIid && a.defenderIid !== 'base' && attackMatchesCoord(a))
         .map(a => (a as Extract<GameAction, { type: 'ATTACK' }>).defenderIid as string),
     );
-  }, [pendingAttackerIid, legalActions]);
+  }, [pendingAttackerIid, coordTargetingPhase, legalActions, attackMatchesCoord]);
 
   const canAttackBase = useMemo(() => {
-    if (!pendingAttackerIid) return false;
+    if (!pendingAttackerIid || coordTargetingPhase) return false;
     return legalActions.some(
-      a => a.type === 'ATTACK' && a.attackerIid === pendingAttackerIid && a.defenderIid === 'base',
+      a => a.type === 'ATTACK' && a.attackerIid === pendingAttackerIid && a.defenderIid === 'base' && attackMatchesCoord(a),
     );
-  }, [pendingAttackerIid, legalActions]);
+  }, [pendingAttackerIid, coordTargetingPhase, legalActions, attackMatchesCoord]);
+
+  // ── Dual-target play (Reckless Torrent) ──────────────────────────────────
+
+  /** Hand-card iids whose play has dual-target variants. */
+  const canPlayDualIids = useMemo(
+    () => new Set(
+      legalActions
+        .filter((a): a is Extract<GameAction, { type: 'PLAY_CARD' }> =>
+          a.type === 'PLAY_CARD' && Array.isArray((a as Extract<GameAction, { type: 'PLAY_CARD' }>).targetIids))
+        .map(a => a.iid),
+    ),
+    [legalActions],
+  );
+
+  /** Step 1: friendly iids that are valid first-targets for the pending dual play. */
+  const dualFriendlyIids = useMemo((): Set<string> => {
+    if (!pendingDualPlayIid || pendingDualFriendlyIid) return new Set();
+    const out = new Set<string>();
+    for (const a of legalActions) {
+      if (a.type !== 'PLAY_CARD' || a.iid !== pendingDualPlayIid) continue;
+      if (a.targetIids && a.targetIids.length >= 1) out.add(a.targetIids[0]);
+    }
+    return out;
+  }, [pendingDualPlayIid, pendingDualFriendlyIid, legalActions]);
+
+  /** Step 2: enemy iids valid as second-target given the chosen friendly. */
+  const dualEnemyIids = useMemo((): Set<string> => {
+    if (!pendingDualPlayIid || !pendingDualFriendlyIid) return new Set();
+    const out = new Set<string>();
+    for (const a of legalActions) {
+      if (a.type !== 'PLAY_CARD' || a.iid !== pendingDualPlayIid) continue;
+      if (a.targetIids && a.targetIids.length >= 2 && a.targetIids[0] === pendingDualFriendlyIid) {
+        out.add(a.targetIids[1]);
+      }
+    }
+    return out;
+  }, [pendingDualPlayIid, pendingDualFriendlyIid, legalActions]);
 
   const canPlayIids = useMemo(
     () => new Set(legalActions.filter(a => a.type === 'PLAY_CARD').map(a => (a as Extract<GameAction, { type: 'PLAY_CARD' }>).iid)),
@@ -206,10 +306,20 @@ export function GameBoard({
     if (pendingAttackEventIid && pendingAttackerIid) {
       return attackEventTargetIids;
     }
+    // Dual-target play step 2: show enemy targets after friendly has been chosen
+    if (pendingDualPlayIid && pendingDualFriendlyIid) {
+      return dualEnemyIids;
+    }
+    // Coord-on-attack targeting phase: highlight valid coord targets (enemies)
+    if (coordTargetingPhase) {
+      return coordTargetIids;
+    }
     return attackTargetIids;
   }, [
     pendingLeaderAbilityId, pendingEventIid, pendingAttackEventIid, pendingAttackerIid,
-    leaderAbilityTargetIids, eventTargetIids, attackEventTargetIids, attackTargetIids, p2,
+    pendingDualPlayIid, pendingDualFriendlyIid, coordTargetingPhase,
+    leaderAbilityTargetIids, eventTargetIids, attackEventTargetIids,
+    attackTargetIids, dualEnemyIids, coordTargetIids, p2,
   ]);
 
   /** My unit iids that should be highlighted as ability/event/attacker targets */
@@ -225,16 +335,22 @@ export function GameBoard({
     if (pendingAttackEventIid && !pendingAttackerIid) {
       return attackEventAttackerIids;
     }
+    // Dual-target play step 1: highlight valid friendly first-targets
+    if (pendingDualPlayIid && !pendingDualFriendlyIid) {
+      return dualFriendlyIids;
+    }
     return new Set();
   }, [
     pendingLeaderAbilityId, pendingEventIid, pendingAttackEventIid, pendingAttackerIid,
-    leaderAbilityTargetIids, eventTargetIids, attackEventAttackerIids, p1,
+    pendingDualPlayIid, pendingDualFriendlyIid,
+    leaderAbilityTargetIids, eventTargetIids, attackEventAttackerIids, dualFriendlyIids, p1,
   ]);
 
   /** Whether the opponent's base is a valid target right now */
   const effectiveCanTargetBase =
     pendingAttackEventIid && pendingAttackerIid ? canAttackEventTargetBase :
     pendingEventIid ? canEventTargetBase :
+    coordTargetingPhase ? false :
     canAttackBase;
 
   const canTakeCounter = !state.winner && isMyTurn && legalActions.some(a => a.type === 'TAKE_COUNTER');
@@ -246,12 +362,21 @@ export function GameBoard({
     setPendingLeaderAbilityId(null);
     setPendingEventIid(null);
     setPendingAttackEventIid(null);
+    setCoordChoiceMade(false);
+    setChosenCoordTargetIid(null);
+    setPendingDualPlayIid(null);
+    setPendingDualFriendlyIid(null);
   }, []);
 
   const handleMyUnitClick = useCallback((iid: string) => {
     // Attack-event step 1: select which friendly unit will attack
     if (pendingAttackEventIid && !pendingAttackerIid && attackEventAttackerIids.has(iid)) {
       setPendingAttackerIid(iid);
+      return;
+    }
+    // Dual-target play step 1: pick the friendly target
+    if (pendingDualPlayIid && !pendingDualFriendlyIid && dualFriendlyIids.has(iid)) {
+      setPendingDualFriendlyIid(iid);
       return;
     }
     // Leader ability targeting a friendly unit
@@ -266,17 +391,33 @@ export function GameBoard({
       setPendingEventIid(null);
       return;
     }
+    // Coord-on-attack: clicking the attacker again skips (optional) or cancels (mandatory)
+    if (pendingAttackerIid === iid && coordTargetingPhase) {
+      if (coordIsOptional) {
+        setCoordChoiceMade(true);
+        setChosenCoordTargetIid(null);
+      } else {
+        setPendingAttackerIid(null);
+        setCoordChoiceMade(false);
+        setChosenCoordTargetIid(null);
+      }
+      return;
+    }
     // Normal attack selection
     if (!isMyTurn) return;
     if (!legalActions.some(a => a.type === 'ATTACK' && a.attackerIid === iid)) return;
     setPendingAttackerIid(prev => prev === iid ? null : iid);
+    setCoordChoiceMade(false);
+    setChosenCoordTargetIid(null);
     setPendingLeaderAbilityId(null);
     setPendingEventIid(null);
     setPendingAttackEventIid(null);
     setSelectedIid(null);
   }, [
     pendingAttackEventIid, pendingAttackerIid, attackEventAttackerIids,
+    pendingDualPlayIid, pendingDualFriendlyIid, dualFriendlyIids,
     pendingLeaderAbilityId, pendingEventIid, leaderAbilityTargetIids, eventTargetIids,
+    coordTargetingPhase, coordIsOptional,
     isMyTurn, legalActions, handleAction, setSelectedIid,
   ]);
 
@@ -285,6 +426,18 @@ export function GameBoard({
     if (pendingAttackEventIid && pendingAttackerIid && attackEventTargetIids.has(iid)) {
       handleAction({ type: 'PLAY_ATTACK_EVENT', iid: pendingAttackEventIid, attackerIid: pendingAttackerIid, defenderIid: iid });
       clearPending();
+      return;
+    }
+    // Dual-target play step 2: pick the enemy and dispatch
+    if (pendingDualPlayIid && pendingDualFriendlyIid && dualEnemyIids.has(iid)) {
+      handleAction({ type: 'PLAY_CARD', iid: pendingDualPlayIid, targetIids: [pendingDualFriendlyIid, iid] });
+      clearPending();
+      return;
+    }
+    // Coord-on-attack: pick the coord target, then proceed to defender selection
+    if (coordTargetingPhase && coordTargetIids.has(iid)) {
+      setChosenCoordTargetIid(iid);
+      setCoordChoiceMade(true);
       return;
     }
     // Leader ability targeting an enemy unit
@@ -299,14 +452,22 @@ export function GameBoard({
       setPendingEventIid(null);
       return;
     }
-    // Normal attack
+    // Normal attack — include the chosen coord target (if any) on the dispatched action.
     if (!pendingAttackerIid || !attackTargetIids.has(iid)) return;
-    handleAction({ type: 'ATTACK', attackerIid: pendingAttackerIid, defenderIid: iid });
+    const coordAction = legalActions.find(a =>
+      a.type === 'ATTACK' && a.attackerIid === pendingAttackerIid && a.defenderIid === iid && attackMatchesCoord(a),
+    ) as Extract<GameAction, { type: 'ATTACK' }> | undefined;
+    handleAction(coordAction ?? { type: 'ATTACK', attackerIid: pendingAttackerIid, defenderIid: iid });
     setPendingAttackerIid(null);
+    setCoordChoiceMade(false);
+    setChosenCoordTargetIid(null);
   }, [
     pendingAttackEventIid, pendingAttackerIid, attackEventTargetIids,
+    pendingDualPlayIid, pendingDualFriendlyIid, dualEnemyIids,
+    coordTargetingPhase, coordTargetIids,
     pendingLeaderAbilityId, pendingEventIid, leaderAbilityTargetIids, eventTargetIids,
-    attackTargetIids, handleAction, clearPending,
+    attackTargetIids, attackMatchesCoord,
+    legalActions, handleAction, clearPending,
   ]);
 
   const handleAttackBase = useCallback(() => {
@@ -323,22 +484,46 @@ export function GameBoard({
       return;
     }
     if (!pendingAttackerIid || !canAttackBase) return;
-    handleAction({ type: 'ATTACK', attackerIid: pendingAttackerIid, defenderIid: 'base' });
+    // Match the legal action that's consistent with the chosen coord state so
+    // the chosen coord target rides along with the attack.
+    const coordAction = legalActions.find(a =>
+      a.type === 'ATTACK' && a.attackerIid === pendingAttackerIid && a.defenderIid === 'base' && attackMatchesCoord(a),
+    ) as Extract<GameAction, { type: 'ATTACK' }> | undefined;
+    handleAction(coordAction ?? { type: 'ATTACK', attackerIid: pendingAttackerIid, defenderIid: 'base' });
     setPendingAttackerIid(null);
+    setCoordChoiceMade(false);
+    setChosenCoordTargetIid(null);
   }, [
     pendingAttackEventIid, pendingAttackerIid, canAttackEventTargetBase,
-    pendingEventIid, canEventTargetBase, canAttackBase, handleAction, clearPending,
+    pendingEventIid, canEventTargetBase, canAttackBase,
+    legalActions, attackMatchesCoord, handleAction, clearPending,
   ]);
 
   const handleHandCardClick = useCallback((iid: string) => {
     const isNormalPlayable    = canPlayIids.has(iid);
     const isAttackEventCard   = canPlayAttackEventIids.has(iid);
-    if (!isMyTurn || (!isNormalPlayable && !isAttackEventCard)) return;
+    const isDualPlayCard      = canPlayDualIids.has(iid);
+    if (!isMyTurn || (!isNormalPlayable && !isAttackEventCard && !isDualPlayCard)) return;
 
     // Cancel attack-event if same card tapped again
     if (pendingAttackEventIid === iid) {
       setPendingAttackEventIid(null);
       setPendingAttackerIid(null);
+      return;
+    }
+
+    // Dual-target play, second tap:
+    //   - If a friendly was already chosen, step back to step 1 (re-pick friendly).
+    //   - If no friendly is chosen yet, treat the second tap as "decline the
+    //     optional effect" and play the card with no targets. This is the
+    //     in-place skip path for cards like Reckless Torrent ("You may ...").
+    if (pendingDualPlayIid === iid) {
+      if (pendingDualFriendlyIid) {
+        setPendingDualFriendlyIid(null);
+      } else {
+        handleAction({ type: 'PLAY_CARD', iid });
+        setPendingDualPlayIid(null);
+      }
       return;
     }
 
@@ -348,6 +533,8 @@ export function GameBoard({
       setPendingAttackerIid(null);
       setPendingLeaderAbilityId(null);
       setPendingEventIid(null);
+      setPendingDualPlayIid(null);
+      setPendingDualFriendlyIid(null);
       setSelectedIid(null);
       return;
     }
@@ -364,6 +551,22 @@ export function GameBoard({
       setPendingAttackerIid(null);
       setPendingLeaderAbilityId(null);
       setPendingAttackEventIid(null);
+      setPendingDualPlayIid(null);
+      setPendingDualFriendlyIid(null);
+      setSelectedIid(null);
+      return;
+    }
+
+    // Dual-target unit → enter dual-target play mode (friendly first, then enemy).
+    // The "decline" path (no targets) is reachable by double-tapping the card
+    // before picking — same UX as "select, then play" for normal units below.
+    if (isDualPlayCard) {
+      setPendingDualPlayIid(iid);
+      setPendingDualFriendlyIid(null);
+      setPendingAttackerIid(null);
+      setPendingLeaderAbilityId(null);
+      setPendingEventIid(null);
+      setPendingAttackEventIid(null);
       setSelectedIid(null);
       return;
     }
@@ -378,10 +581,13 @@ export function GameBoard({
       setPendingLeaderAbilityId(null);
       setPendingEventIid(null);
       setPendingAttackEventIid(null);
+      setPendingDualPlayIid(null);
+      setPendingDualFriendlyIid(null);
     }
   }, [
-    isMyTurn, canPlayIids, canPlayAttackEventIids, selectedIid,
-    pendingEventIid, pendingAttackEventIid, canPlayEventTargeted,
+    isMyTurn, canPlayIids, canPlayAttackEventIids, canPlayDualIids, selectedIid,
+    pendingEventIid, pendingAttackEventIid, pendingDualPlayIid, pendingDualFriendlyIid,
+    canPlayEventTargeted,
     handleAction, setSelectedIid,
   ]);
 
@@ -498,6 +704,9 @@ export function GameBoard({
         pendingAttackEventIid={pendingAttackEventIid}
         canPlayIids={canPlayIids}
         canPlayAttackEventIids={canPlayAttackEventIids}
+        canPlayDualIids={canPlayDualIids}
+        pendingDualPlayIid={pendingDualPlayIid}
+        pendingDualFriendlyIid={pendingDualFriendlyIid}
         legalDeployIds={legalDeployIds}
         legalLeaderAbilityIds={legalLeaderAbilityIds}
         pendingLeaderAbilityId={pendingLeaderAbilityId}

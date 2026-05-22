@@ -1,6 +1,27 @@
 export type GameAction =
-  | { type: 'PLAY_CARD';         iid: string; targetIid?: string }
-  | { type: 'ATTACK';            attackerIid: string; defenderIid: string | 'base' }
+  /**
+   * Play a card from hand.
+   * - targetIid: legacy single target (events with a single target, upgrades).
+   * - targetIids: multi-target list. Convention by effect type:
+   *     WHEN_PLAYED_DAMAGE_DUAL → [friendlyTarget, enemyTarget]
+   */
+  | { type: 'PLAY_CARD';         iid: string; targetIid?: string; targetIids?: string[] }
+  /**
+   * Attack with a unit.
+   * - coordDamageTarget: chosen target for ON_ATTACK_DEAL_DAMAGE_TARGET
+   *   (Kit Fisto pattern). Optional — the effect is "You may" so absence means
+   *   the player declined to use it.
+   * - coordDebuffTarget: chosen target for ON_ATTACK_DEBUFF_TARGET (Padmé
+   *   Pursuing Peace pattern). Mandatory if the effect is active and any
+   *   valid enemy target exists; absent only when no targets are available.
+   */
+  | {
+      type: 'ATTACK';
+      attackerIid: string;
+      defenderIid: string | 'base';
+      coordDamageTarget?: string;
+      coordDebuffTarget?: string;
+    }
   | { type: 'DEPLOY_LEADER';     leaderCardId: string }
   | { type: 'LEADER_ABILITY';    leaderCardId: string; targetIid?: string }
   | { type: 'USE_ABILITY';       iid: string; abilityIndex: number; targetIid?: string }

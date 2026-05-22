@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SavedDeck, deleteUserDeck, fetchUserAchievements, AchievementsResponse } from '@/lib/api';
@@ -533,11 +533,217 @@ function AchievementsTab({
     );
 }
 
+// ── SecurityTab ─────────────────────────────────────────────────────────────
+
+function SecurityTab({ onPasswordChanged }: { onPasswordChanged: () => Promise<void> }) {
+    const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' });
+    const [pwStatus, setPwStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+    const [pwError, setPwError] = useState('');
+
+    const [emailForm, setEmailForm] = useState({ current: '', newEmail: '' });
+    const [emailStatus, setEmailStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+    const [emailError, setEmailError] = useState('');
+
+    const handlePasswordSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (pwForm.next !== pwForm.confirm) {
+            setPwError('New passwords do not match.');
+            setPwStatus('error');
+            return;
+        }
+        if (pwForm.next.length < 8) {
+            setPwError('New password must be at least 8 characters.');
+            setPwStatus('error');
+            return;
+        }
+        setPwStatus('saving');
+        setPwError('');
+        try {
+            const res = await fetchWithAuth('/api/me/password', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ current_password: pwForm.current, new_password: pwForm.next }),
+            });
+            if (res && typeof res === 'object' && 'detail' in res) {
+                setPwError(String(res.detail));
+                setPwStatus('error');
+            } else {
+                setPwStatus('success');
+                setPwForm({ current: '', next: '', confirm: '' });
+                await onPasswordChanged();
+            }
+        } catch {
+            setPwError('Something went wrong. Please try again.');
+            setPwStatus('error');
+        }
+    };
+
+    const handleEmailSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setEmailStatus('saving');
+        setEmailError('');
+        try {
+            const res = await fetchWithAuth('/api/me/email', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ current_password: emailForm.current, new_email: emailForm.newEmail }),
+            });
+            if (res && typeof res === 'object' && 'detail' in res) {
+                setEmailError(String(res.detail));
+                setEmailStatus('error');
+            } else {
+                setEmailStatus('success');
+                setEmailForm({ current: '', newEmail: '' });
+            }
+        } catch {
+            setEmailError('Something went wrong. Please try again.');
+            setEmailStatus('error');
+        }
+    };
+
+    const fieldStyle: React.CSSProperties = {
+        display: 'flex', flexDirection: 'column', gap: 6,
+    };
+    const labelStyle: React.CSSProperties = {
+        fontFamily: 'var(--ts-font-mono)', fontSize: 9, letterSpacing: '0.2em',
+        textTransform: 'uppercase', color: 'var(--ts-ink-3)',
+    };
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 48, maxWidth: 520 }}>
+
+            {/* ── Change Password ── */}
+            <section>
+                <div className="ts-eyebrow" style={{ marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--ts-line)' }}>
+                    Change Password
+                </div>
+
+                {pwStatus === 'success' ? (
+                    <div style={{ border: '1px solid var(--ts-green)', background: 'rgba(80,200,100,0.07)', padding: '16px 20px' }}>
+                        <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 11, color: 'var(--ts-green)', letterSpacing: '0.1em' }}>
+                            ✓ Password updated. All other sessions have been invalidated — you will be logged out momentarily.
+                        </div>
+                    </div>
+                ) : (
+                    <form onSubmit={handlePasswordSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                        <div style={fieldStyle}>
+                            <label style={labelStyle}>Current Password</label>
+                            <input
+                                type="password"
+                                className="ts-input"
+                                value={pwForm.current}
+                                onChange={e => setPwForm(f => ({ ...f, current: e.target.value }))}
+                                autoComplete="current-password"
+                                required
+                            />
+                        </div>
+                        <div style={fieldStyle}>
+                            <label style={labelStyle}>New Password</label>
+                            <input
+                                type="password"
+                                className="ts-input"
+                                value={pwForm.next}
+                                onChange={e => setPwForm(f => ({ ...f, next: e.target.value }))}
+                                autoComplete="new-password"
+                                minLength={8}
+                                required
+                            />
+                        </div>
+                        <div style={fieldStyle}>
+                            <label style={labelStyle}>Confirm New Password</label>
+                            <input
+                                type="password"
+                                className="ts-input"
+                                value={pwForm.confirm}
+                                onChange={e => setPwForm(f => ({ ...f, confirm: e.target.value }))}
+                                autoComplete="new-password"
+                                required
+                            />
+                        </div>
+
+                        {pwStatus === 'error' && (
+                            <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 10, color: 'var(--ts-red)', letterSpacing: '0.08em' }}>
+                                {pwError}
+                            </div>
+                        )}
+
+                        <div>
+                            <button
+                                type="submit"
+                                className="ts-btn ts-btn-primary ts-btn-sm"
+                                disabled={pwStatus === 'saving'}
+                            >
+                                {pwStatus === 'saving' ? 'Saving…' : 'Update Password'}
+                            </button>
+                        </div>
+                    </form>
+                )}
+            </section>
+
+            {/* ── Change Email ── */}
+            <section>
+                <div className="ts-eyebrow" style={{ marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--ts-line)' }}>
+                    Change Email Address
+                </div>
+
+                {emailStatus === 'success' ? (
+                    <div style={{ border: '1px solid var(--ts-green)', background: 'rgba(80,200,100,0.07)', padding: '16px 20px' }}>
+                        <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 11, color: 'var(--ts-green)', letterSpacing: '0.1em' }}>
+                            ✓ Email updated. A verification link has been sent to your new address.
+                        </div>
+                    </div>
+                ) : (
+                    <form onSubmit={handleEmailSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                        <div style={fieldStyle}>
+                            <label style={labelStyle}>Current Password</label>
+                            <input
+                                type="password"
+                                className="ts-input"
+                                value={emailForm.current}
+                                onChange={e => setEmailForm(f => ({ ...f, current: e.target.value }))}
+                                autoComplete="current-password"
+                                required
+                            />
+                        </div>
+                        <div style={fieldStyle}>
+                            <label style={labelStyle}>New Email Address</label>
+                            <input
+                                type="email"
+                                className="ts-input"
+                                value={emailForm.newEmail}
+                                onChange={e => setEmailForm(f => ({ ...f, newEmail: e.target.value }))}
+                                autoComplete="email"
+                                required
+                            />
+                        </div>
+
+                        {emailStatus === 'error' && (
+                            <div style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 10, color: 'var(--ts-red)', letterSpacing: '0.08em' }}>
+                                {emailError}
+                            </div>
+                        )}
+
+                        <div>
+                            <button
+                                type="submit"
+                                className="ts-btn ts-btn-primary ts-btn-sm"
+                                disabled={emailStatus === 'saving'}
+                            >
+                                {emailStatus === 'saving' ? 'Saving…' : 'Update Email'}
+                            </button>
+                        </div>
+                    </form>
+                )}
+            </section>
+        </div>
+    );
+}
+
 // ── Main page ───────────────────────────────────────────────────────────────
 
 const UserProfilePage = () => {
     const router = useRouter();
-    const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+    const { user, isAuthenticated, isLoading: authLoading, logout } = useAuth();
 
     const [decks, setDecks] = useState<SavedDeck[]>([]);
     const [collection, setCollection] = useState<CollectionItem[]>([]);
@@ -720,6 +926,15 @@ const UserProfilePage = () => {
         setResendStatus('sent');
     };
 
+    const handlePasswordChanged = useCallback(async () => {
+        // Token version is bumped on password change — log out after a brief delay
+        // so the user sees the success message before being redirected.
+        setTimeout(async () => {
+            await logout();
+            router.push('/login');
+        }, 2500);
+    }, [logout, router]);
+
     const handleAddToCollection = async (cardId: string, quantity: number = 1) => {
         try {
             await fetchWithAuth('/api/me/collection', {
@@ -861,6 +1076,7 @@ const UserProfilePage = () => {
                         <TabsTrigger value="achievements" className="ts-tab-trigger">Achievements</TabsTrigger>
                         <TabsTrigger value="tournaments" className="ts-tab-trigger">Tournaments</TabsTrigger>
                         <TabsTrigger value="wishlist" className="ts-tab-trigger">Wishlist</TabsTrigger>
+                        <TabsTrigger value="security" className="ts-tab-trigger">Security</TabsTrigger>
                     </TabsList>
 
                     {/* ── Decks ──────────────────────────────────────── */}
@@ -1052,6 +1268,15 @@ const UserProfilePage = () => {
                                 ))}
                             </div>
                         )}
+                    </TabsContent>
+
+                    {/* ── Security ─────────────────────────────────────── */}
+                    <TabsContent value="security">
+                        <div style={{ marginBottom: 28 }}>
+                            <div className="ts-eyebrow" style={{ marginBottom: 4 }}>Account</div>
+                            <h2>Security Settings</h2>
+                        </div>
+                        <SecurityTab onPasswordChanged={handlePasswordChanged} />
                     </TabsContent>
 
                 </Tabs>

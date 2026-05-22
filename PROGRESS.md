@@ -6,6 +6,31 @@
 
 ## Current Status
 
+*(2026-05-22 session 27)* **Coordinate keyword Category B — parser-driven effect system. 5 deferred cards unblocked. TypeScript: 0 errors.**
+
+- **Architecture flip.** `getCoordinateAbilities(card)` is now the single entry point for Coordinate effects. Registry-first / parser-fallback contract mirroring the existing event parser. Manual `CARD_ABILITIES` entries are now overrides (kept for safety but no longer the primary path).
+- **`parseCoordinateText(text)`** in `abilities.ts` — strips the "(Gain this ability...)" reminder, pattern-matches the body. Covers 9 effect shapes: STAT_BUFF, KEYWORD grant (with optional N value), ON_ATTACK_DRAW, ON_ATTACK_PREVENT_DAMAGE, plus the 5 new Category B types. Every currently-registered Coordinate card's text also matches the parser.
+- **5 new `CoordinateEffect` variants + engine wiring**:
+  - `ON_ATTACK_DEAL_DAMAGE_TARGET` (Kit Fisto) — optional damage to a chosen unit before combat. UI 3-step: attacker → coord target → defender.
+  - `ON_ATTACK_DEBUFF_DEFENDER` (Clone Dive Trooper) — defender's strikeback power reduced. No UI work — engine-only.
+  - `ON_ATTACK_DEBUFF_TARGET` (Padmé "Pursuing Peace") — mandatory phase debuff on a chosen enemy. UI 3-step.
+  - `WHEN_PLAYED_DAMAGE_DUAL` (Reckless Torrent) — optional split damage on entry. UI 2-step: card → friendly → enemy; in-place decline by re-tapping the card.
+  - `AURA_BUFF_OTHERS` (Clone Commander Cody) — continuous aura. New `getIncomingAuras(state, target, ownerId)` helper in `keywords.ts` wired into `computePower`, `effectiveHealth`, `hasEffectiveKeyword`. No UI work.
+- **Action shape changes.** `ATTACK` gains `coordDamageTarget?` + `coordDebuffTarget?`. `PLAY_CARD` gains `targetIids?: string[]`. `getLegalActions` enumerates combinations (small N per attacker / per playable card).
+- **`GameBoard.tsx`** — three new state machines mirroring the event-targeting pattern: coord-on-attack target picking (`coordChoiceMade` + `chosenCoordTargetIid`), dual-target play (`pendingDualPlayIid` + `pendingDualFriendlyIid`), and the `attackMatchesCoord` predicate that funnels coord state into action selection. `clearPending` resets all of it.
+- **`YourMat.tsx`** — new props (`canPlayDualIids`, `pendingDualPlayIid`, `pendingDualFriendlyIid`), hand banner extended with two new states, dual-play cards highlight + click as expected.
+- **Category C plan** documented in `abilities.ts` doc comment — 5 cards still blocked (Pelta Supply Frigate / Sanctioner's Shuttle / Ki-Adi-Mundi / Ahsoka or Padmé as Leaders / For The Republic). Each blocker is named with the engine subsystem it needs (token system / capture zone / triggered-ability dispatch / leader-as-attack-trigger / upgrades-as-aura-sources). Once a subsystem lands, the parser is where the new text pattern goes — no per-card registry growth.
+
+Zero new dependencies. Browser play-test still needed.
+
+---
+
+*(2026-05-22 session 26)* **Profile Security tab implemented (item 22). TypeScript: 0 errors.**
+
+- **22 (UX)** — "Security" tab added to profile page with Change Password and Change Email forms. Both wire to existing backend endpoints (`PATCH /api/me/password`, `PATCH /api/me/email`). Password change triggers auto-logout after 2.5s (token_version is bumped on backend). Email change shows verification-email notice. All input validation is client-side + backend. Zero new dependencies.
+
+---
+
 *(2026-05-21 session 25)* **Security/ops items 29–32 resolved. Item 28 still needs human action.**
 
 - **29 (Data)** — Verified backup chain covers twinsuns. No code changes needed.
@@ -364,11 +389,7 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 
 2. **Expand the event registry for common misses** — After play-testing, query `swu_cards.db` for events still hitting the "not yet implemented" path. Add them to `EVENT_EFFECTS` in `abilities.ts`. Focus on cost-1 and cost-2 events (highest play frequency). Common patterns to check: "Draw 1 card." (not in registry), "Give all friendly units +1/+0 for this phase" (aura buff — not parseable, needs custom implementation).
 
-3. **Deferred Coordinate cards now unblocked by targeting system:**
-   - **Kit Fisto** — On Attack: deal 3 to a chosen ground unit → `ON_ATTACK_DEAL_DAMAGE` effect type with target selection mid-attack
-   - **Reckless Torrent** — When Played: deal 2 to one friendly + one enemy unit → dual target selection in `dispatchOnPlay`
-   - **Padmé (Pursuing Peace)** — On Attack: give enemy –3/–0 for this phase → negative `phaseAtk` via `applyAbilityEffect`
-   - **Clone Commander Cody** — Aura: all other friendlies get +1/+1 + Overwhelm while Coordinate active → computed live in `computePower`/`effectiveHealth` (no state needed), new `AURA_BUFF` coordinate effect type
+3. ~~**Deferred Coordinate cards now unblocked by targeting system**~~ **✅ DONE (session 27).** Kit Fisto, Padmé Pursuing Peace, Reckless Torrent, Clone Commander Cody, and Clone Dive Trooper all resolved via the new parser-driven Category B effect system. Browser play-test still needed to confirm UI flows.
 
 4. **AI improvements** — AI currently plays random legal actions. Basic heuristics would improve gameplay significantly: prefer attacking high-HP/attack threats over base when threatened; prefer playing high-value units early; use events efficiently. Even a 50-line priority scorer would make the game feel challenging.
 
@@ -378,25 +399,24 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 
 ---
 
-### Coordinate keyword — 12 of 22 cards implemented
+### Coordinate keyword — 17 of 22 cards implemented (parser-driven)
 
-**Implemented in session 22.** Core system is in place. Remaining cards require capabilities not yet in the engine.
+**Implemented session 22 (Category A) and session 27 (Category B).** Architecture is now `getCoordinateAbilities(card)` = registry-first / parser-fallback. The parser handles all 9 known phrasing templates; future cards using existing templates land without code changes. Manual registry entries are overrides only.
 
-**Deferred cards and what's needed:**
+**Category A (12 cards)** — STAT_BUFF, KEYWORD grant, ON_ATTACK_DRAW, ON_ATTACK_PREVENT_DAMAGE. Originally registry-only; the parser now also matches all of them.
 
-| Card | Effect | Blocker |
+**Category B (5 cards, session 27)** — Kit Fisto, Padmé (Pursuing Peace), Reckless Torrent, Clone Commander Cody, Clone Dive Trooper. Parser-extracted; not in the registry.
+
+**Category C — still blocked, 5 cards.** These are not parser-fixable — each needs a new engine subsystem. Full architectural notes in the doc comment at the top of `frontend/src/lib/game-engine/abilities.ts`.
+
+| Card | Effect | Engine subsystem needed |
 |------|--------|---------|
-| Clone Commander Cody | Each other friendly unit gets +1/+1 and Overwhelm | Continuous aura buff requires re-evaluating all friendly units on state change |
-| Clone Dive Trooper | While attacking, defender gets –2/–0 | Per-attack temp debuff on target requires a transient state layer |
-| Padmé Amidala (Pursuing Peace) | On Attack: give enemy –3/–0 for this phase | Phase-scoped debuff on a chosen unit |
-| Kit Fisto | On Attack: deal 3 damage to a chosen ground unit | Needs target selection UI |
-| Ki-Adi-Mundi | When opponent plays second card each phase: draw 2 | Needs per-player card-play counter and triggered-ability dispatch |
-| Pelta Supply Frigate | When Played: create a Clone Trooper token | Token creation system not yet built |
-| Reckless Torrent | When Played: deal 2 damage to a friendly and an enemy unit | Needs target selection UI |
-| Sanctioner's Shuttle | When Played: capture an enemy unit (cost ≤3) | Capture zone not yet modeled |
-| Ahsoka Tano (Leader) | Action [Exhaust]: attack with a unit, it gets +1/+0 | New leader action type |
-| Padmé Amidala (Leader) | Action [1, Exhaust]: search top 3 for Republic card | Deck search UI not yet built |
-| For The Republic (Upgrade) | Attached unit gains Coordinate Restore 2; costs 2 less with 3 Republic units | Upgrade with Coordinate Restore not hooked up |
+| Ki-Adi-Mundi | When opponent plays second card each phase: draw 2 | **Triggered-ability dispatch.** Engine event bus (CARD_PLAYED, ATTACK_DECLARED, …), per-phase counters on PlayerState, `TriggeredAbility` type. |
+| Pelta Supply Frigate | When Played: create a Clone Trooper token | **Token system.** `isToken: boolean` on CardInstance, `TokenDefinition` registry (name → stat/keyword profile), defeat path that removes tokens entirely. |
+| Sanctioner's Shuttle | When Played: capture an enemy unit (cost ≤3) | **Capture zone.** `captureZone: CardInstance[]` on PlayerState with provenance, `CAPTURE_UNIT` effect, defeat hook on capturer releases captives. |
+| Ahsoka Tano (Leader) | Action [Exhaust]: attack with a unit, it gets +1/+0 | **Leader-as-attack-trigger.** Route a leader action through the existing PLAY_ATTACK_EVENT two-step flow (TRIGGER_ATTACK_WITH already exists for events). |
+| Padmé Amidala (Serving the Republic, Leader) | Action [1, Exhaust]: search top 3 for Republic card | **Deck search UI.** `SEARCH_DECK_TOP { count, filter }` effect, "look at top N" modal, deck-reorder back-on-bottom flow. |
+| For The Republic (Upgrade) | Attached unit gains Coordinate Restore 2 | **Upgrades as Coordinate sources.** Extend `getCoordinateAbilities` to aggregate effects from `inst.upgrades[*].card`; add Restore-as-keyword support on host. |
 
 ---
 
@@ -453,7 +473,7 @@ What needs to be resolved before this is genuinely shippable. Grouped by severit
 | 19 | **Auth** | ~~No change-password endpoint (authenticated users must use reset flow).~~ **✅ DONE** | `PATCH /api/me/password` added (requires current_password + new_password, bumps token_version to invalidate other sessions). Frontend proxy at `/api/me/password`. Profile page UI not yet wired — see item 22. |
 | 20 | **Auth** | ~~No email-update endpoint (typo at registration = permanently stuck).~~ **✅ DONE** | `PATCH /api/me/email` added (requires current_password, validates format, checks uniqueness, resets email_verified, sends verification email). Frontend proxy at `/api/me/email`. Profile page UI not yet wired — see item 22. |
 | 21 | **Security** | ~~`avatar_url` accepted any string.~~ **✅ DONE** | `PATCH /api/me/profile` now rejects `avatar_url` that doesn't start with `https://`. |
-| 22 | **UX** | Profile page has no UI for change-password or change-email. | Add "Security" settings section to the profile page with forms for both. Backend endpoints exist at `PATCH /api/me/password` and `PATCH /api/me/email`. |
+| 22 | **UX** | ~~Profile page has no UI for change-password or change-email.~~ **✅ DONE** | "Security" tab added to profile page. Two forms: Change Password (current + new + confirm, client-side validation, auto-logout on success since token_version is bumped) and Change Email (current password + new email, shows verification email notice on success). Both wire to existing proxy routes at `PATCH /api/me/password` and `PATCH /api/me/email`. TypeScript: 0 errors. |
 | 23 | **Security** | ~~`typescript: { ignoreBuildErrors: true }` in `next.config.ts`.~~ **✅ DONE** | Removed — `tsc --noEmit` confirmed 0 errors. Build will now fail on TypeScript errors, as it should. |
 | 24 | **Security** | ~~Missing Referrer-Policy and Permissions-Policy headers.~~ **✅ DONE** | Both added to `next.config.ts` security headers block. |
 | 25 | **Legal** | ~~No fan-site disclaimer.~~ **✅ DONE** | Disclaimer added to homepage footer: "Fan-made tool. Not affiliated with or endorsed by FFG, Asmodee, or Lucasfilm Ltd." |

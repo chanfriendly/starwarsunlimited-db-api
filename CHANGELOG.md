@@ -4,6 +4,49 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-05-22: Coordinate keyword — Category B parser + engine, Category C plan
+
+**Goal.** Stop hard-coding every Coordinate card. Switch the primary path to a text parser that maps SWU's natural phrasings to typed effects; the manual `CARD_ABILITIES` registry stays as a fallback/override. Same registry-first / parser-fallback contract already used for events. As the card pool grows, new cards using known phrasings cost zero registry entries.
+
+**Five new `CoordinateEffect` variants (Category B)** added to `abilities.ts`:
+- `ON_ATTACK_DEAL_DAMAGE_TARGET` — Kit Fisto: "You may deal 3 damage to a ground unit." Optional ("You may"). UI emits a `coordDamageTarget` per legal enemy plus an undefined slot for declining.
+- `ON_ATTACK_DEBUFF_DEFENDER` — Clone Dive Trooper: "the defender gets –2/–0." No target picking; reduces defender strikeback power inside `applyAttack`.
+- `ON_ATTACK_DEBUFF_TARGET` — Padmé Amidala (Pursuing Peace): "Give an enemy unit –3/–0 for this phase." Mandatory if any enemy exists. Reuses existing `phaseAtk`/`phaseHp` mechanism so `resolveRegroup` clears it for free.
+- `WHEN_PLAYED_DAMAGE_DUAL` — Reckless Torrent: "You may deal 2 damage to a friendly unit and 2 damage to an enemy unit in the same arena." Optional. Engine resolves it AFTER `addToArena` + `dispatchOnPlay` so the new unit counts toward the Coordinate threshold (Reckless Torrent's "including this one").
+- `AURA_BUFF_OTHERS` — Clone Commander Cody: "Each other friendly unit gets +1/+1 and gains Overwhelm." Continuous, no state mutation. New `getIncomingAuras(state, target, ownerId)` helper in `keywords.ts` scans friendlies for aura sources (excluding the target itself, hence "OTHER friendly"). Wired into `computePower`, `effectiveHealth`, and `hasEffectiveKeyword` so the aura is visible to every stat read.
+
+**Parser** — `parseCoordinateText(text)` in `abilities.ts`. Splits on newlines to find the `Coordinate — ...` line (handles em-dash, en-dash, or hyphen). Strips the trailing `(Gain this ability ...)` reminder text. Pattern-matches the body against the regex set covering the five new effect types AND the four pre-existing ones (STAT_BUFF, KEYWORD grant, ON_ATTACK_DRAW, ON_ATTACK_PREVENT_DAMAGE). Every currently-registered Coordinate card's text also matches the parser, which means the manual registry is redundant for them and only retained as a safety net. New `getCoordinateAbilities(card)` is the single entry point — registry first (manual override), parser second.
+
+**Why parser over more registry entries.** Registry entries are O(cards) maintenance; the parser is O(distinct phrasings). SWU uses a fairly narrow template language for Coordinate clauses, so a few patterns cover many cards. New cards with the same templates become free. Cards with genuinely novel mechanics still go into `CARD_ABILITIES` as overrides, but the bar for "do we add to the registry?" is now "is the parser wrong?" instead of "is this card unimplemented?"
+
+**Action shape changes.** `ATTACK` gains `coordDamageTarget?` and `coordDebuffTarget?`. `PLAY_CARD` gains `targetIids?: string[]` (legacy `targetIid` kept for single-target compatibility). `getLegalActions` enumerates the combinations: per-attacker × per-defender × per-(damage target | undefined for "You may decline") × per-debuff target. Per-card the combination is small. Reckless Torrent enumerates (friendly × enemy) under the same-arena constraint, plus the no-target decline.
+
+**`applyAttack` changes.** New locals: `defenderCombatAtkMod` accumulates ON_ATTACK_DEBUFF_DEFENDER contributions and is subtracted from defender's strikeback power (clamped at 0). The `coordDamageTarget` and `coordDebuffTarget` parameters apply their effects before main combat damage. Defender debuff lives on `phaseAtk`/`phaseHp` of the chosen unit, so existing regroup cleanup wipes it without engine plumbing.
+
+**`applyPlayCard` changes.** After `addToArena` + `dispatchOnPlay`, if the just-played unit has an active `WHEN_PLAYED_DAMAGE_DUAL` Coordinate effect (Coordinate threshold is met post-entry) and the action carried `targetIids` with 2+ entries, deal damage to `targetIids[0]` (friendly) and `targetIids[1]` (enemy). Defeat check runs after.
+
+**UI in `GameBoard.tsx`.** Three new state machines, each mirroring the event-targeting pattern that already exists:
+- Coord-on-attack target picking: `coordChoiceMade` + `chosenCoordTargetIid`. Attacker click → coord targets highlighted; pick enemy → defenders highlighted; pick defender → dispatch. For optional effects (Kit Fisto), clicking the attacker again skips. For mandatory (Padmé), it cancels.
+- Dual-target play: `pendingDualPlayIid` + `pendingDualFriendlyIid`. Card click → friendly highlighted; pick friendly → enemies highlighted (filtered by `sameArena`); pick enemy → dispatch. Re-clicking the card before picking a friendly plays it WITHOUT the effect (in-place decline). Clicking after a friendly is chosen reverts to step 1.
+- `attackMatchesCoord` predicate funnels the chosen coord state into action selection so the right legal action (with the right coord target attached) ends up dispatched. `coordTargetingPhase` derived from `coordTargetIids.size > 0 && !coordChoiceMade`, which controls whether defenders or coord targets are highlighted.
+
+`YourMat.tsx` gets three new props (`canPlayDualIids`, `pendingDualPlayIid`, `pendingDualFriendlyIid`), updates the hand banner with two new states, and treats dual-play cards as clickable + selected during the flow.
+
+**Category C — plan only, not implemented.** Five cards remain blocked, each on a missing engine subsystem (NOT a missing parser pattern). The full architectural notes live in the doc comment at the top of `abilities.ts` so the next person to attempt these has the full picture:
+- Pelta Supply Frigate → token system (CardInstance.isToken flag, TokenDefinition registry, defeat path that removes tokens entirely)
+- Sanctioner's Shuttle → capture zone on PlayerState with provenance, defeat hook that releases captives
+- Ki-Adi-Mundi → triggered-ability dispatch (engine event bus, per-phase counters, TriggeredAbility type)
+- Ahsoka Tano (Leader) / Padmé (Serving the Republic) → leader actions with attack triggers / deck search UI
+- For The Republic → upgrades as aura sources (extend `getIncomingAuras` to scan `inst.upgrades`)
+
+Once any of these land, the parser is the place to add the matching text pattern — same contract, new effect category.
+
+**Known limitations.** A card with BOTH `ON_ATTACK_DEAL_DAMAGE_TARGET` and `ON_ATTACK_DEBUFF_TARGET` would only be partially controllable from the UI (user picks one slot's target; the other gets the first-enumerated legal value). No current card has both effects. PLAY_ATTACK_EVENT (attack-events like "Shoot First") does not carry coord targets, so a Kit Fisto attacking via an attack event would not get its optional damage choice. Both are corner cases worth tracking but not worth additional plumbing now.
+
+**TypeScript: 0 errors after all changes.** No new dependencies. The browser oracle still needs a play-test run.
+
+---
+
 ### 2026-05-21: Production readiness hardening — infra items 28–32
 
 **TLS cert renewed (item 28)** — Let's Encrypt cert for `twinsuns.chanfriendly.duckdns.org` manually renewed. Prior cert expired 2026-07-01. Confirm auto-renewal is enabled in NPM so future cycles don't require manual action.

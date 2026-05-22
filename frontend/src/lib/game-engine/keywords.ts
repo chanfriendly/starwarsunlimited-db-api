@@ -1,6 +1,6 @@
 import { CardInstance, GameState, PlayerId } from './types';
 import { GameAction } from './actions';
-import { CARD_ABILITIES, CoordinateEffect } from './abilities';
+import { CoordinateEffect, getCoordinateAbilities } from './abilities';
 
 // ---------------------------------------------------------------------------
 // Keyword parsing
@@ -70,6 +70,11 @@ export function isCoordinateActive(state: GameState, ownerId: PlayerId): boolean
  * Returns all Coordinate effects for a unit that are currently active.
  * Returns [] if the card lacks the Coordinate keyword or if the threshold
  * (3+ units for the owner) is not met.
+ *
+ * Source of effects: registry-first, parser-fallback — see
+ * `getCoordinateAbilities` in abilities.ts. This is intentionally the only
+ * code path that returns "active" coordinate effects, so adding a new
+ * `CoordinateEffect` variant requires updating exactly one resolver.
  */
 export function getActiveCoordinateEffects(
   state: GameState,
@@ -78,14 +83,56 @@ export function getActiveCoordinateEffects(
 ): CoordinateEffect[] {
   if (!hasKeyword(inst.card, 'Coordinate')) return [];
   if (!isCoordinateActive(state, ownerId)) return [];
-  const abilities = CARD_ABILITIES[inst.card.name] ?? [];
-  return abilities
-    .filter(a => a.type === 'COORDINATE')
-    .map(a => a.effect);
+  return getCoordinateAbilities(inst.card);
 }
 
 /**
- * True if the unit has the keyword natively OR via an active Coordinate grant.
+ * Returns the potential Coordinate effects for a card, ignoring whether the
+ * threshold is currently met. Used by `getLegalActions` to decide whether to
+ * generate combinatorial actions for cards that ENTER play (where Coordinate
+ * will become active immediately after) — e.g. Reckless Torrent's
+ * `WHEN_PLAYED_DAMAGE_DUAL` fires the moment the unit enters, assuming the
+ * post-entry count reaches 3.
+ */
+export function getPotentialCoordinateEffects(card: CardInstance['card']): CoordinateEffect[] {
+  if (!hasKeyword(card, 'Coordinate')) return [];
+  return getCoordinateAbilities(card);
+}
+
+/**
+ * Accumulated aura contributions from OTHER friendly units that have an active
+ * `AURA_BUFF_OTHERS` Coordinate effect. The target unit is excluded so an aura
+ * source does not buff itself.
+ *
+ * Future Category C: when upgrades become aura sources too (Clone Commander
+ * Cody from an attached upgrade, for example), extend this to also scan
+ * `inst.upgrades` on every friendly. No callsite changes needed.
+ */
+export function getIncomingAuras(
+  state: GameState,
+  target: CardInstance,
+  ownerId: PlayerId,
+): { atk: number; hp: number; keywords: string[] } {
+  const owner = state.players[ownerId];
+  const friendlies = [...owner.groundArena, ...owner.spaceArena];
+  let atk = 0, hp = 0;
+  const keywords: string[] = [];
+
+  for (const source of friendlies) {
+    if (source.iid === target.iid) continue; // "each OTHER friendly unit"
+    for (const e of getActiveCoordinateEffects(state, source, ownerId)) {
+      if (e.type !== 'AURA_BUFF_OTHERS') continue;
+      atk += e.atk;
+      hp  += e.hp;
+      if (e.grantKeywords) keywords.push(...e.grantKeywords);
+    }
+  }
+  return { atk, hp, keywords };
+}
+
+/**
+ * True if the unit has the keyword natively, via an active Coordinate grant,
+ * OR via an incoming aura from another friendly's `AURA_BUFF_OTHERS` effect.
  * Use this everywhere the engine checks for a keyword on a unit.
  */
 export function hasEffectiveKeyword(
@@ -96,9 +143,11 @@ export function hasEffectiveKeyword(
 ): boolean {
   if (hasKeyword(inst.card, keyword)) return true;
   const effects = getActiveCoordinateEffects(state, inst, ownerId);
-  return effects.some(
-    e => e.type === 'KEYWORD' && e.keyword.toLowerCase() === keyword.toLowerCase(),
-  );
+  if (effects.some(e => e.type === 'KEYWORD' && e.keyword.toLowerCase() === keyword.toLowerCase())) {
+    return true;
+  }
+  const auras = getIncomingAuras(state, inst, ownerId);
+  return auras.keywords.some(k => k.toLowerCase() === keyword.toLowerCase());
 }
 
 /**
@@ -153,6 +202,9 @@ export function computePower(
     if (e.type === 'STAT_BUFF') power += e.atk;
   }
 
+  // Incoming aura buffs from other friendly units' AURA_BUFF_OTHERS effects
+  power += getIncomingAuras(state, inst, ownerId).atk;
+
   // Attack can never go below 0 (phase debuffs may produce negative intermediate values)
   return Math.max(0, power);
 }
@@ -174,6 +226,10 @@ export function effectiveHealth(
   for (const e of getActiveCoordinateEffects(state, inst, ownerId)) {
     if (e.type === 'STAT_BUFF') hp += e.hp;
   }
+
+  // Incoming aura buffs (Clone Commander Cody, future cards)
+  hp += getIncomingAuras(state, inst, ownerId).hp;
+
   return hp;
 }
 

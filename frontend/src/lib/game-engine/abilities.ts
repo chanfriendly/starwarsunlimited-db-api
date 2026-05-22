@@ -1,6 +1,14 @@
-// Per-card ability registry.
-// Keyed by card name (not card ID — IDs can change between DB builds).
-// Where multiple cards share a name, the effect is the same across printings.
+// Per-card ability registry + card-text parser.
+//
+// IMPORTANT: design intent — keep ability resolution data-driven.
+// The text parser (parseCoordinateText / parseEventText) handles common card
+// phrasings so the registry doesn't need an entry per card. The registry exists
+// only as an authoritative override for cards whose text is unparseable, or
+// where the parser would misclassify. As the SWU card pool grows, the parser
+// is the primary path. New effect categories (e.g. token creation, capture)
+// require both new engine code AND new parser patterns.
+
+import { Card } from '@/lib/api';
 
 // ---------------------------------------------------------------------------
 // Effect types
@@ -14,7 +22,23 @@ export type CoordinateEffect =
   // On Attack: draw N cards
   | { type: 'ON_ATTACK_DRAW'; count: number }
   // On Attack: prevent all combat damage to this unit for this attack
-  | { type: 'ON_ATTACK_PREVENT_DAMAGE' };
+  | { type: 'ON_ATTACK_PREVENT_DAMAGE' }
+  // On Attack: optionally deal N damage to a chosen unit (Kit Fisto pattern).
+  // arenaFilter restricts the legal targets; absent = either arena.
+  | { type: 'ON_ATTACK_DEAL_DAMAGE_TARGET'; amount: number; arenaFilter?: 'ground' | 'space' }
+  // While attacking, the defender unit gets atk/hp for this attack only
+  // (Clone Dive Trooper pattern). atk/hp are typically negative (debuff).
+  | { type: 'ON_ATTACK_DEBUFF_DEFENDER'; atk: number; hp: number }
+  // On Attack: give a chosen enemy unit atk/hp for the rest of this phase
+  // (Padmé Pursuing Peace pattern). atk/hp are typically negative.
+  | { type: 'ON_ATTACK_DEBUFF_TARGET'; atk: number; hp: number }
+  // When Played: optionally deal damage to one friendly + one enemy unit
+  // (Reckless Torrent pattern). sameArena requires both targets share an arena.
+  | { type: 'WHEN_PLAYED_DAMAGE_DUAL'; friendlyAmount: number; enemyAmount: number; sameArena?: boolean }
+  // Continuous: each OTHER friendly unit gets atk/hp and optional keywords
+  // (Clone Commander Cody pattern). Re-evaluated live in computePower /
+  // effectiveHealth / hasEffectiveKeyword — no state mutation needed.
+  | { type: 'AURA_BUFF_OTHERS'; atk: number; hp: number; grantKeywords?: string[] };
 
 export interface CoordinateAbility {
   type: 'COORDINATE';
@@ -24,27 +48,67 @@ export interface CoordinateAbility {
 export type CardAbility = CoordinateAbility;
 
 // ---------------------------------------------------------------------------
-// Registry
+// Coordinate coverage map
 //
-// Only includes cards whose Coordinate effects the engine can evaluate:
-//   - STAT_BUFF: continuous attack/health bonus
-//   - KEYWORD: grants an existing engine-handled keyword (Raid, Grit, Saboteur,
-//              Sentinel, Ambush) while Coordinate is active
-//   - ON_ATTACK_DRAW: simple card draw on attack
-//   - ON_ATTACK_PREVENT_DAMAGE: attacker avoids combat damage for this attack
+// Category A — engine + parser fully cover:
+//   STAT_BUFF, KEYWORD grant (Ambush/Saboteur/Sentinel/Grit/Raid),
+//   ON_ATTACK_DRAW, ON_ATTACK_PREVENT_DAMAGE
 //
-// NOT included (require targeted or event-based UI not yet implemented):
-//   Clone Commander Cody   — buffs all other friendlies (continuous aura)
-//   Clone Dive Trooper     — debuffs defender attack (requires per-attack temp state)
-//   Padmé (Pursuing Peace) — debuffs enemy attack for the phase
-//   Kit Fisto              — deal 3 to a chosen ground unit (needs target selection)
-//   Ki-Adi-Mundi           — triggered by opponent's second card each phase
-//   Pelta Supply Frigate   — create a Clone Trooper token when played
-//   Reckless Torrent       — deal 2 damage each way when played
-//   Sanctioner's Shuttle   — capture an enemy unit when played
-//   Ahsoka Tano (Leader)   — new action type (attack with a unit, +1/+0)
-//   Padmé Amidala (Leader) — new action type (deck search)
-//   For The Republic       — upgrade that grants Coordinate Restore 2
+// Category B — engine + parser cover (added in this pass):
+//   ON_ATTACK_DEAL_DAMAGE_TARGET   (Kit Fisto, future "deal N to a unit" cards)
+//   ON_ATTACK_DEBUFF_DEFENDER      (Clone Dive Trooper, future defender debuffs)
+//   ON_ATTACK_DEBUFF_TARGET        (Padmé "Pursuing Peace", future enemy-target debuffs)
+//   WHEN_PLAYED_DAMAGE_DUAL        (Reckless Torrent, future split-damage on play)
+//   AURA_BUFF_OTHERS               (Clone Commander Cody, future continuous auras)
+//
+// Category C — blocked on engine subsystems NOT YET BUILT. Listed with the
+// architectural piece each one needs. Adding the parser pattern alone is not
+// enough — these require new state shape and dispatch:
+//
+//   Pelta Supply Frigate    — TOKEN SYSTEM. Need a `CREATE_TOKEN` effect, a
+//                             TokenDefinition registry (name → stat profile +
+//                             keywords + image), an `isToken: boolean` flag on
+//                             CardInstance, and a defeat path that removes
+//                             tokens entirely (no discard pile entry).
+//
+//   Sanctioner's Shuttle    — CAPTURE ZONE. Need `captureZone: CardInstance[]`
+//                             on PlayerState with provenance (original owner),
+//                             a `CAPTURE_UNIT` effect, and a defeat hook on the
+//                             capturer that releases captives back to their
+//                             original arena.
+//
+//   Ki-Adi-Mundi            — TRIGGERED-ABILITY DISPATCH. Need an event bus
+//                             that the engine emits to (CARD_PLAYED, ATTACK_DECLARED,
+//                             UNIT_DEFEATED, etc.), per-phase counters on
+//                             PlayerState ("cards played this phase"), and a
+//                             TriggeredAbility type with { trigger, condition,
+//                             effect } that we scan against every event.
+//
+//   Ahsoka Tano (Leader)    — Coordinate as a LEADER ACTION, with `TRIGGER_ATTACK_WITH`
+//                             which already exists as an event effect. Plumbing
+//                             work only: extend LEADER_ABILITIES to support a
+//                             TRIGGER_ATTACK_WITH-style effect, and route the
+//                             leader action through the PLAY_ATTACK_EVENT flow.
+//
+//   Padmé Amidala (Serving the Republic)
+//                           — DECK SEARCH UI. Need `SEARCH_DECK_TOP { count,
+//                             filter: { trait?, aspect?, type? } }` effect, a
+//                             "look at top N" interaction (modal showing cards
+//                             face-up to the active player), and a way to
+//                             reorder the remaining cards back onto the deck.
+//
+//   For The Republic        — UPGRADE-AS-COORDINATE-SOURCE. Need upgrades to
+//                             contribute Coordinate effects to their host unit.
+//                             Specifically: `getCoordinateAbilities` should also
+//                             aggregate effects from `inst.upgrades[*].card`, and
+//                             `Coordinate Restore N` needs Restore-as-keyword
+//                             support on the host. Smaller than the others but
+//                             requires touching both the aura aggregator and the
+//                             upgrade attach flow.
+//
+// When a Category C subsystem lands, the parser is the place to add the
+// matching text pattern. Then future cards using the same mechanic become
+// automatic — same registry-first / parser-fallback contract used today.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -270,7 +334,128 @@ export function needsEventTarget(cardName: string, cardText = ''): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Coordinate ability registry (original)
+// Coordinate text parser
+//
+// Maps the "Coordinate — ..." clause of a card to a list of CoordinateEffect.
+// Returns [] when no Coordinate clause is present OR the clause's body doesn't
+// match a known pattern. Called as the fallback for cards NOT in CARD_ABILITIES.
+//
+// Pattern coverage is grouped by SWU's natural phrasing. Each new pattern
+// added here covers an unknown number of future cards using the same template.
+// ---------------------------------------------------------------------------
+
+/** Strip the reminder text in trailing "(Gain this ability ...)" parenthetical. */
+function stripReminder(s: string): string {
+  return s.replace(/\s*\([^)]*\)\s*$/, '').trim();
+}
+
+export function parseCoordinateText(text: string): CoordinateEffect[] {
+  if (!text) return [];
+
+  // Find the line containing "Coordinate — ..." (any of em-dash, en-dash, or hyphen).
+  // Some cards have the Coordinate clause on its own line; some inline.
+  const lines = text.split(/\r?\n/);
+  const coordLine = lines.find(l => /Coordinate\s+[—–-]\s+/.test(l));
+  if (!coordLine) return [];
+
+  const body = stripReminder(coordLine.replace(/^.*?Coordinate\s+[—–-]\s+/, '').trim());
+
+  let m: RegExpMatchArray | null;
+
+  // ── STAT_BUFF ────────────────────────────────────────────────────────────
+  m = body.match(/^This unit gets \+(\d+)\/\+(\d+)\.?$/);
+  if (m) return [{ type: 'STAT_BUFF', atk: +m[1], hp: +m[2] }];
+
+  // ── ON_ATTACK_DRAW ───────────────────────────────────────────────────────
+  m = body.match(/^On Attack: Draw a card\.?$/);
+  if (m) return [{ type: 'ON_ATTACK_DRAW', count: 1 }];
+  m = body.match(/^On Attack: Draw (\d+) cards?\.?$/);
+  if (m) return [{ type: 'ON_ATTACK_DRAW', count: +m[1] }];
+
+  // ── ON_ATTACK_PREVENT_DAMAGE ────────────────────────────────────────────
+  if (/^On Attack: Prevent all combat damage/.test(body)) {
+    return [{ type: 'ON_ATTACK_PREVENT_DAMAGE' }];
+  }
+
+  // ── ON_ATTACK_DEAL_DAMAGE_TARGET ────────────────────────────────────────
+  // "On Attack: You may deal N damage to a (ground |space )?unit."
+  m = body.match(/^On Attack: You may deal (\d+) damage to a (ground |space )?unit\.?$/);
+  if (m) {
+    const arenaFilter = m[2] ? (m[2].trim() as 'ground' | 'space') : undefined;
+    return [{ type: 'ON_ATTACK_DEAL_DAMAGE_TARGET', amount: +m[1], ...(arenaFilter ? { arenaFilter } : {}) }];
+  }
+
+  // ── ON_ATTACK_DEBUFF_TARGET ─────────────────────────────────────────────
+  // "On Attack: Give an enemy unit –N/–M for this phase."
+  m = body.match(/^On Attack: Give an enemy unit [–-](\d+)\/[–-](\d+) for this phase\.?$/);
+  if (m) return [{ type: 'ON_ATTACK_DEBUFF_TARGET', atk: -+m[1], hp: -+m[2] }];
+
+  // ── ON_ATTACK_DEBUFF_DEFENDER ───────────────────────────────────────────
+  // "While this unit is attacking, the defender gets –N/–M."
+  m = body.match(/^While this unit is attacking, the defender gets [–-](\d+)\/[–-](\d+)\.?$/);
+  if (m) return [{ type: 'ON_ATTACK_DEBUFF_DEFENDER', atk: -+m[1], hp: -+m[2] }];
+
+  // ── AURA_BUFF_OTHERS ────────────────────────────────────────────────────
+  // "Each other friendly unit gets +N/+M (and gains KEYWORD)?."
+  m = body.match(/^Each other friendly unit gets \+(\d+)\/\+(\d+)(?: and gains ([A-Z][\w ]*?))?\.?$/);
+  if (m) {
+    const kw = m[3]?.trim();
+    return [{
+      type: 'AURA_BUFF_OTHERS',
+      atk: +m[1],
+      hp: +m[2],
+      ...(kw ? { grantKeywords: [kw] } : {}),
+    }];
+  }
+
+  // ── WHEN_PLAYED_DAMAGE_DUAL ─────────────────────────────────────────────
+  // "When Played: You may deal N damage to a friendly unit and M damage to
+  //  an enemy unit (in the same arena)?."
+  m = body.match(/^When Played: You may deal (\d+) damage to a friendly unit and (\d+) damage to an enemy unit( in the same arena)?\.?$/);
+  if (m) {
+    return [{
+      type: 'WHEN_PLAYED_DAMAGE_DUAL',
+      friendlyAmount: +m[1],
+      enemyAmount: +m[2],
+      ...(m[3] ? { sameArena: true } : {}),
+    }];
+  }
+
+  // ── KEYWORD grants (single-word) ────────────────────────────────────────
+  m = body.match(/^(Ambush|Saboteur|Sentinel|Grit|Shielded|Overwhelm)$/);
+  if (m) return [{ type: 'KEYWORD', keyword: m[1] }];
+
+  // ── KEYWORD with value ──────────────────────────────────────────────────
+  m = body.match(/^(Raid|Restore) (\d+)\.?$/);
+  if (m) return [{ type: 'KEYWORD', keyword: m[1], value: +m[2] }];
+
+  return [];
+}
+
+/**
+ * Look up Coordinate effects for a card.
+ * Registry (manual) takes precedence over parser (text-derived). Returns [] if
+ * neither source produces effects — the card silently has no Coordinate effect.
+ *
+ * This is the single entry point all engine code should use to access a card's
+ * Coordinate effects.
+ */
+export function getCoordinateAbilities(card: Card): CoordinateEffect[] {
+  const registry = CARD_ABILITIES[card.name];
+  if (registry) {
+    return registry
+      .filter((a): a is CoordinateAbility => a.type === 'COORDINATE')
+      .map(a => a.effect);
+  }
+  return parseCoordinateText(card.text ?? '');
+}
+
+// ---------------------------------------------------------------------------
+// Coordinate ability registry (manual overrides)
+//
+// Only list cards whose text the parser CANNOT correctly handle, or where we
+// want to explicitly override the parser. Every entry here is essentially a
+// statement that the parser's behavior on this card is wrong or insufficient.
 // ---------------------------------------------------------------------------
 
 export const CARD_ABILITIES: Record<string, CardAbility[]> = {

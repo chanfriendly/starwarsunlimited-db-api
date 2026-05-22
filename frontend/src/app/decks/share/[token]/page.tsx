@@ -1,5 +1,6 @@
 import { PublicDeckViewClient } from './PublicDeckViewClient';
 
-export default function SharedDeckPage({ params }: { params: { token: string } }) {
-  return <PublicDeckViewClient shareToken={params.token} />;
+export default async function SharedDeckPage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params;
+  return <PublicDeckViewClient shareToken={token} />;
 }

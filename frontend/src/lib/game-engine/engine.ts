@@ -8,6 +8,7 @@ import { GameAction } from './actions';
 import {
   hasKeyword, getKeywordValue, computePower, effectiveHealth,
   hasEffectiveKeyword, getEffectiveKeywordValue, getActiveCoordinateEffects,
+  getPotentialCoordinateEffects,
   dispatchOnPlay, dispatchOnDefeated, applyAttackFilters,
 } from './keywords';
 import {
@@ -478,7 +479,37 @@ function getLegalActions(state: GameState, playerId: PlayerId): GameAction[] {
           actions.push({ type: 'PLAY_CARD', iid: c.iid });
         }
       } else {
-        actions.push({ type: 'PLAY_CARD', iid: c.iid });
+        // Unit play. Check for WHEN_PLAYED_DAMAGE_DUAL Coordinate effect that
+        // would fire IF Coordinate becomes active when this unit enters.
+        // Threshold: 3+ units AFTER entry → current count must be ≥ 2.
+        const coordPotential = getPotentialCoordinateEffects(c.card);
+        const dual = coordPotential.find(e => e.type === 'WHEN_PLAYED_DAMAGE_DUAL');
+        const willHaveCoord = (me.groundArena.length + me.spaceArena.length) >= 2;
+
+        if (dual && dual.type === 'WHEN_PLAYED_DAMAGE_DUAL' && willHaveCoord) {
+          const opp_ = state.players[opponent(playerId)];
+          const pairs: Array<{ f: string; e: string }> = [];
+
+          if (dual.sameArena) {
+            for (const arena of ['ground', 'space'] as const) {
+              const fArr = arena === 'ground' ? me.groundArena : me.spaceArena;
+              const eArr = arena === 'ground' ? opp_.groundArena : opp_.spaceArena;
+              for (const f of fArr) for (const e of eArr) pairs.push({ f: f.iid, e: e.iid });
+            }
+          } else {
+            const allF = [...me.groundArena, ...me.spaceArena];
+            const allE = [...opp_.groundArena, ...opp_.spaceArena];
+            for (const f of allF) for (const e of allE) pairs.push({ f: f.iid, e: e.iid });
+          }
+
+          for (const { f, e } of pairs) {
+            actions.push({ type: 'PLAY_CARD', iid: c.iid, targetIids: [f, e] });
+          }
+          // "You may" — also offer the no-target variant (decline the effect)
+          actions.push({ type: 'PLAY_CARD', iid: c.iid });
+        } else {
+          actions.push({ type: 'PLAY_CARD', iid: c.iid });
+        }
       }
     }
   }
@@ -514,21 +545,69 @@ function getLegalActions(state: GameState, playerId: PlayerId): GameAction[] {
   const opp = state.players[opponent(playerId)];
   const groundAttackers = me.groundArena.filter(c => !c.exhausted && !c.deployedThisTurn);
   const spaceAttackers  = me.spaceArena.filter(c => !c.exhausted && !c.deployedThisTurn);
+  const oppAllUnits = [...opp.groundArena, ...opp.spaceArena];
+
+  /**
+   * Given an attacker and a defender, emit one ATTACK per (coord damage target ×
+   * coord debuff target) combination. If the attacker has no Coordinate
+   * on-attack target effects, emits exactly one plain ATTACK. The damage
+   * effect is optional ("You may"); the debuff is mandatory if any enemy
+   * exists. Both are no-ops when there's no enemy to target.
+   */
+  const pushAttackVariants = (attackerIid: string, defenderIid: string | 'base') => {
+    const attacker = me.groundArena.find(c => c.iid === attackerIid)
+                  ?? me.spaceArena.find(c => c.iid === attackerIid);
+    if (!attacker) return;
+
+    const coordEffects = getActiveCoordinateEffects(state, attacker, playerId);
+    const dmgEff   = coordEffects.find(e => e.type === 'ON_ATTACK_DEAL_DAMAGE_TARGET');
+    const debuffEff = coordEffects.find(e => e.type === 'ON_ATTACK_DEBUFF_TARGET');
+
+    // Compute candidate target lists (just iids). "undefined" represents "no choice".
+    const dmgCandidates: (string | undefined)[] = [];
+    if (dmgEff && dmgEff.type === 'ON_ATTACK_DEAL_DAMAGE_TARGET') {
+      const filter = dmgEff.arenaFilter;
+      const pool = filter === 'ground' ? opp.groundArena
+                 : filter === 'space'  ? opp.spaceArena
+                 : oppAllUnits;
+      for (const t of pool) dmgCandidates.push(t.iid);
+      // "You may" → also allow declining
+      dmgCandidates.push(undefined);
+    } else {
+      dmgCandidates.push(undefined);
+    }
+
+    const debuffCandidates: (string | undefined)[] = [];
+    if (debuffEff && debuffEff.type === 'ON_ATTACK_DEBUFF_TARGET') {
+      for (const t of oppAllUnits) debuffCandidates.push(t.iid);
+      if (oppAllUnits.length === 0) debuffCandidates.push(undefined); // no targets, attack still legal
+    } else {
+      debuffCandidates.push(undefined);
+    }
+
+    for (const d of dmgCandidates) {
+      for (const b of debuffCandidates) {
+        actions.push({
+          type: 'ATTACK',
+          attackerIid,
+          defenderIid,
+          ...(d ? { coordDamageTarget: d } : {}),
+          ...(b ? { coordDebuffTarget: b } : {}),
+        });
+      }
+    }
+  };
 
   // Ground attackers → ground defenders or base
   for (const attacker of groundAttackers) {
-    for (const defender of opp.groundArena) {
-      actions.push({ type: 'ATTACK', attackerIid: attacker.iid, defenderIid: defender.iid });
-    }
-    actions.push({ type: 'ATTACK', attackerIid: attacker.iid, defenderIid: 'base' });
+    for (const defender of opp.groundArena) pushAttackVariants(attacker.iid, defender.iid);
+    pushAttackVariants(attacker.iid, 'base');
   }
 
   // Space attackers → space defenders or base
   for (const attacker of spaceAttackers) {
-    for (const defender of opp.spaceArena) {
-      actions.push({ type: 'ATTACK', attackerIid: attacker.iid, defenderIid: defender.iid });
-    }
-    actions.push({ type: 'ATTACK', attackerIid: attacker.iid, defenderIid: 'base' });
+    for (const defender of opp.spaceArena) pushAttackVariants(attacker.iid, defender.iid);
+    pushAttackVariants(attacker.iid, 'base');
   }
 
   // Apply Sentinel and other attack filters first so PLAY_ATTACK_EVENT inherits constraints.
@@ -562,7 +641,13 @@ function getLegalActions(state: GameState, playerId: PlayerId): GameAction[] {
 // Action handlers
 // ---------------------------------------------------------------------------
 
-function applyPlayCard(state: GameState, playerId: PlayerId, iid: string, targetIid?: string): GameState {
+function applyPlayCard(
+  state: GameState,
+  playerId: PlayerId,
+  iid: string,
+  targetIid?: string,
+  targetIids?: string[],
+): GameState {
   const found = findCard(state, iid);
   if (!found || found.arena !== 'hand' || found.owner !== playerId) return state;
 
@@ -608,6 +693,21 @@ function applyPlayCard(state: GameState, playerId: PlayerId, iid: string, target
     s = addToArena(s, playerId, arena, inst);
     s = dispatchOnPlay(s, inst, playerId);
     s = log(s, playerId, `Played unit: ${card.card.name} → ${arena} arena.`);
+
+    // Coordinate WHEN_PLAYED_DAMAGE_DUAL: resolves only if Coordinate is active
+    // post-entry AND the player provided two targets. Reckless Torrent counts
+    // itself for the threshold, so this is what triggers it on turn-of-entry.
+    if (targetIids && targetIids.length >= 2) {
+      const coordEffects = getActiveCoordinateEffects(s, inst, playerId);
+      const dual = coordEffects.find(e => e.type === 'WHEN_PLAYED_DAMAGE_DUAL');
+      if (dual && dual.type === 'WHEN_PLAYED_DAMAGE_DUAL') {
+        const [friendlyIid, enemyIid] = targetIids;
+        s = mapCardInArenas(s, friendlyIid, c => ({ ...c, damage: c.damage + dual.friendlyAmount }));
+        s = mapCardInArenas(s, enemyIid,    c => ({ ...c, damage: c.damage + dual.enemyAmount }));
+        s = log(s, playerId, `Coordinate — ${card.card.name}: dealt ${dual.friendlyAmount}/${dual.enemyAmount} damage.`);
+        s = checkDefeated(s);
+      }
+    }
   }
 
   return switchActivePlayer(s, playerId);
@@ -618,6 +718,8 @@ function applyAttack(
   playerId: PlayerId,
   attackerIid: string,
   defenderIid: string | 'base',
+  coordDamageTarget?: string,
+  coordDebuffTarget?: string,
 ): GameState {
   const attackerRef = findCard(state, attackerIid);
   if (!attackerRef || attackerRef.owner !== playerId) return state;
@@ -634,6 +736,9 @@ function applyAttack(
   // at attack declaration and damage prevention is known before resolution.
   const coordEffects = getActiveCoordinateEffects(state, attacker, playerId);
   let preventSelfDamage = false;
+  // Accumulated combat-only debuff to apply to the defender's strikeback power
+  // (Clone Dive Trooper pattern). Negative values reduce the defender's hit.
+  let defenderCombatAtkMod = 0;
 
   let s = state;
 
@@ -652,6 +757,27 @@ function applyAttack(
         };
       });
       s = log(s, playerId, `Coordinate — ${attacker.card.name}: drew ${e.count} card(s).`);
+    }
+    if (e.type === 'ON_ATTACK_DEAL_DAMAGE_TARGET' && coordDamageTarget) {
+      // Optional ("You may"). If the player chose a target, deal damage to it
+      // before main combat. Defeat is resolved later in checkDefeated().
+      s = mapCardInArenas(s, coordDamageTarget, c => ({ ...c, damage: c.damage + e.amount }));
+      s = log(s, playerId, `Coordinate — ${attacker.card.name}: dealt ${e.amount} damage to a unit.`);
+    }
+    if (e.type === 'ON_ATTACK_DEBUFF_TARGET' && coordDebuffTarget) {
+      // Phase debuff on a chosen enemy. Stored on phaseAtk/phaseHp which
+      // resolveRegroup clears at end of round. Same mechanism as event buffs.
+      s = mapCardInArenas(s, coordDebuffTarget, c => ({
+        ...c,
+        phaseAtk: (c.phaseAtk ?? 0) + e.atk,
+        phaseHp:  (c.phaseHp  ?? 0) + e.hp,
+      }));
+      s = log(s, playerId, `Coordinate — ${attacker.card.name}: gave a unit ${e.atk}/${e.hp} for this phase.`);
+    }
+    if (e.type === 'ON_ATTACK_DEBUFF_DEFENDER') {
+      // Defender's strikeback attack is reduced for THIS attack only.
+      // Stat field on the card is not modified — purely a combat-time adjustment.
+      defenderCombatAtkMod += e.atk;
     }
   }
 
@@ -686,7 +812,9 @@ function applyAttack(
     if (!defenderRef || defenderRef.owner !== opp) return state;
 
     const defender = defenderRef.card;
-    const defenderPower = defender.card.attack ?? 0;
+    // Defender's strikeback power, reduced by any ON_ATTACK_DEBUFF_DEFENDER
+    // contribution from the attacker's Coordinate effects. Cannot go below 0.
+    const defenderPower = Math.max(0, (defender.card.attack ?? 0) + defenderCombatAtkMod);
     const defArena = defenderRef.arena as ArenaId;
 
     // Saboteur (native or Coordinate-granted): strip ALL shield tokens from the
@@ -1088,11 +1216,11 @@ export class GameEngine {
   private _applyAction(state: GameState, playerId: PlayerId, action: GameAction): GameState {
     switch (action.type) {
       case 'PLAY_CARD':
-        return applyPlayCard(state, playerId, action.iid, action.targetIid);
+        return applyPlayCard(state, playerId, action.iid, action.targetIid, action.targetIids);
       case 'PLAY_ATTACK_EVENT':
         return applyPlayAttackEvent(state, playerId, action.iid, action.attackerIid, action.defenderIid);
       case 'ATTACK':
-        return applyAttack(state, playerId, action.attackerIid, action.defenderIid);
+        return applyAttack(state, playerId, action.attackerIid, action.defenderIid, action.coordDamageTarget, action.coordDebuffTarget);
       case 'DEPLOY_LEADER':
         return applyDeployLeader(state, playerId, action.leaderCardId);
       case 'LEADER_ABILITY':
