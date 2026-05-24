@@ -1,8 +1,19 @@
 'use client';
 import React from 'react';
 import type { PlayerState } from '@/lib/game-engine/types';
-import { PlayCard, toPlayCardProps, BaseCard, toBaseData, LeaderCard, toLeaderData, InitToken, CardBack } from './PlayCard';
+import { PlayCard, toPlayCardProps, PlayCardData, BaseCard, toBaseData, LeaderCard, toLeaderData, InitToken, CardBack } from './PlayCard';
 import { HpReadout, Counter, ResourceLattice } from './BoardParts';
+
+/** Override raw card stats with engine-computed effective values (e.g. Coordinate buffs). */
+function applyEffectiveStats(
+  props: PlayCardData,
+  effectiveStats: Map<string, { power: number; hp: number }> | undefined,
+): PlayCardData {
+  if (!effectiveStats || !props.iid) return props;
+  const stats = effectiveStats.get(props.iid);
+  if (!stats) return props;
+  return { ...props, power: stats.power, hp: stats.hp, maxHp: stats.hp };
+}
 
 interface TopOppMatProps {
   player: PlayerState;
@@ -13,11 +24,13 @@ interface TopOppMatProps {
   onUnitClick: (iid: string) => void;
   onAttackBase: () => void;
   displayName: string;
+  /** Engine-computed effective stats (power/hp) per unit iid — reflects Coordinate buffs etc. */
+  unitEffectiveStats?: Map<string, { power: number; hp: number }>;
 }
 
 export function TopOppMat({
   player, round, hasInitiative, attackTargetIids, canAttackBase,
-  onUnitClick, onAttackBase, displayName,
+  onUnitClick, onAttackBase, displayName, unitEffectiveStats,
 }: TopOppMatProps) {
   const base   = toBaseData(player.base);
   const handle = displayName.substring(0, 2).toUpperCase();
@@ -28,7 +41,7 @@ export function TopOppMat({
       style={{
         display: 'grid',
         gridTemplateColumns: '1.2fr 148px 1.2fr',
-        gridTemplateRows: 'auto auto minmax(120px, 1fr) auto',
+        gridTemplateRows: 'auto auto auto minmax(120px, 1fr)',
         gap: 12,
         padding: 10,
         flex: 1, minHeight: 0,
@@ -60,7 +73,7 @@ export function TopOppMat({
       </div>
 
       {/* ── Ground arena ─────────────────────────────────────────── */}
-      <div className="zone" style={{ gridColumn: 1, gridRow: 3 }}>
+      <div className="zone" style={{ gridColumn: 1, gridRow: 4 }}>
         <span className="zone-label">◆ Ground · {displayName}</span>
         <div className="arena-grid">
           {player.groundArena.length === 0
@@ -70,7 +83,7 @@ export function TopOppMat({
                 return (
                   <PlayCard
                     key={ci.iid}
-                    card={toPlayCardProps(ci)}
+                    card={applyEffectiveStats(toPlayCardProps(ci), unitEffectiveStats)}
                     size="sm"
                     target={isTarget}
                     clickable={isTarget}
@@ -82,7 +95,7 @@ export function TopOppMat({
       </div>
 
       {/* ── Center: base + leaders ────────────────────────────────── */}
-      <div style={{ gridColumn: 2, gridRow: 3, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
+      <div style={{ gridColumn: 2, gridRow: 4, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
         <div className="zone" style={{ width: '100%', padding: '12px 6px 6px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <span className="zone-label">Base</span>
           <BaseCard
@@ -104,7 +117,7 @@ export function TopOppMat({
       </div>
 
       {/* ── Space arena ──────────────────────────────────────────── */}
-      <div className="zone" style={{ gridColumn: 3, gridRow: 3 }}>
+      <div className="zone" style={{ gridColumn: 3, gridRow: 4 }}>
         <span className="zone-label">◆ Space · {displayName}</span>
         <div className="arena-grid">
           {player.spaceArena.length === 0
@@ -114,7 +127,7 @@ export function TopOppMat({
                 return (
                   <PlayCard
                     key={ci.iid}
-                    card={toPlayCardProps(ci)}
+                    card={applyEffectiveStats(toPlayCardProps(ci), unitEffectiveStats)}
                     size="sm"
                     target={isTarget}
                     clickable={isTarget}
@@ -126,13 +139,14 @@ export function TopOppMat({
       </div>
 
       {/* ── Resources ────────────────────────────────────────────── */}
-      <div className="zone" style={{ gridColumn: '1 / 4', gridRow: 4, height: 48 }}>
+      <div className="zone" style={{ gridColumn: '1 / 4', gridRow: 3, height: 48 }}>
         <span className="zone-label">
           ◆ Resources · {player.resources.available} ready · {player.resources.total} total
         </span>
         <ResourceLattice
           total={player.resources.total}
           available={player.resources.available}
+          resourcePile={player.resourcePile}
           compact
         />
       </div>

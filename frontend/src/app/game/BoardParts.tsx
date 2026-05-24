@@ -1,6 +1,7 @@
 'use client';
 import React from 'react';
-import { CardBack } from './PlayCard';
+import type { CardInstance } from '@/lib/game-engine/types';
+import { CardBack, emitHoverCard, type PlayCardData } from './PlayCard';
 
 // ── ResCard — card-back-art mini card for resource display ────────────────────
 
@@ -51,9 +52,32 @@ interface ResourceLatticeProps {
   total: number;
   available: number;
   compact?: boolean;
+  /** Ordered list of cards in the resource zone — enables hover-to-identify. */
+  resourcePile?: CardInstance[];
 }
 
-export function ResourceLattice({ total, available, compact }: ResourceLatticeProps) {
+/** Build a PlayCardData hover payload from a CardInstance in the resource zone. */
+function toResourceHoverData(ci: CardInstance): PlayCardData {
+  return {
+    iid: ci.iid,
+    name: ci.card.name,
+    subtitle: ci.card.subtitle,
+    type: ci.card.type,
+    cost: ci.card.energy_cost ?? ci.card.cost,
+    aspects: (ci.card.aspects ?? []).map(a => a.aspect_name),
+    power: ci.card.attack,
+    hp: ci.card.health,
+    maxHp: ci.card.health,
+    damage: 0,
+    exhausted: false,
+    upgrades: [],
+    image_uri: ci.card.image_uri ?? ci.card.image_url,
+    text: ci.card.text,
+    keywords: ci.card.keywords,
+  };
+}
+
+export function ResourceLattice({ total, available, compact, resourcePile }: ResourceLatticeProps) {
   // Portrait dimensions (ready = upright, spent = rotated -90deg = landscape)
   const W = compact ? 18 : 26;  // portrait width
   const H = compact ? 26 : 38;  // portrait height
@@ -62,6 +86,8 @@ export function ResourceLattice({ total, available, compact }: ResourceLatticePr
     <div className={'resources-strip' + (compact ? ' is-compact' : '')}>
       {Array.from({ length: total }, (_, i) => {
         const isReady = i < available;
+        const ci = resourcePile?.[i];
+        const hoverData = ci ? toResourceHoverData(ci) : undefined;
         // Wrapper sized to match the card's visual footprint after rotation.
         // Ready: portrait (W × H). Spent: landscape (H × W).
         return (
@@ -76,7 +102,11 @@ export function ResourceLattice({ total, available, compact }: ResourceLatticePr
               opacity: isReady ? 1 : 0.42,
               filter: isReady ? 'none' : 'grayscale(0.55)',
               transition: 'opacity 0.3s, filter 0.3s',
+              cursor: hoverData ? 'help' : 'default',
             }}
+            onMouseEnter={hoverData ? (e) => emitHoverCard({ card: hoverData, label: 'Resource', x: e.clientX, y: e.clientY }) : undefined}
+            onMouseMove={hoverData ? (e) => emitHoverCard({ card: hoverData, label: 'Resource', x: e.clientX, y: e.clientY }) : undefined}
+            onMouseLeave={hoverData ? () => emitHoverCard(null) : undefined}
           >
             <div style={{
               position: 'absolute',

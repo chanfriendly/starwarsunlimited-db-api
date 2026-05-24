@@ -8,7 +8,7 @@ import { GameAction } from './actions';
 import {
   hasKeyword, getKeywordValue, computePower, effectiveHealth,
   hasEffectiveKeyword, getEffectiveKeywordValue, getActiveCoordinateEffects,
-  getPotentialCoordinateEffects,
+  getPotentialCoordinateEffects, isCoordinateActive,
   dispatchOnPlay, dispatchOnDefeated, applyAttackFilters,
 } from './keywords';
 import {
@@ -293,8 +293,16 @@ function applyAbilityEffect(
       s = defeatUnitByIid(s, targetIid);
       break;
     }
+    case 'HEAL_UNIT': {
+      if (!targetIid) break;
+      s = mapCardInArenas(s, targetIid, c => ({
+        ...c, damage: Math.max(0, c.damage - effect.amount),
+      }));
+      s = log(s, playerId, `Healed ${effect.amount} damage from a unit.`);
+      break;
+    }
     case 'TRIGGER_ATTACK_WITH': {
-      // Handled entirely by applyPlayAttackEvent — should never reach here.
+      // Handled entirely by applyPlayAttackEvent / applyLeaderAttackAbility — should never reach here.
       break;
     }
   }
@@ -339,6 +347,7 @@ function initPlayer(config: PlayerConfig, baseIid: number): [PlayerState, number
     hasCountered: false,
     hasResourced: false,
     setupResourcesLeft: 2,
+    resourcePile: [],
   };
 
   return [player, iidCounter];
@@ -525,11 +534,14 @@ function getLegalActions(state: GameState, playerId: PlayerId): GameAction[] {
   }
 
   // Leader abilities (non-deployed, non-exhausted, affordable)
+  // TRIGGER_ATTACK_WITH abilities are skipped here — they generate LEADER_ATTACK_ABILITY actions instead.
   for (const leader of me.leaders) {
     if (leader.isDeployed || leader.exhausted) continue;
-    const ability = LEADER_ABILITIES[leader.card.name];
+    const ability = LEADER_ABILITIES[leader.card.id];
     if (!ability) continue;
+    if (ability.effect.type === 'TRIGGER_ATTACK_WITH') continue; // handled below
     if (me.resources.available < ability.resourceCost) continue;
+    if (ability.coordinateRequired && !isCoordinateActive(state, playerId)) continue;
 
     if (ability.targetKind) {
       const targets = getValidTargets(state, playerId, ability.targetKind);
@@ -634,7 +646,27 @@ function getLegalActions(state: GameState, playerId: PlayerId): GameAction[] {
     }
   }
 
-  return [...filteredActions, ...attackEventActions];
+  // Leader attack abilities — same pattern as PLAY_ATTACK_EVENT but triggered by a leader.
+  // Reuses filteredAttacks so Sentinel and arena constraints already apply.
+  const leaderAttackAbilityActions: GameAction[] = [];
+  for (const leader of me.leaders) {
+    if (leader.isDeployed || leader.exhausted) continue;
+    const ability = LEADER_ABILITIES[leader.card.id];
+    if (!ability || ability.effect.type !== 'TRIGGER_ATTACK_WITH') continue;
+    if (me.resources.available < ability.resourceCost) continue;
+    if (ability.coordinateRequired && !isCoordinateActive(state, playerId)) continue;
+
+    for (const atk of filteredAttacks) {
+      leaderAttackAbilityActions.push({
+        type: 'LEADER_ATTACK_ABILITY',
+        leaderCardId: leader.card.id,
+        attackerIid: atk.attackerIid,
+        defenderIid: atk.defenderIid,
+      });
+    }
+  }
+
+  return [...filteredActions, ...attackEventActions, ...leaderAttackAbilityActions];
 }
 
 // ---------------------------------------------------------------------------
@@ -896,6 +928,23 @@ function applyAttack(
   return switchActivePlayer(s, playerId);
 }
 
+/**
+ * Default deployed-unit stats for leaders whose attack/health are null in
+ * swu_cards.db. The DB stores only the "Leader" side of each leader card;
+ * the back/unit side stats are not fetched from the SWU API yet.
+ * Values here are approximated from the physical card until a DB migration
+ * adds a dedicated `deployed_attack` / `deployed_health` column.
+ * Key: leader card id.
+ */
+const LEADER_DEPLOYED_STATS: Record<string, { attack: number; health: number }> = {
+  // Ahsoka Tano (Resolute) — set 1
+  '13980': { attack: 3, health: 6 },
+  // Ahsoka Tano (On a New Mission) — set 4
+  '27039': { attack: 4, health: 7 },
+  // Ahsoka Tano (Folio, set 5)
+  '50892': { attack: 3, health: 6 },
+};
+
 function applyDeployLeader(state: GameState, playerId: PlayerId, leaderCardId: string): GameState {
   const me = state.players[playerId];
   const leader = me.leaders.find(l => l.card.id === leaderCardId && !l.isDeployed);
@@ -909,9 +958,22 @@ function applyDeployLeader(state: GameState, playerId: PlayerId, leaderCardId: s
   [iid, s] = uid(s);
 
   const arena = arenaFor(leader.card);
+
+  // Leaders in the DB have null attack/health (only the leader-side is stored,
+  // not the deployed-unit side). Look up known stats or fall back to 3/6 so
+  // the unit is at least functional in the engine. The back-card image shows
+  // the real values to the player.
+  const defaultStats = LEADER_DEPLOYED_STATS[leader.card.id] ?? { attack: 3, health: 6 };
+  const deployedCard = {
+    ...leader.card,
+    image_uri: leader.card.image_back_uri ?? leader.card.image_uri,
+    attack:  leader.card.attack  ?? defaultStats.attack,
+    health:  leader.card.health  ?? defaultStats.health,
+  };
+
   const inst: CardInstance = {
     iid,
-    card: { ...leader.card, image_uri: leader.card.image_back_uri ?? leader.card.image_uri },
+    card: deployedCard,
     exhausted: true,
     damage: 0,
     upgrades: [],
@@ -942,8 +1004,8 @@ function applyLeaderAbility(
   const leader = me.leaders.find(l => l.card.id === leaderCardId && !l.isDeployed && !l.exhausted);
   if (!leader) return state;
 
-  const ability = LEADER_ABILITIES[leader.card.name];
-  if (!ability) return state;
+  const ability = LEADER_ABILITIES[leader.card.id];
+  if (!ability || ability.effect.type === 'TRIGGER_ATTACK_WITH') return state;
 
   if (me.resources.available < ability.resourceCost) return state;
 
@@ -973,14 +1035,93 @@ function applyLeaderAbility(
   return switchActivePlayer(s, playerId);
 }
 
+/**
+ * Resolve a LEADER_ATTACK_ABILITY action.
+ * Mirrors applyPlayAttackEvent: pay costs → exhaust leader → apply stat bonus →
+ * execute attack → remove bonus (no-op if attacker died).
+ */
+function applyLeaderAttackAbility(
+  state: GameState,
+  playerId: PlayerId,
+  leaderCardId: string,
+  attackerIid: string,
+  defenderIid: string | 'base',
+): GameState {
+  const me = state.players[playerId];
+  const leader = me.leaders.find(l => l.card.id === leaderCardId && !l.isDeployed && !l.exhausted);
+  if (!leader) return state;
+
+  const ability = LEADER_ABILITIES[leader.card.id];
+  if (!ability || ability.effect.type !== 'TRIGGER_ATTACK_WITH') return state;
+
+  const effect = ability.effect; // TRIGGER_ATTACK_WITH
+  if (me.resources.available < ability.resourceCost) return state;
+
+  let s = state;
+
+  // Pay resource cost
+  if (ability.resourceCost > 0) {
+    s = updatePlayer(s, playerId, p => ({
+      ...p,
+      resources: { ...p.resources, available: p.resources.available - ability.resourceCost },
+    }));
+  }
+
+  // Exhaust the leader
+  s = updatePlayer(s, playerId, p => ({
+    ...p,
+    leaders: p.leaders.map(l =>
+      l.card.id === leaderCardId ? { ...l, exhausted: true } : l,
+    ),
+  }));
+
+  s = log(s, playerId, `${leader.card.name}: used leader attack ability.`);
+
+  // Apply temporary stat bonus to the attacker ("for this attack").
+  if (effect.atkBonus !== 0 || effect.hpBonus !== 0) {
+    s = mapCardInArenas(s, attackerIid, c => ({
+      ...c,
+      phaseAtk: (c.phaseAtk ?? 0) + effect.atkBonus,
+      phaseHp:  (c.phaseHp  ?? 0) + effect.hpBonus,
+    }));
+  }
+
+  // Execute the attack (exhausts attacker, deals damage, checks defeat, switches player).
+  s = applyAttack(s, playerId, attackerIid, defenderIid);
+
+  // Remove the temporary bonus (no-op if the unit died — mapCardInArenas handles missing iids).
+  if (effect.atkBonus !== 0 || effect.hpBonus !== 0) {
+    s = mapCardInArenas(s, attackerIid, c => ({
+      ...c,
+      phaseAtk: (c.phaseAtk ?? 0) - effect.atkBonus,
+      phaseHp:  (c.phaseHp  ?? 0) - effect.hpBonus,
+    }));
+  }
+
+  return s;
+}
+
 function applyTakeCounter(state: GameState, playerId: PlayerId): GameState {
   let s = updatePlayer(state, playerId, p => ({ ...p, hasCountered: true }));
   s = log(s, playerId, `${playerId} takes the counter.`);
 
   // If both players have countered → regroup phase
   if (s.players.player1.hasCountered && s.players.player2.hasCountered) {
+    // Draw 2 cards for each player NOW — before resource selection.
+    // SWU rule: draw happens at the START of regroup, then players resource.
+    for (const pid of ['player1', 'player2'] as PlayerId[]) {
+      s = updatePlayer(s, pid, p => {
+        const draws = Math.min(2, p.deck.length);
+        return {
+          ...p,
+          hand: [...p.hand, ...p.deck.slice(0, draws)],
+          deck: p.deck.slice(draws),
+        };
+      });
+    }
+    s = log(s, undefined, 'Each player draws 2 cards.');
     s = { ...s, phase: 'regroup', activePlayer: s.initiative };
-    s = log(s, undefined, 'Both players countered — regroup phase begins.');
+    s = log(s, undefined, 'Regroup — select a card to resource (or skip).');
   } else {
     // Switch to opponent for their remaining actions
     s = { ...s, activePlayer: opponent(playerId) };
@@ -993,7 +1134,8 @@ function applyResourceCard(state: GameState, playerId: PlayerId, iid: string): G
   const found = findCard(state, iid);
   if (!found || found.arena !== 'hand' || found.owner !== playerId) return state;
 
-  const cardName = found.card.card.name;
+  const cardInst = found.card; // capture before removal so we can push to resourcePile
+  const cardName = cardInst.card.name;
   let s = removeFromHand(state, playerId, iid);
 
   if (s.phase === 'setup') {
@@ -1004,6 +1146,7 @@ function applyResourceCard(state: GameState, playerId: PlayerId, iid: string): G
       resources: { total: p.resources.total + 1, available: p.resources.available },
       setupResourcesLeft: newLeft,
       hasResourced: done,
+      resourcePile: [...p.resourcePile, cardInst],
     }));
     s = log(s, playerId, `Setup resource ${3 - newLeft}/2: ${cardName}.`);
 
@@ -1023,6 +1166,7 @@ function applyResourceCard(state: GameState, playerId: PlayerId, iid: string): G
     ...p,
     resources: { total: p.resources.total + 1, available: p.resources.available },
     hasResourced: true,
+    resourcePile: [...p.resourcePile, cardInst],
   }));
   s = log(s, playerId, `Resourced ${cardName}.`);
 
@@ -1080,12 +1224,10 @@ function resolveSetup(state: GameState): GameState {
 function resolveRegroup(state: GameState): GameState {
   let s = state;
 
+  // Cards were already drawn at the START of regroup (in applyTakeCounter).
+  // Here we only ready units/leaders, refresh resources, and advance the round.
   for (const pid of ['player1', 'player2'] as PlayerId[]) {
     s = updatePlayer(s, pid, p => {
-      const draws = Math.min(2, p.deck.length);
-      const drawn  = p.deck.slice(0, draws);
-      const newDeck = p.deck.slice(draws);
-
       const ready = (arr: CardInstance[]) =>
         arr.map(c => ({
           ...c,
@@ -1097,8 +1239,6 @@ function resolveRegroup(state: GameState): GameState {
 
       return {
         ...p,
-        deck: newDeck,
-        hand: [...p.hand, ...drawn],
         resources: { total: p.resources.total, available: p.resources.total },
         groundArena: ready(p.groundArena),
         spaceArena:  ready(p.spaceArena),
@@ -1225,6 +1365,8 @@ export class GameEngine {
         return applyDeployLeader(state, playerId, action.leaderCardId);
       case 'LEADER_ABILITY':
         return applyLeaderAbility(state, playerId, action.leaderCardId, action.targetIid);
+      case 'LEADER_ATTACK_ABILITY':
+        return applyLeaderAttackAbility(state, playerId, action.leaderCardId, action.attackerIid, action.defenderIid);
       case 'TAKE_COUNTER':
       case 'PASS_PRIORITY':
         return applyTakeCounter(state, playerId);
@@ -1245,8 +1387,23 @@ export class GameEngine {
 // ---------------------------------------------------------------------------
 
 export function deckToPlayerConfig(deck: SavedDeck, playerId: PlayerId, displayName: string): PlayerConfig {
+  // Build a set of IDs that must NOT appear as regular deck cards.
+  // The backend marks leaders/base separately but defensive filtering catches
+  // any data-layer inconsistency (e.g. a leader card also appearing in deck.cards).
+  const excludedIds = new Set<string>();
+  for (const l of deck.leaders) excludedIds.add(l.id);
+  if (deck.base) excludedIds.add(deck.base.id);
+
   const expanded: Card[] = [];
   for (const entry of deck.cards) {
+    if (excludedIds.has(entry.card.id)) {
+      // Defensive: leader/base card leaked into deck.cards — skip it
+      console.warn(
+        `[engine] deckToPlayerConfig: card "${entry.card.name}" (${entry.card.id}) ` +
+        `appears in deck.cards but is also a leader or base for ${playerId}. Skipping.`,
+      );
+      continue;
+    }
     for (let i = 0; i < entry.quantity; i++) {
       expanded.push(entry.card);
     }

@@ -11,10 +11,18 @@ const nextConfig: NextConfig = {
     ignoreDuringBuilds: true,
   },
 
-  // Image configuration
+  // Image configuration.
+  // Card art is served from cdn.starwarsunlimited.com (URLs come from the SWU
+  // API → swu_cards.db). cdn.jsdelivr.net kept as a fallback in case any
+  // legacy/forked card images still reference the JimJafar mirror.
   images: {
-    domains: ['cdn.jsdelivr.net', 'placehold.co'],
+    domains: ['cdn.starwarsunlimited.com', 'cdn.jsdelivr.net', 'placehold.co'],
     remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'cdn.starwarsunlimited.com',
+        pathname: '/**',
+      },
       {
         protocol: 'https',
         hostname: 'cdn.jsdelivr.net',
@@ -32,12 +40,15 @@ const nextConfig: NextConfig = {
   async headers() {
     // CSP baseline. 'unsafe-inline' is required for Next.js inline scripts and Tailwind.
     // For a stricter policy with nonces, move this to Nginx Proxy Manager's custom config.
-    // img-src includes cdn.jsdelivr.net (SWU card images) and data: (placeholders/SVGs).
+    // img-src must list every CDN that card art URLs reference. Today that's
+    // cdn.starwarsunlimited.com (primary, from the SWU API) and cdn.jsdelivr.net
+    // (legacy JimJafar mirror, kept as fallback). data:/blob: cover SVG
+    // placeholders, avatar uploads, and the like.
     const csp = [
       "default-src 'self'",
       "script-src 'self' 'unsafe-inline'",
       "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' https://cdn.jsdelivr.net data: blob:",
+      "img-src 'self' https://cdn.starwarsunlimited.com https://cdn.jsdelivr.net data: blob:",
       "font-src 'self'",
       "connect-src 'self'",
       "frame-ancestors 'none'",

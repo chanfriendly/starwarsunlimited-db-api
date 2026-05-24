@@ -30,15 +30,26 @@ export function useGame({ playerDeck, aiDeck, difficulty, playerName }: UseGameO
   const engineRef = useRef<GameEngine | null>(null);
   const aiRef     = useRef<HeuristicAI | null>(null);
 
-  const [state, setState] = useState<GameState>(() => {
+  // Initialize engine + AI BEFORE useState so the lazy initializer always reads
+  // from the same engine instance. React Strict Mode invokes the useState
+  // initializer twice in dev, causing two different engines to be created if
+  // the engine is built inside that callback — the ref ends up pointing to
+  // engine2 while the state snapshot is from engine1, desynchronizing all
+  // subsequent actions (wrong card iids, wrong arenas, etc.).
+  // The null-check here is idempotent: refs persist across Strict Mode's
+  // double-render so the engine is only ever created once.
+  if (engineRef.current === null) {
     const engine = new GameEngine({
       player1: deckToPlayerConfig(playerDeck, 'player1', playerName),
       player2: deckToPlayerConfig(aiDeck,    'player2', 'AI Opponent'),
     });
     engineRef.current = engine;
     aiRef.current = new HeuristicAI(engine, 'player2', difficulty);
-    return engine.getState() as GameState;
-  });
+  }
+
+  const [state, setState] = useState<GameState>(
+    () => engineRef.current!.getState() as GameState,
+  );
 
   const [selectedIid, setSelectedIid] = useState<string | null>(null);
 
@@ -94,13 +105,22 @@ export function useGame({ playerDeck, aiDeck, difficulty, playerName }: UseGameO
     if (state.phase === 'regroup') {
       if (state.activePlayer === 'player1') return; // wait for player1 UI
 
-      // AI's resource turn — pick the highest-cost card to resource, or skip if empty
+      // AI's resource turn — pick the lowest-cost card to resource (preserve high-value plays), or skip if empty
       const t = setTimeout(() => {
         if (!engineRef.current) return;
         const aiActions = engineRef.current.getLegalActions('player2');
-        const resourceOpts = aiActions.filter(a => a.type === 'RESOURCE_CARD');
+        const resourceOpts = aiActions.filter(a => a.type === 'RESOURCE_CARD') as Extract<typeof aiActions[number], { type: 'RESOURCE_CARD' }>[];
         const action = resourceOpts.length > 0
-          ? resourceOpts[Math.floor(Math.random() * resourceOpts.length)]
+          ? (() => {
+              const p2 = engineRef.current!.getState().players.player2;
+              return resourceOpts.reduce((best, a) => {
+                const ci = p2.hand.find(h => h.iid === a.iid);
+                const bestCi = p2.hand.find(h => h.iid === (best as { iid: string }).iid);
+                const cost = ci ? (ci.card.energy_cost ?? ci.card.cost ?? 0) : 99;
+                const bestCost = bestCi ? (bestCi.card.energy_cost ?? bestCi.card.cost ?? 0) : 99;
+                return cost < bestCost ? a : best;
+              }, resourceOpts[0]);
+            })()
           : ({ type: 'END_REGROUP' } as const);
         const next = engineRef.current.applyAction('player2', action);
         setState({ ...next });

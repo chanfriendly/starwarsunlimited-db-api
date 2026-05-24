@@ -6,6 +6,74 @@
 
 ## Current Status
 
+*(2026-05-24 session 32)* **Full leader ability expansion — 47 leaders implemented, attack-type ability state machine added, disclaimer banner. TypeScript: 0 errors.**
+
+**New in session 32:**
+- **All leaders implemented (47 entries).** `LEADER_ABILITIES` in `abilities.ts` changed from name-keyed → ID-keyed (multiple leaders share names, e.g. Ahsoka Tano, Boba Fett). 47 leaders now have abilities. Effect categories covered: `TRIGGER_ATTACK_WITH` (13 leaders), `PHASE_BUFF_UNIT` (3), `DEAL_DAMAGE_UNIT` (11), `DEAL_DAMAGE_OPP_BASE` (3), `DEAL_DAMAGE_ANY` (1), `EXHAUST_UNIT` (2), `HEAL_BASE` (1), `HEAL_UNIT` (3 — new effect type), `GIVE_SHIELD_FRIENDLY` (5), `DRAW` (2). All effects are best-effort approximations; conditions, trait/aspect filters, and secondary clauses are noted in comments.
+- **New `LEADER_ATTACK_ABILITY` action type.** Leaders whose ability text says "Attack with a unit. It gets +N/+N for this attack." (Ahsoka "Snips", Asajj "Unparalleled Adversary", Anakin "What it Takes to Win", Jyn Erso, IG-88, Moff Gideon, Leia "Alliance General", Saw Gerrera, Rio Durant, Maul, Han Solo "Never Tell Me the Odds", Asajj "Ambitious Apprentice", Colonel Yularen) now use a new `LEADER_ATTACK_ABILITY` action type. Engine function `applyLeaderAttackAbility` mirrors `applyPlayAttackEvent`: pay cost → exhaust leader → apply stat bonus → call `applyAttack` → remove bonus. Sentinel and arena constraints inherited from `filteredAttacks`.
+- **New `HEAL_UNIT` effect type.** Added to `AbilityEffect` union and wired in `applyAbilityEffect`. Used by Obi-Wan Kenobi "Patient Mentor", Leia "Get to Your Transports!", and Satine Kryze.
+- **`coordinateRequired?: boolean` on `LeaderAbility`.** Ahsoka Tano "Snips" text reads "Coordinate — Action [Exhaust]: …" — her ability is only legal while Coordinate is active. `getLegalActions` checks `isCoordinateActive(state, playerId)` before generating actions for any leader with this flag.
+- **Two-step UI state machine for leader attack abilities** (`GameBoard.tsx`). New state: `pendingLeaderAttackAbilityId`. New memos: `legalLeaderAttackAbilityIds`, `leaderAttackAbilityAttackerIids`, `leaderAttackAbilityTargetIids`, `canLeaderAttackAbilityTargetBase`. Flow: click ABILITY button → enter mode → highlight valid attackers → click attacker → highlight valid defenders → click defender → dispatch `LEADER_ATTACK_ABILITY`. Cancel by clicking ABILITY again.
+- **`YourMat.tsx`** — ABILITY button now shows for both `LEADER_ABILITY` and `LEADER_ATTACK_ABILITY` leaders. CANCEL state covers both pending types.
+- **Disclaimer banner** — amber `⚠ Simulator β — card effects approximate, some unimplemented` badge in the top chrome rail. Always visible during gameplay.
+
+**Known gaps (not implementable without new subsystems):**
+- **Force token system** — ~10 leaders (Ahsoka "Fighting For Peace", Ahsoka "I Have an Idea", Anakin "Tempted", Avar Kriss, Barriss, Cal Kestis, Darth Maul, Grand Inquisitor "Stories Quickly", Mother Talzin, Obi-Wan "Courage", Qui-Gon)
+- **Token creation** — ~15 leaders (Captain Rex, Admiral Ackbar's X-Wing, Grand Moff Tarkin Experience, various Credit tokens, etc.)
+- **Triggered/passive effects** — ~20 leaders (all Boba Fett variants, Cad Bane, Cassian "Climb!", Jango Fett, Darth Revan, Quinlan Vos, etc.)
+- **Complex actions** — deck search (Chancellor Palpatine, Jyn "Time to Fight"), play-from-hand (Fennec Shand, Third Sister), resource manipulation (Han Solo "Audacious Smuggler", Hunter)
+
+Zero new dependencies. TypeScript: 0 errors.
+
+---
+
+*(2026-05-24 session 31)* **UAT bug fixes continued — upgrade targeting UI implemented. TypeScript: 0 errors.**
+
+Session 30 addressed all 7 bugs from the first play-test match (Strict Mode root-cause fix, draw order, leader stats, DividerBar, CardPreview). Session 31 addresses bugs from the second play-test match:
+
+**New in session 31:**
+- **Upgrade targeting flow** — `PlayCard` upgrades (e.g. Protector) now enter a two-step targeting mode instead of falling through to arena placement. Clicking an upgrade card highlights all friendly units as valid attachment targets with an amber banner ("▸ Select a unit to attach the upgrade — click the card again to cancel"). Clicking a highlighted unit dispatches `PLAY_CARD { iid, targetIid }` which triggers the engine's `type === 'upgrade' && targetIid` path. Tapping the upgrade card again cancels the selection. Changes: `canPlayUpgradeIids` + `upgradeTargetIids` memos in `GameBoard.tsx`, `pendingUpgradeIid` state wired through `clearPending`/`friendlyTargetIids`/`handleMyUnitClick`/`handleHandCardClick`, new props added to `YourMat` interface. TypeScript: 0 errors.
+
+**From session 30 (carried):**
+- **Root cause fixed (Strict Mode desync)** — engine init moved to render body before `useState`; idempotent null-check. Fixed Bugs #5A (wrong arena), #6 (Sentinel bypass), leader deploy, and Coordinate effects that were all failing due to the desynced state.
+- **Draw/resource order** — draw 2 cards moved to `applyTakeCounter` so cards are visible before resource selection.
+- **Leader deployed stats** — `LEADER_DEPLOYED_STATS` map + 3/6 fallback for null attack/health.
+- **DividerBar** — last log entry in place of resource readout.
+- **CardPreview** — full card image at SWU aspect ratio, no overlays.
+
+**Still under investigation:**
+- **Events not applying effects** — likely resolved by Strict Mode fix (engine state was desynced, effects were computing on wrong state). If specific cards still don't work, report card names and they'll be added to the registry.
+- **Ambush "immediate attack" timing** — Current impl: Ambush unit enters play `exhausted: false` and can attack on your next turn. Proper SWU Ambush grants an interrupt attack before the turn passes. Full implementation would require holding `activePlayer` after playing the unit and allowing one optional attack. Noted as known gap; unit is still usable (attacks on next turn).
+- **Deployed leader stats data gap** — `LEADER_DEPLOYED_STATS` covers only Ahsoka Tano variants. Other leaders fall back to 3/6. Long-term: update `build_database.py` to fetch deployed stats from the SWU API.
+
+Zero new dependencies. TypeScript: 0 errors.
+
+---
+
+*(2026-05-23 session 29)* **AI heuristic overhaul + event registry expansion. TypeScript: 0 errors.**
+
+- **AI scoring system.** `ai.ts` rewritten from a 5-priority chain to a per-action score system. `scoreAction()` evaluates every legal action and returns the highest scorer. Key correctness fixes: kill-shot detection now uses `computePower(state, attacker, ownerId)` / `effectiveHealth()` instead of raw `card.attack`/`card.health`, so Grit, Coordinate buffs, and Aura buffs are factored in. Trade quality assessment distinguishes favorable (kill, survive), neutral (mutual kill), bad (we die, they live), and chip-only cases with appropriate scores. Base-attack strategy scales by `attackPower / baseHp` ratio and grants a bonus when board advantage is positive. Deploy, leader ability, and event card scoring all improved.
+- **Leader ability scoring.** `LEADER_ABILITY` actions were silently never chosen by the old AI (priority chain had no branch for them). Now scored at 45–55 based on whether a target is required. Targeted abilities (exhaust enemy unit, buff friendly) score higher.
+- **Event card scoring.** Events are now played by the AI. `PLAY_CARD` events scored by text-pattern: defeat events score 55 when enemies exist, damage events by amount×3, draw events 30, buffs 25. `PLAY_ATTACK_EVENT` scored by combat outcome against the chosen defender.
+- **Resource selection.** `useGame.ts` AI resource selection updated to pick the lowest-cost card from hand (preserve high-value plays for deployment) instead of a random card.
+- **Event registry expanded (~30 new entries).** `EVENT_EFFECTS` in `abilities.ts` now covers: draw/tutor events (I Want Proof, I've Found Them, Arms Deal, Do or Do Not, Recruit, Commission, Bounty Posting), damage events (That's a Rock, Grenade Strike, Drain Essence, Contempt for Culture, Air Superiority, Force Choke, Electromagnetic Pulse, Fight Fire With Fire), attack-boost events (Outflank, Attack Run, Barrel Roll, Punch It, Desperate Attack, Corner the Prey, Flash the Vents, One Way Out, Commence the Festivities, Dogfight, I Have You Now, Niman Strike, Rebel Assault, Swoop Down, Breaking In, Improvised Detonation, Heroic Sacrifice, Grim Resolve, Catch Unawares, Tandem Assault, Headhunting), debuffs (Incapacitate, Mystic Reflection), and heals (Smuggler's Aid, Repair). Multi-clause and type-specific events are approximated with their primary effect.
+
+Zero new dependencies. TypeScript: 0 errors. UAT match still in progress — no browser verification yet (user is playing).
+
+---
+
+*(2026-05-23 session 28)* **Coordinate stat display fix, resource pile tracking, resource hover, setup UX improvements. TypeScript: 0 errors.**
+
+- **Coordinate stat display bug fixed.** Echo was showing 2/2 instead of 4/4 with Coordinate active (4 units in play). Root cause: `toPlayCardProps(ci)` reads raw `card.attack`/`card.health` — the display adapter had no access to `GameState`, so Coordinate STAT_BUFF and AURA_BUFF_OTHERS were computed by the engine but never reached the card component. Fix: added two `useMemo` stat maps (`p1UnitEffectiveStats`, `p2UnitEffectiveStats`) in `GameBoard.tsx` where full `GameState` is available. Each calls `computePower(state, ci, ownerId)` and `effectiveHealth(state, ci, ownerId)` per unit, builds a `Map<iid, { power, hp }>`, and passes it down as a new optional prop to `YourMat` and `TopOppMat`. An `applyEffectiveStats()` helper in each mat overrides the raw props before rendering. Clone Commander Cody's AURA_BUFF_OTHERS (+1/+1 to all other friendlies) is confirmed working.
+- **Resource pile tracking added.** `PlayerState` gains `resourcePile: CardInstance[]` — an append-only ordered list tracking which cards were resourced and in what order. Added to `initPlayer` (empty on init) and populated in `applyResourceCard` for both setup and regroup branches (capturing the `CardInstance` before removal from hand). The pile index `i` directly corresponds to resource pip `i` in the UI.
+- **Resource hover implemented.** `ResourceLattice` in `BoardParts.tsx` now looks up `resourcePile?.[i]` for each pip. When a `CardInstance` is found, hover events call `emitHoverCard()` with the card data — the same event bus used by `PlayCard` hover previews. The `CardPreview` overlay then shows the full card face. Pip cursor changes to `help` when hoverable. `toResourceHoverData(ci)` builds the `PlayCardData` shape from a `CardInstance`.
+- **Setup hand card UX improved.** During setup and regroup phases, hand cards now wrap in a hover `<div>` with `onMouseEnter`/`onMouseLeave` that drives a `resourceHoveredIid` state. The hovered card shows an amber `is-selected` glow (same as normal selection) so the player sees exactly which card will be resourced before clicking. Setup cards enlarged from `md` to `lg` (110×154px) so card names are clearly legible. The existing `CardPreview` hover popup also fires on mouse-over during setup/regroup.
+- **Defensive leader/base filter in `deckToPlayerConfig`.** Added `excludedIds` guard to `engine.ts` that checks each `deck.cards` entry against the deck's leader IDs and base ID before expanding. If a leader or base card leaks into the deck card list (possible backend quirk), it is silently skipped with a `console.warn` naming the card. This was added as a diagnostic/safety measure after investigating a reported "wrong card resourced" bug.
+
+Zero new dependencies. Browser UAT needed — user will play a match and report issues.
+
+---
+
 *(2026-05-22 session 27)* **Coordinate keyword Category B — parser-driven effect system. 5 deferred cards unblocked. TypeScript: 0 errors.**
 
 - **Architecture flip.** `getCoordinateAbilities(card)` is now the single entry point for Coordinate effects. Registry-first / parser-fallback contract mirroring the existing event parser. Manual `CARD_ABILITIES` entries are now overrides (kept for safety but no longer the primary path).
@@ -385,17 +453,19 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 
 **Priority order — top item is immediately actionable:**
 
-1. **Play-test the parser** — Run a game with an "Attack with a unit" event (e.g. Improvised Detonation, Breaking In, Shoot First, One Way Out) and verify the two-step attack-event flow works. Verify debuffs (–N/–N cards) apply correctly. Verify Vanquish/Lost and Forgotten defeat instantly. The parser covers ~47 events; confirm the "effect not yet implemented" fallback is rare in practice.
+1. **UAT: Full tabletop simulator match** — User will play a complete game and report what doesn't work. Known areas to exercise: Coordinate ability flows (Kit Fisto, Padmé Pursuing Peace, Reckless Torrent, Clone Commander Cody, Clone Dive Trooper), attack-event two-step (Shoot First / One Way Out / Vanquish), resource hover during gameplay, leader abilities (Chirrut, Admiral Ackbar). After the match, address reported issues before moving to new features.
 
-2. **Expand the event registry for common misses** — After play-testing, query `swu_cards.db` for events still hitting the "not yet implemented" path. Add them to `EVENT_EFFECTS` in `abilities.ts`. Focus on cost-1 and cost-2 events (highest play frequency). Common patterns to check: "Draw 1 card." (not in registry), "Give all friendly units +1/+0 for this phase" (aura buff — not parseable, needs custom implementation).
+2. **Play-test the event parser** — Run a game with an "Attack with a unit" event (e.g. Improvised Detonation, Breaking In, Shoot First, One Way Out) and verify the two-step attack-event flow works. Verify debuffs (–N/–N cards) apply correctly. Verify Vanquish/Lost and Forgotten defeat instantly. The registry now covers ~70 events; confirm the "effect not yet implemented" fallback is rare in practice.
 
-3. ~~**Deferred Coordinate cards now unblocked by targeting system**~~ **✅ DONE (session 27).** Kit Fisto, Padmé Pursuing Peace, Reckless Torrent, Clone Commander Cody, and Clone Dive Trooper all resolved via the new parser-driven Category B effect system. Browser play-test still needed to confirm UI flows.
+3. ~~**Expand the event registry for common misses**~~ **✅ DONE (session 29).** ~30 new entries added: draw/tutor events, damage events, attack-boost events (Outflank, Punch It, Flash the Vents, etc.), debuffs, and heals. Multi-clause and type-specific events approximated with primary effect.
 
-4. **AI improvements** — AI currently plays random legal actions. Basic heuristics would improve gameplay significantly: prefer attacking high-HP/attack threats over base when threatened; prefer playing high-value units early; use events efficiently. Even a 50-line priority scorer would make the game feel challenging.
+4. ~~**Deferred Coordinate cards now unblocked by targeting system**~~ **✅ DONE (session 27).** Kit Fisto, Padmé Pursuing Peace, Reckless Torrent, Clone Commander Cody, and Clone Dive Trooper all resolved via the new parser-driven Category B effect system. Browser play-test still needed to confirm UI flows.
 
-5. **Deploy sessions 18–24 to production** — `./deploy.sh`. Sessions 21–24 are frontend-only (game engine + UI), no schema changes.
-6. **Verify achievements in production** — navigate to Profile → Achievements tab; confirm rank panel shows with lesson content, achievement grid loads; build a deck and refresh to confirm `first_deck`/`rank_k1` earned.
-7. **Consider adding `/decks/share/[token]` discoverability** — no entry point from the public side yet.
+5. ~~**AI improvements**~~ **✅ DONE (session 29).** AI rewritten from a 5-priority chain to a per-action score system. Now uses `computePower`/`effectiveHealth` for accurate kill-shot detection, evaluates trade quality (favorable/neutral/bad), plays events and uses leader abilities, and scores base attacks by proximity to win condition. Resource selection updated to pick lowest-cost card. See CHANGELOG for full details.
+
+6. **Deploy sessions 21–29 to production** — `./deploy.sh`. All game engine sessions are frontend-only, no schema changes. `resourcePile` on `PlayerState` is in-memory only — not persisted — so no migration needed.
+7. **Verify achievements in production** — navigate to Profile → Achievements tab; confirm rank panel shows with lesson content, achievement grid loads; build a deck and refresh to confirm `first_deck`/`rank_k1` earned.
+8. **Consider adding `/decks/share/[token]` discoverability** — no entry point from the public side yet.
 
 ---
 

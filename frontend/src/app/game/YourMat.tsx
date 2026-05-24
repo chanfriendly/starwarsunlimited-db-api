@@ -1,8 +1,19 @@
 'use client';
-import React from 'react';
+import React, { useState } from 'react';
 import type { PlayerState } from '@/lib/game-engine/types';
 import { hasKeyword } from '@/lib/game-engine';
-import { PlayCard, toPlayCardProps, BaseCard, toBaseData, LeaderCard, toLeaderData, InitToken } from './PlayCard';
+import { PlayCard, toPlayCardProps, PlayCardData, BaseCard, toBaseData, LeaderCard, toLeaderData, InitToken } from './PlayCard';
+
+/** Override raw card stats with engine-computed effective values (e.g. Coordinate buffs). */
+function applyEffectiveStats(
+  props: PlayCardData,
+  effectiveStats: Map<string, { power: number; hp: number }> | undefined,
+): PlayCardData {
+  if (!effectiveStats || !props.iid) return props;
+  const stats = effectiveStats.get(props.iid);
+  if (!stats) return props;
+  return { ...props, power: stats.power, hp: stats.hp, maxHp: stats.hp };
+}
 import { ResourceLattice, CardPile } from './BoardParts';
 
 interface YourMatProps {
@@ -20,15 +31,23 @@ interface YourMatProps {
   canPlayAttackEventIids: Set<string>;
   /** iid of hand cards with WHEN_PLAYED_DAMAGE_DUAL Coordinate variants */
   canPlayDualIids: Set<string>;
+  /** iid of upgrade cards in hand that are affordable/playable */
+  canPlayUpgradeIids: Set<string>;
   /** iid of the dual-target unit in mid-play */
   pendingDualPlayIid: string | null;
   /** chosen friendly target after dual step 1 */
   pendingDualFriendlyIid: string | null;
+  /** iid of an upgrade card awaiting a unit target to attach to */
+  pendingUpgradeIid: string | null;
   legalDeployIds: Set<string>;
   /** Leader card ids that have a usable ability this turn */
   legalLeaderAbilityIds: Set<string>;
+  /** Leader card ids with a TRIGGER_ATTACK_WITH ability available this turn */
+  legalLeaderAttackAbilityIds: Set<string>;
   /** Leader card id whose ability is waiting for a target */
   pendingLeaderAbilityId: string | null;
+  /** Leader card id whose attack-type ability is in progress (step 1 or 2) */
+  pendingLeaderAttackAbilityId: string | null;
   /** My unit iids that are valid targets for a pending ability, event, or attack-event attacker */
   abilityTargetIids: Set<string>;
   /** True during the opening setup phase (select up to 2 resources before round 1) */
@@ -36,6 +55,8 @@ interface YourMatProps {
   isResourcePhase: boolean;
   /** True when the player controls 3+ units — Coordinate abilities are active */
   coordinateActive: boolean;
+  /** Engine-computed effective stats (power/hp) per unit iid — reflects Coordinate buffs etc. */
+  unitEffectiveStats?: Map<string, { power: number; hp: number }>;
   onUnitClick: (iid: string) => void;
   onHandCardClick: (iid: string) => void;
   onDeployLeader: (cardId: string) => void;
@@ -47,10 +68,12 @@ interface YourMatProps {
 export function YourMat({
   player, round, hasInitiative, selectedIid, pendingAttackerIid,
   pendingEventIid, pendingAttackEventIid,
-  canPlayIids, canPlayAttackEventIids, canPlayDualIids,
-  pendingDualPlayIid, pendingDualFriendlyIid,
+  canPlayIids, canPlayAttackEventIids, canPlayDualIids, canPlayUpgradeIids,
+  pendingDualPlayIid, pendingDualFriendlyIid, pendingUpgradeIid,
   legalDeployIds, legalLeaderAbilityIds,
-  pendingLeaderAbilityId, abilityTargetIids, isSetupPhase, isResourcePhase, coordinateActive,
+  pendingLeaderAbilityId, pendingLeaderAttackAbilityId, abilityTargetIids, isSetupPhase, isResourcePhase, coordinateActive,
+  unitEffectiveStats,
+  legalLeaderAttackAbilityIds,
   onUnitClick, onHandCardClick, onDeployLeader, onLeaderAbility, onResourceCard, onSkipResource,
 }: YourMatProps) {
   const base = toBaseData(player.base);
@@ -58,6 +81,10 @@ export function YourMat({
   const hasCoordinateUnit = [...player.groundArena, ...player.spaceArena]
     .some(ci => hasKeyword(ci.card, 'Coordinate'));
   const showCoordinateBadge = coordinateActive && hasCoordinateUnit;
+
+  // Tracks which hand card is hovered during setup/regroup resource selection
+  // so we can highlight it before the user commits the click.
+  const [resourceHoveredIid, setResourceHoveredIid] = useState<string | null>(null);
 
   return (
     <div style={{
@@ -90,7 +117,7 @@ export function YourMat({
                 return (
                   <PlayCard
                     key={ci.iid}
-                    card={toPlayCardProps(ci)}
+                    card={applyEffectiveStats(toPlayCardProps(ci), unitEffectiveStats)}
                     size="md"
                     clickable={isClickable}
                     selected={pendingAttackerIid === ci.iid}
@@ -113,8 +140,8 @@ export function YourMat({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {player.leaders.map(li => {
               const canDeploy    = !li.isDeployed && legalDeployIds.has(li.card.id);
-              const canAbility   = !li.isDeployed && legalLeaderAbilityIds.has(li.card.id);
-              const isAbilityPending = pendingLeaderAbilityId === li.card.id;
+              const canAbility   = !li.isDeployed && (legalLeaderAbilityIds.has(li.card.id) || legalLeaderAttackAbilityIds.has(li.card.id));
+              const isAbilityPending = pendingLeaderAbilityId === li.card.id || pendingLeaderAttackAbilityId === li.card.id;
               return (
                 <div key={li.card.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}>
                   <LeaderCard leader={toLeaderData(li)} size="sm" />
@@ -159,7 +186,7 @@ export function YourMat({
                 return (
                   <PlayCard
                     key={ci.iid}
-                    card={toPlayCardProps(ci)}
+                    card={applyEffectiveStats(toPlayCardProps(ci), unitEffectiveStats)}
                     size="md"
                     clickable={isClickable}
                     selected={pendingAttackerIid === ci.iid}
@@ -176,7 +203,7 @@ export function YourMat({
         <span className="zone-label">
           ◆ Resources · {player.resources.available} ready · {player.resources.total} total
         </span>
-        <ResourceLattice total={player.resources.total} available={player.resources.available} />
+        <ResourceLattice total={player.resources.total} available={player.resources.available} resourcePile={player.resourcePile} />
       </div>
 
       {/* ── Deck / Discard / Init (col 3) ────────────────────────── */}
@@ -213,13 +240,19 @@ export function YourMat({
             </div>
             <div className="hand-row">
               {player.hand.map(ci => (
-                <PlayCard
+                <div
                   key={ci.iid}
-                  card={toPlayCardProps(ci)}
-                  size="md"
-                  clickable
-                  onClick={() => onResourceCard(ci.iid)}
-                />
+                  onMouseEnter={() => setResourceHoveredIid(ci.iid)}
+                  onMouseLeave={() => setResourceHoveredIid(null)}
+                >
+                  <PlayCard
+                    card={toPlayCardProps(ci)}
+                    size="lg"
+                    clickable
+                    selected={resourceHoveredIid === ci.iid}
+                    onClick={() => onResourceCard(ci.iid)}
+                  />
+                </div>
               ))}
             </div>
           </>
@@ -243,13 +276,19 @@ export function YourMat({
             </div>
             <div className="hand-row">
               {player.hand.map(ci => (
-                <PlayCard
+                <div
                   key={ci.iid}
-                  card={toPlayCardProps(ci)}
-                  size="md"
-                  clickable
-                  onClick={() => onResourceCard(ci.iid)}
-                />
+                  onMouseEnter={() => setResourceHoveredIid(ci.iid)}
+                  onMouseLeave={() => setResourceHoveredIid(null)}
+                >
+                  <PlayCard
+                    card={toPlayCardProps(ci)}
+                    size="md"
+                    clickable
+                    selected={resourceHoveredIid === ci.iid}
+                    onClick={() => onResourceCard(ci.iid)}
+                  />
+                </div>
               ))}
             </div>
           </>
@@ -258,13 +297,15 @@ export function YourMat({
             <div style={{
               position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)',
               fontFamily: 'var(--font-mono)', fontSize: 9, letterSpacing: '0.24em',
-              color: (pendingEventIid || pendingAttackEventIid || pendingDualPlayIid) ? 'var(--saber-amber)' : 'var(--ink-3)',
+              color: (pendingEventIid || pendingAttackEventIid || pendingDualPlayIid || pendingUpgradeIid) ? 'var(--saber-amber)' : 'var(--ink-3)',
               textTransform: 'uppercase',
               background: 'var(--bg)', padding: '2px 14px',
-              border: `1px solid ${(pendingEventIid || pendingAttackEventIid || pendingDualPlayIid) ? 'var(--saber-amber)' : 'var(--line)'}`,
+              border: `1px solid ${(pendingEventIid || pendingAttackEventIid || pendingDualPlayIid || pendingUpgradeIid) ? 'var(--saber-amber)' : 'var(--line)'}`,
               zIndex: 2, whiteSpace: 'nowrap',
             }}>
-              {pendingDualPlayIid && !pendingDualFriendlyIid
+              {pendingUpgradeIid
+                ? `▸ Select a unit to attach the upgrade — click the card again to cancel`
+                : pendingDualPlayIid && !pendingDualFriendlyIid
                 ? `▸ Select a friendly unit — tap card again to skip the effect`
                 : pendingDualPlayIid && pendingDualFriendlyIid
                 ? `▸ Select an enemy unit — tap card again to re-pick friendly`
@@ -284,17 +325,18 @@ export function YourMat({
             </div>
             <div className="hand-row">
               {player.hand.map(ci => {
-                const isPlayable = canPlayIids.has(ci.iid) || canPlayAttackEventIids.has(ci.iid) || canPlayDualIids.has(ci.iid);
+                const isPlayable = canPlayIids.has(ci.iid) || canPlayAttackEventIids.has(ci.iid) || canPlayDualIids.has(ci.iid) || canPlayUpgradeIids.has(ci.iid);
                 const isEventPending = pendingEventIid === ci.iid;
                 const isAttackEventPending = pendingAttackEventIid === ci.iid;
                 const isDualPending = pendingDualPlayIid === ci.iid;
+                const isUpgradePending = pendingUpgradeIid === ci.iid;
                 return (
                   <PlayCard
                     key={ci.iid}
                     card={toPlayCardProps(ci)}
                     size="md"
                     clickable={isPlayable}
-                    selected={selectedIid === ci.iid || isEventPending || isAttackEventPending || isDualPending}
+                    selected={selectedIid === ci.iid || isEventPending || isAttackEventPending || isDualPending || isUpgradePending}
                     onClick={isPlayable ? () => onHandCardClick(ci.iid) : undefined}
                   />
                 );

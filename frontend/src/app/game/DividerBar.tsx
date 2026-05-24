@@ -9,7 +9,6 @@ interface DividerBarProps {
   activePlayer: PlayerId;
   initiative: PlayerId;
   playerName: string;
-  resources: { available: number; total: number };
   isMyTurn: boolean;
   isAiThinking: boolean;
   isSetupPhase: boolean;
@@ -21,7 +20,7 @@ interface DividerBarProps {
 }
 
 export function DividerBar({
-  round, phase, initiative, playerName, resources,
+  round, phase, initiative, playerName,
   isMyTurn, isAiThinking, isSetupPhase, isResourcePhase, canTakeCounter, onTakeCounter, actionLog, winner,
 }: DividerBarProps) {
   const [logOpen, setLogOpen] = useState(false);
@@ -89,14 +88,13 @@ export function DividerBar({
           )}
         </div>
 
-        {/* Right: resources + log toggle */}
+        {/* Right: last log entry + log toggle */}
         <div className="divider-right">
-          <div className="res-readout">
-            <span className="res-val">{resources.available}</span>
-            <span className="res-of">/</span>
-            <span className="res-val">{resources.total}</span>
-            <span className="res-lbl">res</span>
-          </div>
+          {actionLog.length > 0 && (
+            <div className="last-log-entry" title={actionLog[actionLog.length - 1].message}>
+              {actionLog[actionLog.length - 1].message}
+            </div>
+          )}
           <button className={'div-btn' + (logOpen ? ' is-active' : '')} onClick={() => setLogOpen(o => !o)}>
             LOG
           </button>

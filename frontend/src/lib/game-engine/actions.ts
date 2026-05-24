@@ -24,6 +24,13 @@ export type GameAction =
     }
   | { type: 'DEPLOY_LEADER';     leaderCardId: string }
   | { type: 'LEADER_ABILITY';    leaderCardId: string; targetIid?: string }
+  /**
+   * "Attack with a unit. It gets +N/+N for this attack."
+   * Leader-ability variant of PLAY_ATTACK_EVENT. Exhausts the leader, applies
+   * a temporary stat buff to the chosen attacker, executes the attack, then
+   * removes the buff.
+   */
+  | { type: 'LEADER_ATTACK_ABILITY'; leaderCardId: string; attackerIid: string; defenderIid: string | 'base' }
   | { type: 'USE_ABILITY';       iid: string; abilityIndex: number; targetIid?: string }
   /**
    * "Attack with a unit. It gets +N/+N for this attack."

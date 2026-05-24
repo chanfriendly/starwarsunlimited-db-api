@@ -1,6 +1,7 @@
 'use client';
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import type { GameAction } from '@/lib/game-engine/actions';
+import { computePower, effectiveHealth } from '@/lib/game-engine';
 import type { UseGameResult } from './useGame';
 import { TopOppMat } from './TopOppMat';
 import { DividerBar } from './DividerBar';
@@ -46,10 +47,51 @@ export function GameBoard({
    */
   const [pendingDualPlayIid,      setPendingDualPlayIid]      = useState<string | null>(null);
   const [pendingDualFriendlyIid,  setPendingDualFriendlyIid]  = useState<string | null>(null);
+  /**
+   * iid of an upgrade card in hand that's been selected and is waiting for
+   * the player to click a friendly unit to attach it to.
+   * Two-step: click upgrade card → click any friendly unit → attach.
+   * Click the upgrade card again to cancel.
+   */
+  const [pendingUpgradeIid,       setPendingUpgradeIid]       = useState<string | null>(null);
+  /**
+   * leaderCardId of a leader whose TRIGGER_ATTACK_WITH ability is in progress.
+   * Step 1: leader ABILITY clicked → set this, pick attacker (pendingAttackerIid).
+   * Step 2: attacker picked → pick defender via leaderAttackAbilityTargetIids.
+   * Click ABILITY again to cancel.
+   */
+  const [pendingLeaderAttackAbilityId, setPendingLeaderAttackAbilityId] = useState<string | null>(null);
 
   const p1 = state.players.player1;
   const p2 = state.players.player2;
   const isMyTurn = state.activePlayer === 'player1' && !p1.hasCountered && state.phase === 'action';
+
+  // Pre-compute effective (Coordinate-aware) stats for all arena units so the
+  // display reflects buffs like Echo's +2/+2 without threading GameState deep
+  // into the card-rendering components.
+  const p1UnitEffectiveStats = useMemo(() => {
+    const map = new Map<string, { power: number; hp: number }>();
+    for (const ci of [...p1.groundArena, ...p1.spaceArena]) {
+      map.set(ci.iid, {
+        power: computePower(state, ci, 'player1'),
+        hp:    effectiveHealth(state, ci, 'player1'),
+      });
+    }
+    return map;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+
+  const p2UnitEffectiveStats = useMemo(() => {
+    const map = new Map<string, { power: number; hp: number }>();
+    for (const ci of [...p2.groundArena, ...p2.spaceArena]) {
+      map.set(ci.iid, {
+        power: computePower(state, ci, 'player2'),
+        hp:    effectiveHealth(state, ci, 'player2'),
+      });
+    }
+    return map;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
 
   // Notify parent when game ends
   useEffect(() => {
@@ -196,6 +238,61 @@ export function GameBoard({
     );
   }, [pendingLeaderAbilityId, legalActions]);
 
+  /** Leader card ids with LEADER_ATTACK_ABILITY actions (attack-type leader abilities) */
+  const legalLeaderAttackAbilityIds = useMemo(
+    () => new Set(
+      legalActions
+        .filter(a => a.type === 'LEADER_ATTACK_ABILITY')
+        .map(a => (a as Extract<GameAction, { type: 'LEADER_ATTACK_ABILITY' }>).leaderCardId),
+    ),
+    [legalActions],
+  );
+
+  /**
+   * Step 1: friendly unit iids that can attack for pendingLeaderAttackAbilityId.
+   * Derived from LEADER_ATTACK_ABILITY actions for the selected leader.
+   */
+  const leaderAttackAbilityAttackerIids = useMemo((): Set<string> => {
+    if (!pendingLeaderAttackAbilityId) return new Set();
+    return new Set(
+      legalActions
+        .filter(a =>
+          a.type === 'LEADER_ATTACK_ABILITY' &&
+          (a as Extract<GameAction, { type: 'LEADER_ATTACK_ABILITY' }>).leaderCardId === pendingLeaderAttackAbilityId,
+        )
+        .map(a => (a as Extract<GameAction, { type: 'LEADER_ATTACK_ABILITY' }>).attackerIid),
+    );
+  }, [pendingLeaderAttackAbilityId, legalActions]);
+
+  /**
+   * Step 2: valid defender iids for pending leader attack ability + chosen attacker.
+   * Excludes 'base' (handled by canLeaderAttackAbilityTargetBase).
+   */
+  const leaderAttackAbilityTargetIids = useMemo((): Set<string> => {
+    if (!pendingLeaderAttackAbilityId || !pendingAttackerIid) return new Set();
+    return new Set(
+      legalActions
+        .filter(a =>
+          a.type === 'LEADER_ATTACK_ABILITY' &&
+          (a as Extract<GameAction, { type: 'LEADER_ATTACK_ABILITY' }>).leaderCardId === pendingLeaderAttackAbilityId &&
+          (a as Extract<GameAction, { type: 'LEADER_ATTACK_ABILITY' }>).attackerIid === pendingAttackerIid &&
+          (a as Extract<GameAction, { type: 'LEADER_ATTACK_ABILITY' }>).defenderIid !== 'base',
+        )
+        .map(a => (a as Extract<GameAction, { type: 'LEADER_ATTACK_ABILITY' }>).defenderIid as string),
+    );
+  }, [pendingLeaderAttackAbilityId, pendingAttackerIid, legalActions]);
+
+  const canLeaderAttackAbilityTargetBase = useMemo(() => {
+    if (!pendingLeaderAttackAbilityId || !pendingAttackerIid) return false;
+    return legalActions.some(
+      a =>
+        a.type === 'LEADER_ATTACK_ABILITY' &&
+        (a as Extract<GameAction, { type: 'LEADER_ATTACK_ABILITY' }>).leaderCardId === pendingLeaderAttackAbilityId &&
+        (a as Extract<GameAction, { type: 'LEADER_ATTACK_ABILITY' }>).attackerIid === pendingAttackerIid &&
+        (a as Extract<GameAction, { type: 'LEADER_ATTACK_ABILITY' }>).defenderIid === 'base',
+    );
+  }, [pendingLeaderAttackAbilityId, pendingAttackerIid, legalActions]);
+
   /** Map of event iid → targetIids[] for events that need a target */
   const canPlayEventTargeted = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -211,6 +308,30 @@ export function GameBoard({
     }
     return map;
   }, [legalActions, p1.hand]);
+
+  /** Hand-card iids that are upgrades and are affordable/playable this turn. */
+  const canPlayUpgradeIids = useMemo(
+    () => new Set(
+      p1.hand
+        .filter(ci => ci.card.type?.toLowerCase() === 'upgrade' && canPlayIids.has(ci.iid))
+        .map(ci => ci.iid),
+    ),
+    [p1.hand, canPlayIids],
+  );
+
+  /** Friendly unit iids that are valid attachment targets for the pending upgrade. */
+  const upgradeTargetIids = useMemo((): Set<string> => {
+    if (!pendingUpgradeIid) return new Set();
+    return new Set(
+      legalActions
+        .filter(a =>
+          a.type === 'PLAY_CARD' &&
+          (a as Extract<GameAction, { type: 'PLAY_CARD' }>).iid === pendingUpgradeIid &&
+          (a as Extract<GameAction, { type: 'PLAY_CARD' }>).targetIid !== undefined,
+        )
+        .map(a => (a as Extract<GameAction, { type: 'PLAY_CARD' }>).targetIid as string),
+    );
+  }, [pendingUpgradeIid, legalActions]);
 
   /** Valid target iids for the pending event */
   const eventTargetIids = useMemo((): Set<string> => {
@@ -302,6 +423,10 @@ export function GameBoard({
     if (pendingEventIid) {
       return new Set([...eventTargetIids].filter(id => id !== 'base'));
     }
+    // Leader attack ability step 2: show valid defenders for leader + chosen attacker
+    if (pendingLeaderAttackAbilityId && pendingAttackerIid) {
+      return leaderAttackAbilityTargetIids;
+    }
     // Attack-event step 2: show valid defenders for event + chosen attacker
     if (pendingAttackEventIid && pendingAttackerIid) {
       return attackEventTargetIids;
@@ -316,9 +441,11 @@ export function GameBoard({
     }
     return attackTargetIids;
   }, [
-    pendingLeaderAbilityId, pendingEventIid, pendingAttackEventIid, pendingAttackerIid,
+    pendingLeaderAbilityId, pendingEventIid,
+    pendingLeaderAttackAbilityId, pendingAttackEventIid, pendingAttackerIid,
     pendingDualPlayIid, pendingDualFriendlyIid, coordTargetingPhase,
-    leaderAbilityTargetIids, eventTargetIids, attackEventTargetIids,
+    leaderAbilityTargetIids, eventTargetIids,
+    leaderAttackAbilityTargetIids, attackEventTargetIids,
     attackTargetIids, dualEnemyIids, coordTargetIids, p2,
   ]);
 
@@ -331,6 +458,10 @@ export function GameBoard({
     if (pendingEventIid) {
       return new Set([...eventTargetIids].filter(id => myUnitIids.has(id)));
     }
+    // Leader attack ability step 1: highlight valid attackers
+    if (pendingLeaderAttackAbilityId && !pendingAttackerIid) {
+      return new Set([...leaderAttackAbilityAttackerIids].filter(id => myUnitIids.has(id)));
+    }
     // Attack-event step 1: highlight valid attackers so player knows who can use the event
     if (pendingAttackEventIid && !pendingAttackerIid) {
       return attackEventAttackerIids;
@@ -339,15 +470,23 @@ export function GameBoard({
     if (pendingDualPlayIid && !pendingDualFriendlyIid) {
       return dualFriendlyIids;
     }
+    // Upgrade targeting: highlight valid attachment targets (all friendly units)
+    if (pendingUpgradeIid) {
+      return new Set([...upgradeTargetIids].filter(id => myUnitIids.has(id)));
+    }
     return new Set();
   }, [
-    pendingLeaderAbilityId, pendingEventIid, pendingAttackEventIid, pendingAttackerIid,
-    pendingDualPlayIid, pendingDualFriendlyIid,
-    leaderAbilityTargetIids, eventTargetIids, attackEventAttackerIids, dualFriendlyIids, p1,
+    pendingLeaderAbilityId, pendingEventIid,
+    pendingLeaderAttackAbilityId, pendingAttackEventIid, pendingAttackerIid,
+    pendingDualPlayIid, pendingDualFriendlyIid, pendingUpgradeIid,
+    leaderAbilityTargetIids, eventTargetIids,
+    leaderAttackAbilityAttackerIids, attackEventAttackerIids, dualFriendlyIids,
+    upgradeTargetIids, p1,
   ]);
 
   /** Whether the opponent's base is a valid target right now */
   const effectiveCanTargetBase =
+    pendingLeaderAttackAbilityId && pendingAttackerIid ? canLeaderAttackAbilityTargetBase :
     pendingAttackEventIid && pendingAttackerIid ? canAttackEventTargetBase :
     pendingEventIid ? canEventTargetBase :
     coordTargetingPhase ? false :
@@ -360,15 +499,28 @@ export function GameBoard({
   const clearPending = useCallback(() => {
     setPendingAttackerIid(null);
     setPendingLeaderAbilityId(null);
+    setPendingLeaderAttackAbilityId(null);
     setPendingEventIid(null);
     setPendingAttackEventIid(null);
     setCoordChoiceMade(false);
     setChosenCoordTargetIid(null);
     setPendingDualPlayIid(null);
     setPendingDualFriendlyIid(null);
+    setPendingUpgradeIid(null);
   }, []);
 
   const handleMyUnitClick = useCallback((iid: string) => {
+    // Upgrade targeting: attach upgrade to the clicked friendly unit
+    if (pendingUpgradeIid && upgradeTargetIids.has(iid)) {
+      handleAction({ type: 'PLAY_CARD', iid: pendingUpgradeIid, targetIid: iid });
+      setPendingUpgradeIid(null);
+      return;
+    }
+    // Leader attack ability step 1: select which friendly unit will attack
+    if (pendingLeaderAttackAbilityId && !pendingAttackerIid && leaderAttackAbilityAttackerIids.has(iid)) {
+      setPendingAttackerIid(iid);
+      return;
+    }
     // Attack-event step 1: select which friendly unit will attack
     if (pendingAttackEventIid && !pendingAttackerIid && attackEventAttackerIids.has(iid)) {
       setPendingAttackerIid(iid);
@@ -414,6 +566,8 @@ export function GameBoard({
     setPendingAttackEventIid(null);
     setSelectedIid(null);
   }, [
+    pendingUpgradeIid, upgradeTargetIids,
+    pendingLeaderAttackAbilityId, leaderAttackAbilityAttackerIids,
     pendingAttackEventIid, pendingAttackerIid, attackEventAttackerIids,
     pendingDualPlayIid, pendingDualFriendlyIid, dualFriendlyIids,
     pendingLeaderAbilityId, pendingEventIid, leaderAbilityTargetIids, eventTargetIids,
@@ -422,6 +576,12 @@ export function GameBoard({
   ]);
 
   const handleOppUnitClick = useCallback((iid: string) => {
+    // Leader attack ability step 2: select the defender
+    if (pendingLeaderAttackAbilityId && pendingAttackerIid && leaderAttackAbilityTargetIids.has(iid)) {
+      handleAction({ type: 'LEADER_ATTACK_ABILITY', leaderCardId: pendingLeaderAttackAbilityId, attackerIid: pendingAttackerIid, defenderIid: iid });
+      clearPending();
+      return;
+    }
     // Attack-event step 2: select the defender
     if (pendingAttackEventIid && pendingAttackerIid && attackEventTargetIids.has(iid)) {
       handleAction({ type: 'PLAY_ATTACK_EVENT', iid: pendingAttackEventIid, attackerIid: pendingAttackerIid, defenderIid: iid });
@@ -462,7 +622,8 @@ export function GameBoard({
     setCoordChoiceMade(false);
     setChosenCoordTargetIid(null);
   }, [
-    pendingAttackEventIid, pendingAttackerIid, attackEventTargetIids,
+    pendingLeaderAttackAbilityId, pendingAttackerIid, leaderAttackAbilityTargetIids,
+    pendingAttackEventIid, attackEventTargetIids,
     pendingDualPlayIid, pendingDualFriendlyIid, dualEnemyIids,
     coordTargetingPhase, coordTargetIids,
     pendingLeaderAbilityId, pendingEventIid, leaderAbilityTargetIids, eventTargetIids,
@@ -471,6 +632,12 @@ export function GameBoard({
   ]);
 
   const handleAttackBase = useCallback(() => {
+    // Leader attack ability step 2: the base is the defender
+    if (pendingLeaderAttackAbilityId && pendingAttackerIid && canLeaderAttackAbilityTargetBase) {
+      handleAction({ type: 'LEADER_ATTACK_ABILITY', leaderCardId: pendingLeaderAttackAbilityId, attackerIid: pendingAttackerIid, defenderIid: 'base' });
+      clearPending();
+      return;
+    }
     // Attack-event step 2: the base is the defender
     if (pendingAttackEventIid && pendingAttackerIid && canAttackEventTargetBase) {
       handleAction({ type: 'PLAY_ATTACK_EVENT', iid: pendingAttackEventIid, attackerIid: pendingAttackerIid, defenderIid: 'base' });
@@ -494,6 +661,7 @@ export function GameBoard({
     setCoordChoiceMade(false);
     setChosenCoordTargetIid(null);
   }, [
+    pendingLeaderAttackAbilityId, canLeaderAttackAbilityTargetBase,
     pendingAttackEventIid, pendingAttackerIid, canAttackEventTargetBase,
     pendingEventIid, canEventTargetBase, canAttackBase,
     legalActions, attackMatchesCoord, handleAction, clearPending,
@@ -503,7 +671,27 @@ export function GameBoard({
     const isNormalPlayable    = canPlayIids.has(iid);
     const isAttackEventCard   = canPlayAttackEventIids.has(iid);
     const isDualPlayCard      = canPlayDualIids.has(iid);
-    if (!isMyTurn || (!isNormalPlayable && !isAttackEventCard && !isDualPlayCard)) return;
+    const isUpgradeCard       = canPlayUpgradeIids.has(iid);
+    if (!isMyTurn || (!isNormalPlayable && !isAttackEventCard && !isDualPlayCard && !isUpgradeCard)) return;
+
+    // Cancel upgrade selection if same card tapped again
+    if (pendingUpgradeIid === iid) {
+      setPendingUpgradeIid(null);
+      return;
+    }
+
+    // Upgrade card → enter targeting mode (always needs a unit to attach to)
+    if (isUpgradeCard) {
+      setPendingUpgradeIid(iid);
+      setPendingAttackerIid(null);
+      setPendingLeaderAbilityId(null);
+      setPendingEventIid(null);
+      setPendingAttackEventIid(null);
+      setPendingDualPlayIid(null);
+      setPendingDualFriendlyIid(null);
+      setSelectedIid(null);
+      return;
+    }
 
     // Cancel attack-event if same card tapped again
     if (pendingAttackEventIid === iid) {
@@ -583,10 +771,11 @@ export function GameBoard({
       setPendingAttackEventIid(null);
       setPendingDualPlayIid(null);
       setPendingDualFriendlyIid(null);
+      setPendingUpgradeIid(null);
     }
   }, [
-    isMyTurn, canPlayIids, canPlayAttackEventIids, canPlayDualIids, selectedIid,
-    pendingEventIid, pendingAttackEventIid, pendingDualPlayIid, pendingDualFriendlyIid,
+    isMyTurn, canPlayIids, canPlayAttackEventIids, canPlayDualIids, canPlayUpgradeIids, selectedIid,
+    pendingUpgradeIid, pendingEventIid, pendingAttackEventIid, pendingDualPlayIid, pendingDualFriendlyIid,
     canPlayEventTargeted,
     handleAction, setSelectedIid,
   ]);
@@ -596,12 +785,33 @@ export function GameBoard({
   }, [handleAction]);
 
   const handleLeaderAbility = useCallback((cardId: string) => {
-    // Cancel if same leader clicked again
+    // Cancel if same leader clicked again (either type)
     if (pendingLeaderAbilityId === cardId) {
       setPendingLeaderAbilityId(null);
       return;
     }
-    // Check whether this ability needs a target
+    if (pendingLeaderAttackAbilityId === cardId) {
+      setPendingLeaderAttackAbilityId(null);
+      setPendingAttackerIid(null);
+      return;
+    }
+
+    // Check if this is a TRIGGER_ATTACK_WITH leader ability
+    const isAttackAbility = legalActions.some(
+      a => a.type === 'LEADER_ATTACK_ABILITY' &&
+        (a as Extract<GameAction, { type: 'LEADER_ATTACK_ABILITY' }>).leaderCardId === cardId,
+    );
+    if (isAttackAbility) {
+      setPendingLeaderAttackAbilityId(cardId);
+      setPendingAttackerIid(null);
+      setPendingLeaderAbilityId(null);
+      setPendingEventIid(null);
+      setPendingAttackEventIid(null);
+      setSelectedIid(null);
+      return;
+    }
+
+    // Check whether this standard ability needs a target
     const hasTarget = legalActions.some(
       a =>
         a.type === 'LEADER_ABILITY' &&
@@ -617,7 +827,7 @@ export function GameBoard({
       // No target needed — dispatch immediately
       handleAction({ type: 'LEADER_ABILITY', leaderCardId: cardId });
     }
-  }, [pendingLeaderAbilityId, legalActions, handleAction, setSelectedIid]);
+  }, [pendingLeaderAbilityId, pendingLeaderAttackAbilityId, legalActions, handleAction, setSelectedIid]);
 
   const handleTakeCounter = useCallback(() => {
     handleAction({ type: 'TAKE_COUNTER' });
@@ -650,12 +860,19 @@ export function GameBoard({
         <div className="table-chrome is-tl">
           <a href="/decks" className="chrome-btn">← DECKS</a>
         </div>
-        <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+        <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 16 }}>
           <span style={{
             fontFamily: 'var(--font-mono)', fontSize: 9,
             letterSpacing: '0.28em', color: 'var(--ink-4)', textTransform: 'uppercase',
           }}>
             Twin Suns · 2P
+          </span>
+          <span style={{
+            fontFamily: 'var(--font-mono)', fontSize: 8,
+            letterSpacing: '0.14em', color: 'var(--saber-amber)', textTransform: 'uppercase',
+            border: '1px solid var(--saber-amber)', padding: '1px 7px', borderRadius: 2, opacity: 0.75,
+          }}>
+            ⚠ Simulator β — card effects approximate, some unimplemented
           </span>
         </div>
         <div className="table-chrome is-tr">
@@ -673,6 +890,7 @@ export function GameBoard({
         onUnitClick={handleOppUnitClick}
         onAttackBase={handleAttackBase}
         displayName="AI Opponent"
+        unitEffectiveStats={p2UnitEffectiveStats}
       />
 
       {/* ── Divider bar ───────────────────────────────────────────── */}
@@ -682,7 +900,6 @@ export function GameBoard({
         activePlayer={state.activePlayer}
         initiative={state.initiative}
         playerName={playerName}
-        resources={p1.resources}
         isMyTurn={isMyTurn}
         isAiThinking={isAiThinking}
         isSetupPhase={isSetupPhase}
@@ -705,15 +922,20 @@ export function GameBoard({
         canPlayIids={canPlayIids}
         canPlayAttackEventIids={canPlayAttackEventIids}
         canPlayDualIids={canPlayDualIids}
+        canPlayUpgradeIids={canPlayUpgradeIids}
         pendingDualPlayIid={pendingDualPlayIid}
         pendingDualFriendlyIid={pendingDualFriendlyIid}
+        pendingUpgradeIid={pendingUpgradeIid}
         legalDeployIds={legalDeployIds}
         legalLeaderAbilityIds={legalLeaderAbilityIds}
+        legalLeaderAttackAbilityIds={legalLeaderAttackAbilityIds}
         pendingLeaderAbilityId={pendingLeaderAbilityId}
+        pendingLeaderAttackAbilityId={pendingLeaderAttackAbilityId}
         abilityTargetIids={friendlyTargetIids}
         isSetupPhase={isSetupPhase}
         isResourcePhase={isResourcePhase}
         coordinateActive={playerCoordinateActive}
+        unitEffectiveStats={p1UnitEffectiveStats}
         onUnitClick={handleMyUnitClick}
         onHandCardClick={handleHandCardClick}
         onDeployLeader={handleDeployLeader}

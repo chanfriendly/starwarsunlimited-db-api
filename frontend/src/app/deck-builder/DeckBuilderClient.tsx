@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useDeckBuilder } from '@/contexts/DeckBuilderContext';
-import { Card as CardType, CollectionItem, FetchCardsParams, fetchCards, fetchAspects, fetchSets, fetchTraits, fetchUserCollection } from '@/lib/api';
+import { Card as CardType, CollectionItem, FetchCardsParams, fetchCards, fetchAspects, fetchSets, fetchTraits, fetchKeywords, fetchUserCollection } from '@/lib/api';
 import { debounce } from 'lodash-es';
 import { fetchWithAuth } from '@/lib/fetch-utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -718,7 +718,8 @@ function FilterSidebar({
   filterAspects, setFilterAspects,
   filterTraits, setFilterTraits,
   filterSets, setFilterSets,
-  availableAspects, availableTraits, availableSets,
+  filterKeywords, setFilterKeywords,
+  availableAspects, availableTraits, availableSets, availableKeywords,
   showAllCards, setShowAllCards,
   hideCardsInDeck, setHideCardsInDeck,
   currentStage,
@@ -729,9 +730,12 @@ function FilterSidebar({
   setFilterTraits: React.Dispatch<React.SetStateAction<string[]>>;
   filterSets: string[];
   setFilterSets: React.Dispatch<React.SetStateAction<string[]>>;
+  filterKeywords: string[];
+  setFilterKeywords: React.Dispatch<React.SetStateAction<string[]>>;
   availableAspects: string[];
   availableTraits: string[];
   availableSets: string[];
+  availableKeywords: string[];
   showAllCards: boolean;
   setShowAllCards: React.Dispatch<React.SetStateAction<boolean>>;
   hideCardsInDeck: boolean;
@@ -846,6 +850,42 @@ function FilterSidebar({
         </div>
       )}
 
+      {/* Keywords — Coordinate, Ambush, Saboteur, etc. Multi-select OR (any-of). */}
+      {availableKeywords.length > 0 && (
+        <div style={{ borderBottom: '1px solid var(--ts-line)', padding: '14px 0' }}>
+          <div className="ts-eyebrow" style={{ marginBottom: 10 }}>Keyword</div>
+          <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
+            {availableKeywords.map(k => (
+              <label
+                key={k}
+                style={{
+                  display: 'flex',
+                  gap: 8,
+                  alignItems: 'center',
+                  fontSize: 11,
+                  color: 'var(--ts-ink-2)',
+                  cursor: 'pointer',
+                  fontFamily: 'var(--ts-font-mono)',
+                  letterSpacing: '0.08em',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={filterKeywords.includes(k)}
+                  onChange={e =>
+                    setFilterKeywords(prev =>
+                      e.target.checked ? [...prev, k] : prev.filter(x => x !== k)
+                    )
+                  }
+                  style={{ accentColor: 'var(--ts-amber)' }}
+                />
+                {k}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Smart filters */}
       <div style={{ padding: '14px 0' }}>
         <div className="ts-eyebrow" style={{ marginBottom: 10 }}>Smart Filters</div>
@@ -889,9 +929,9 @@ function FilterSidebar({
       </div>
 
       {/* Clear */}
-      {(filterAspects.length + filterTraits.length + filterSets.length) > 0 && (
+      {(filterAspects.length + filterTraits.length + filterSets.length + filterKeywords.length) > 0 && (
         <button
-          onClick={() => { setFilterAspects([]); setFilterTraits([]); setFilterSets([]); }}
+          onClick={() => { setFilterAspects([]); setFilterTraits([]); setFilterSets([]); setFilterKeywords([]); }}
           style={{
             fontFamily: 'var(--ts-font-mono)',
             fontSize: 9,
@@ -1262,6 +1302,13 @@ export default function DeckBuilderClient() {
 
   const [loadingDeck, setLoadingDeck] = useState(!!deckIdParam);
   const [error, setError] = useState<string | null>(null);
+  // searchInput is the controlled input value (instant); searchQuery is the
+  // debounced value that actually drives API calls. Two states so typing stays
+  // responsive but we don't hit the backend on every keystroke. Both are reset
+  // when currentStage changes — see the reset effect below — so a search from
+  // the leaders stage doesn't leak into the bases query (which would return 0
+  // results since no base contains any leader's name).
+  const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [showAllCards, setShowAllCards] = useState(false);
   const [hideCardsInDeck, setHideCardsInDeck] = useState(true);
@@ -1272,9 +1319,11 @@ export default function DeckBuilderClient() {
   const [filterAspects, setFilterAspects] = useState<string[]>([]);
   const [filterTraits, setFilterTraits] = useState<string[]>([]);
   const [filterSets, setFilterSets] = useState<string[]>([]);
+  const [filterKeywords, setFilterKeywords] = useState<string[]>([]);
   const [availableAspects, setAvailableAspects] = useState<string[]>([]);
   const [availableTraits, setAvailableTraits] = useState<string[]>([]);
   const [availableSets, setAvailableSets] = useState<string[]>([]);
+  const [availableKeywords, setAvailableKeywords] = useState<string[]>([]);
 
   const loadingRef = useRef(false);
   const cardLoadingStageRef = useRef<string | null>(null);
@@ -1307,11 +1356,13 @@ export default function DeckBuilderClient() {
   // Load filter options
   useEffect(() => {
     if (currentStage !== 'cards' || availableAspects.length > 0) return;
-    Promise.all([fetchAspects(), fetchSets(), fetchTraits()])
-      .then(([asp, sets, traits]) => {
+    Promise.all([fetchAspects(), fetchSets(), fetchTraits(), fetchKeywords()])
+      .then(([asp, sets, traits, keywords]) => {
         setAvailableAspects(asp.map((a: any) => a.aspect_name).filter(Boolean));
         setAvailableSets(sets.map((s: any) => s.set_name).filter(Boolean));
         setAvailableTraits(traits.map((t: any) => t.trait).filter(Boolean));
+        // /api/keywords returns a flat string[] (not objects). Sort for stable UI ordering.
+        setAvailableKeywords([...keywords].filter(Boolean).sort());
       })
       .catch(err => console.error('[DeckBuilder] filter options:', err));
   }, [currentStage, availableAspects.length]);
@@ -1358,6 +1409,7 @@ export default function DeckBuilderClient() {
     if (filterAspects.length) baseParams.aspect = filterAspects.join(',');
     if (filterTraits.length) baseParams.trait = filterTraits.join(',');
     if (filterSets.length) baseParams.set = filterSets.join(',');
+    if (filterKeywords.length) baseParams.keyword = filterKeywords.join(',');
 
     try {
       const [units, events, upgrades] = await Promise.all([
@@ -1373,7 +1425,7 @@ export default function DeckBuilderClient() {
     } finally {
       setTabsLoading(false);
     }
-  }, [searchQuery, filterAspects, filterTraits, filterSets]);
+  }, [searchQuery, filterAspects, filterTraits, filterSets, filterKeywords]);
 
   // Load existing deck
   useEffect(() => {
@@ -1416,11 +1468,11 @@ export default function DeckBuilderClient() {
   // Cards stage: reload all types when search or filters change
   useEffect(() => {
     if (isPotentialLoop || currentStage !== 'cards') return;
-    const key = `cards-${searchQuery}-${filterAspects.join(',')}-${filterTraits.join(',')}-${filterSets.join(',')}`;
+    const key = `cards-${searchQuery}-${filterAspects.join(',')}-${filterTraits.join(',')}-${filterSets.join(',')}-${filterKeywords.join(',')}`;
     if (cardLoadingStageRef.current === key) return;
     cardLoadingStageRef.current = key;
     loadAllCardTypes();
-  }, [currentStage, searchQuery, filterAspects, filterTraits, filterSets, loadAllCardTypes, isPotentialLoop]);
+  }, [currentStage, searchQuery, filterAspects, filterTraits, filterSets, filterKeywords, loadAllCardTypes, isPotentialLoop]);
 
   // Load user collection once when entering the cards stage
   useEffect(() => {
@@ -1436,6 +1488,17 @@ export default function DeckBuilderClient() {
     () => debounce((q: string) => setSearchQuery(q), SEARCH_DEBOUNCE_MS),
     []
   );
+
+  // Clear the search box when transitioning between stages. Without this, a
+  // search like "Anakin" entered on the leaders stage carries over to the
+  // bases query and zero-results it (no base name contains any leader name).
+  // `.cancel()` flushes any pending debounced setSearchQuery that would
+  // otherwise re-set the value after we cleared it.
+  useEffect(() => {
+    debouncedSearch.cancel();
+    setSearchInput('');
+    setSearchQuery('');
+  }, [currentStage, debouncedSearch]);
 
   // Client-side filtering for leaders/base stages
   const displayedCards = useMemo(() => {
@@ -1609,7 +1672,11 @@ export default function DeckBuilderClient() {
           <input
             className="ts-input"
             placeholder="Search cards…"
-            onChange={e => debouncedSearch(e.target.value)}
+            value={searchInput}
+            onChange={e => {
+              setSearchInput(e.target.value);
+              debouncedSearch(e.target.value);
+            }}
             style={{ paddingLeft: 32, fontSize: 13 }}
           />
         </div>
@@ -1704,9 +1771,11 @@ export default function DeckBuilderClient() {
             filterAspects={filterAspects} setFilterAspects={setFilterAspects}
             filterTraits={filterTraits} setFilterTraits={setFilterTraits}
             filterSets={filterSets} setFilterSets={setFilterSets}
+            filterKeywords={filterKeywords} setFilterKeywords={setFilterKeywords}
             availableAspects={availableAspects}
             availableTraits={availableTraits}
             availableSets={availableSets}
+            availableKeywords={availableKeywords}
             showAllCards={showAllCards} setShowAllCards={setShowAllCards}
             hideCardsInDeck={hideCardsInDeck} setHideCardsInDeck={setHideCardsInDeck}
             currentStage={currentStage}

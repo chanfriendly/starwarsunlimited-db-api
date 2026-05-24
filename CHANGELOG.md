@@ -4,6 +4,221 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-05-24: Layout fixes — opponent resources repositioned, card preview aspect ratio (session 32)
+
+**Opponent resources row order (`TopOppMat.tsx`)**
+
+Resources zone was at `gridRow: 4` (below arenas, closest to the divider bar), which compressed the arena row and pushed the second leader card out of view. Fixed by swapping rows: resources moved to `gridRow: 3` (between hand and arenas), arenas moved to `gridRow: 4`. `gridTemplateRows` updated from `'auto auto minmax(120px, 1fr) auto'` → `'auto auto auto minmax(120px, 1fr)'` so arenas continue to get all available flexible height. Now mirrors `YourMat`'s layout where resources sit between arenas and hand.
+
+**Card preview aspect ratio (`CardPreview.tsx`)**
+
+`objectFit: 'fill'` stretched images to fill a fixed 240×335 portrait container regardless of the image's native ratio. Base cards are landscape (~140×86), so their hover popouts were severely squished. Fix: removed the fixed `height` from the container and changed the `<img>` to `width: 100%; height: auto`. The container now sizes to the image's natural ratio — portrait cards render at ~240×335, landscape base cards at ~240×148, with no distortion. The fallback (no-image) div retains an explicit `PREVIEW_MAX_H` height. Vertical position clamping uses `PREVIEW_MAX_H = 340` as an estimate (slightly overestimates for base cards, but keeps them on screen).
+
+---
+
+### 2026-05-24: Full leader ability expansion — 47 leaders, attack-type ability machine (session 32)
+
+**ID-keyed leader registry (`abilities.ts`)**
+
+`LEADER_ABILITIES` was keyed by card name (e.g. `'Chirrut Îmwe'`). Multiple leaders share names across sets — Ahsoka Tano has 3 entries (sets 1, 4, 5), Boba Fett has 4, Anakin Skywalker has 3, etc. Name-keying meant only the last entry in the registry was reachable, and the engine `getLegalActions` / `applyLeaderAbility` were both calling `LEADER_ABILITIES[leader.card.name]` which silently returned `undefined` for any leader not in the registry. Fix: registry changed to ID-keyed (card ID is stable per DB build), with a comment noting it. Both lookup sites in `engine.ts` updated.
+
+**New `LEADER_ATTACK_ABILITY` action type (`actions.ts`, `engine.ts`)**
+
+Leaders with "Attack with a unit. It gets +N/+N for this attack." ability text require a distinct action type because they need three arguments (leaderCardId, attackerIid, defenderIid), go through a different state machine in the UI, and cannot be routed through `applyAbilityEffect` (which takes a single targetIid). Added `LEADER_ATTACK_ABILITY` to `GameAction`. Engine function `applyLeaderAttackAbility` mirrors `applyPlayAttackEvent`. LEADER_ATTACK_ABILITY actions reuse `filteredAttacks` so Sentinel and arena rules automatically apply. Dispatcher wired.
+
+**`coordinateRequired?: boolean` on `LeaderAbility`**
+
+Ahsoka Tano "Snips" (set 1, id `13980`) reads "Coordinate — Action [Exhaust]: Attack with a unit. It gets +1/+0." Her ability should only be legal when 3+ friendly units are in play. New flag on `LeaderAbility`; `getLegalActions` checks `isCoordinateActive(state, playerId)` (imported from `keywords.ts`) before generating actions for flagged leaders.
+
+**New `HEAL_UNIT` effect type**
+
+Three leaders (Obi-Wan Kenobi "Patient Mentor", Leia "Get to Your Transports!", Satine Kryze) heal damage from a unit rather than a base. Added `{ type: 'HEAL_UNIT'; amount: number }` to `AbilityEffect`, wired `case 'HEAL_UNIT'` in `applyAbilityEffect` using `mapCardInArenas` + `Math.max(0, c.damage - amount)`.
+
+**UI state machine for leader attack abilities (`GameBoard.tsx`, `YourMat.tsx`)**
+
+New state: `pendingLeaderAttackAbilityId`. New memos: `legalLeaderAttackAbilityIds` (set of leaders with LEADER_ATTACK_ABILITY actions), `leaderAttackAbilityAttackerIids` (step 1: valid attackers), `leaderAttackAbilityTargetIids` (step 2: valid defenders), `canLeaderAttackAbilityTargetBase`. `handleLeaderAbility` detects attack-type by checking legalActions before entering standard or attack mode. `handleMyUnitClick` / `handleOppUnitClick` / `handleAttackBase` all check for `pendingLeaderAttackAbilityId` first. `clearPending` clears all pending states including the new one. `YourMat` shows the ABILITY button for both `LEADER_ABILITY` and `LEADER_ATTACK_ABILITY` leaders; CANCEL state covers both.
+
+**Disclaimer banner (`GameBoard.tsx`)**
+
+Small amber badge in the top chrome rail: "⚠ Simulator β — card effects approximate, some unimplemented". Addresses user request for an explicit under-construction notice. Opacity 0.75 so it's visible but not distracting.
+
+---
+
+### 2026-05-24: Upgrade targeting UI — two-step attach flow (session 31)
+
+**Upgrade targeting state machine (`GameBoard.tsx`, `YourMat.tsx`)**
+
+Upgrades (type = "upgrade") were falling through to arena placement in `applyPlayCard` because `handleHandCardClick` dispatched `{ type: 'PLAY_CARD', iid }` without a `targetIid`. The engine's `type === 'upgrade' && targetIid` path (which attaches the card to a unit) was never reached — the card went to the else branch which placed it as a unit in the arena. Bug: Protector ended up in the ground arena rather than attached to a unit.
+
+Fix: mirrored the existing event/dual-target state machine pattern. New state: `pendingUpgradeIid`. New memos:
+- `canPlayUpgradeIids` — hand cards whose `type === 'upgrade'` and are in `canPlayIids` (affordable, correct phase). Derived from `p1.hand` + `canPlayIids`.
+- `upgradeTargetIids` — friendly unit iids from `PLAY_CARD` actions where `iid === pendingUpgradeIid && targetIid !== undefined`. Engine already generates one action per friendly unit for each affordable upgrade — so this set is exactly the valid attachment targets.
+
+Flow: click upgrade card → `handleHandCardClick` sets `pendingUpgradeIid`, clears all other pending states, sets selectedIid null → `friendlyTargetIids` now returns `upgradeTargetIids` → friendly units highlight as targets → click a friendly unit → `handleMyUnitClick` dispatches `PLAY_CARD { iid: pendingUpgradeIid, targetIid: iid }` → engine attaches upgrade → `setPendingUpgradeIid(null)`. Tap the upgrade card again to cancel.
+
+`YourMat` changes: added `canPlayUpgradeIids` + `pendingUpgradeIid` props; upgrade cards in hand render as clickable and show `selected` glow when pending; hand banner now includes the "▸ Select a unit to attach the upgrade — click the card again to cancel" state.
+
+Chose to NOT add a separate upgrade-targeting ring/highlight (distinct from the existing `target` ring on ability targets) — the `target` ring already signals "click this unit" which is correct for upgrades. No additional CSS needed.
+
+**Ambush timing gap (known, not fixed this session)**
+
+Ambush is implemented by setting the unit's `exhausted: false` when it enters play (`ambushHandler` in `keywords.ts`). The unit is then available to attack on the player's *next* turn. SWU rules grant an *interrupt* attack — the player attacks with the Ambush unit before the opponent gets their next action. Implementing this correctly would require holding `activePlayer` after playing the unit and running a short "you may attack with this unit now" loop before calling `switchActivePlayer`. This is non-trivial and deferred. The current behavior (unit attacks on next turn) is a conservative approximation — the player gets the benefit, just one action-order later.
+
+---
+
+### 2026-05-24: UAT bug fixes — 6 of 7 issues resolved (session 30)
+
+**Root cause: React Strict Mode engine/state desync (`useGame.ts`)**
+
+The single most impactful bug: `engineRef.current = engine` was set *inside* the `useState` lazy initializer. React Strict Mode (development) invokes the initializer twice to detect impure functions — the second invocation created a new `GameEngine` (different random shuffle) and overwrote `engineRef.current`, while `state` stayed from the *first* invocation. The result: every card in the UI had iids from engine1's shuffle, but player actions were dispatched to engine2, so the wrong card was always targeted. This caused:
+- Wrong card resourced during setup (Bug #2)
+- Reckless Torrent in ground arena instead of space (Bug #5A) — iid `i5` in engine1 was a space unit; in engine2 it was a ground unit
+- Coordinate dual-damage effect not triggering (Bug #5B)
+- Sentinel bypass (Bug #6) — attack filter ran against the engine2 board state, not what was displayed
+- Player couldn't deploy leader (Bug #7, deploy portion) — `legalActions` were engine2's, which had different resource counts
+
+Fix: engine and AI are initialized in the render body with a null-check before `useState`. Refs persist across Strict Mode's double-render, so the null-check is idempotent — the engine is only ever created once and both the ref and the state initializer see the same object.
+
+**Draw/resource order (`engine.ts`)**
+
+`resolveRegroup()` was drawing 2 cards for each player after the resource phase completed. SWU rules: draw at the *start* of regroup, then resource. Fix: draw loop moved to `applyTakeCounter` when both players have countered and the game enters regroup. `resolveRegroup` now only readies units, refreshes available resources, and advances the round counter. Players see their newly drawn cards before making the resource selection.
+
+**Deployed leader stats (`engine.ts`)**
+
+`swu_cards.db` stores leader cards with `attack: null, health: null` — the API client (`swu_api_client.py`) explicitly skips attack/health for the "Leader" card type because that data lives on the back/unit side, which the API client doesn't currently fetch. The engine's `effectiveHealth` defaulted null health to 1, giving deployed leaders 0/1 stats (nearly useless). Fix: `LEADER_DEPLOYED_STATS` map added to `engine.ts` keyed by card ID, with known stats for the three Ahsoka Tano variants tested in play. `applyDeployLeader` uses the map when attack/health are null; unknown leaders fall back to 3/6. Long-term fix is a `build_database.py` update to also fetch and store leader unit deployed stats from the SWU API.
+
+**CardPreview redesign (`CardPreview.tsx`)**
+
+Previous design: 260×400 container with a 170px art crop (top half, objectPosition: top) + full text panel (name, subtitle, type, card text, keyword list, stats footer). Issues: (1) cost badge overlaid on the card art covered the printed cost number, (2) aspect pips were colored by CSS variable but the variable didn't always match the actual aspect color, (3) the text panel was less useful than seeing the actual card. New design: full card image at standard SWU aspect ratio (240×335, 63:88 ratio) with no overlays. No cost badge, no separate stat footer — everything visible on the card image itself. Fallback shows name/subtitle/stats when no `image_uri` is available.
+
+**DividerBar — last log entry replaces resource readout (`DividerBar.tsx`, `play.css`)**
+
+Resource counts (`X/Y res`) removed from the divider bar right section. Resources are already shown in the player mat's resource zone. The freed space now shows the most recent action log message in a truncated mono label — useful during AI turns or after complex sequences to see what just happened without opening the log drawer. `resources` prop removed from `DividerBarProps` and the `GameBoard.tsx` call site.
+
+**Data gap — leader deployed stats**
+
+`swu_cards.db` is built by `build_database.py` → `swu_api_client.py`. The client fetches cards from the SWU `card-list` endpoint, filters variants (`variantOf[$null]=true`), and processes by type. For type "Leader", it stores `epic_action`, `deploy_box`, and `energy_cost` — not `attack`/`health`, since those aren't on the leader side. The deployed unit stats are either on a separate API field not currently fetched, or on a separate "Leader Unit" type card that `variantOf[$null]=true` filters out. Until the API client is updated, the `LEADER_DEPLOYED_STATS` map in `engine.ts` is the maintainable interim solution. Entries must be added manually when new leaders are tested.
+
+---
+
+### 2026-05-23: AI heuristic overhaul + event registry expansion (session 29)
+
+**AI scoring system (`ai.ts` rewrite)**
+
+The previous AI used a 5-branch priority chain: always deploy → play highest-cost unit → attack base safely → kill shot → take counter. Several correctness issues:
+1. **Kill-shot detection** used raw `card.attack` instead of `computePower()`, so a Grit unit, Coordinate-buffed unit, or aura-buffed unit (Cody +1/+1) would never be correctly evaluated as a threat or as a kill-shot attacker.
+2. **Leader abilities** had no branch — the AI would never choose `LEADER_ABILITY` actions.
+3. **Events were never played** — the only `PLAY_CARD` path played units only.
+4. **Base attack was excessively conservative** — only attacked base if the attacker had zero damage, regardless of whether a kill was close.
+5. **Trade quality** — unit attacks only attempted kill shots; the AI would never make a neutral trade (both units die) even when their unit was more valuable.
+
+New approach: `scoreAction()` evaluates every legal action and returns the highest scorer. Score ranges:
+- `200` — wins the game (base kill, lethal base attack)
+- `100+` — favorable trade (kill their unit, ours survives; higher for more valuable defenders)
+- `55–80` — deploy, defeat-event, attack-event kill, leader ability
+- `20–55` — play unit (stats-per-cost + keyword bonuses), play non-kill event
+- `5–20` — chip base attack (scales by proximity to lethal)
+- `0` — take counter
+- `-40` — bad trade (we die, they don't)
+
+**Why score-based vs. priority chain:** Priorities are brittle when two actions are in similar tiers (e.g., "should I play a unit or attack base?"). A scoring approach allows fine-grained tuning of each case without touching unrelated branches. It also makes it natural to add new action types (leader ability, PLAY_ATTACK_EVENT) without retrofitting a new priority level.
+
+**Resource selection (`useGame.ts`):** AI now picks the lowest-cost card to resource during regroup (previously random). Rationale: high-cost cards are the ones you most want to play later; low-cost cards (cost 0–1) are often best candidates for the resource zone. This makes the AI's resource curve more consistent and preserves its best plays.
+
+**Event registry expansion (`abilities.ts`)**
+
+Added ~30 new entries to `EVENT_EFFECTS`. The existing parser handles simple single-clause events (anchored regex), but fails on:
+- Multi-clause events (any event with more than one sentence — parser `^...$` anchors break)
+- Type-restricted events ("Vehicle unit", "REBEL unit", "Droid or Vehicle unit", "Force unit") — parser only handles unqualified "unit"
+- Conditional events ("If you control a Force unit…") — parser skips optionality entirely
+
+New registry entries by category:
+
+**Draw/tutor** — `I Want Proof Not Leads` (draw 2, discard 1 → approx DRAW 2), `I've Found Them` (reveal 3, draw unit → DRAW 1), `Arms Deal` (each player draws 2 → DRAW 2), `Do or Do Not` (draw 2 with Force or 1 → DRAW 2), `Recruit` (search top 5 for unit → DRAW 1), `Commission` (search top 10 → DRAW 1), `Bounty Posting` (search for Bounty upgrade → DRAW 1).
+
+**Damage** — `That's a Rock` (1 to unit; second clause breaks parser), `Grenade Strike` (2 + optional 1 more), `Drain Essence` (2 + Force token), `Contempt for Culture` (2 to non-Vehicle), `Air Superiority` (4 to ground, conditional), `Force Choke` (5, conditional cost reduction), `Electromagnetic Pulse` (2 to Droid/Vehicle + exhaust), `Fight Fire With Fire` (3 to a friendly + 3 to an enemy; modeled as 3 to enemy).
+
+**Attack-boost** — 16 entries including Outflank (+0/+0, approximates one of two attacks), Punch It (+2/+0 Vehicle), Desperate Attack (+2/+0 damaged), Flash the Vents (+2/+0 Overwhelm), One Way Out (+1/+0 Overwhelm), Breaking In (+2/+0 Saboteur), Improvised Detonation (+2/+0), and others. Multi-attack events (Outflank, Attack Run, Rebel Assault, Tandem Assault) are approximated as a single `TRIGGER_ATTACK_WITH` — the player gets one boosted attack instead of two unbooosted ones. This is a simplification that keeps the engine from requiring a new "multi-attack" action type.
+
+**Debuffs** — `Incapacitate` (–2/–2), `Mystic Reflection` (–2/–0 base case).
+
+**Heals** — `Smuggler's Aid` (heal base 3; Smuggle text on second line blocks parser), `Repair` (heal 3 from unit or base; "or base" pattern not parseable, approximated as HEAL_BASE).
+
+All approximations are noted inline. Exact behavior of conditional or secondary clauses is ignored in the simulator — the primary effect resolves, which is correct for most board states.
+
+---
+
+### 2026-05-23: Coordinate stat display fix, resource pile tracking, resource hover, setup UX
+
+**Coordinate stat display fix (Echo 2/2 → 4/4)**
+
+The engine correctly computed Coordinate STAT_BUFF and AURA_BUFF_OTHERS bonuses, but they never reached the card display. `toPlayCardProps(ci)` reads `card.attack` / `card.health` directly off the `Card` object — it has no `GameState` access. The display was always showing base stats regardless of active buffs. Same bug applied to Clone Commander Cody's +1/+1 aura to all other friendlies.
+
+Fix: compute effective stats where `GameState` is available (`GameBoard.tsx`) and pass them down to the display layer. Two `useMemo` blocks — one for each player — iterate each player's arena units, call `computePower(state, ci, ownerId)` and `effectiveHealth(state, ci, ownerId)`, and accumulate a `Map<iid, { power, hp }>`. The map is passed as a new optional prop `unitEffectiveStats` to `YourMat` and `TopOppMat`. Each mat has an `applyEffectiveStats()` helper that merges the override into the `PlayCardData` props before rendering. If no override exists for an iid (e.g. a card without Coordinate effects), the raw stats fall through unchanged.
+
+Why this approach instead of threading `GameState` directly: the display components are pure React with no engine dependency. Adding a `GameState` import would couple them tightly to the engine and make testing harder. The precomputed Map is a clean boundary — display layer stays dumb, orchestration layer stays authoritative.
+
+---
+
+**Resource pile tracking and hover**
+
+Previously `PlayerState.resources` was `{ total: number; available: number }` — a count only. Card identity was lost the moment a card was resourced. There was no way for the UI to tell players what any given resource pip contained.
+
+New approach: `resourcePile: CardInstance[]` appended to `PlayerState`. Each call to `applyResourceCard` captures the `CardInstance` before removing it from hand and pushes it into `resourcePile`. The pile is append-only and never shrinks — it's purely additive so pip index `i` always corresponds to `resourcePile[i]`.
+
+`ResourceLattice` in `BoardParts.tsx` now looks up the corresponding `CardInstance` for each pip. When found, `toResourceHoverData(ci)` converts it to a `PlayCardData` shape and wires `onMouseEnter`/`onMouseMove`/`onMouseLeave` events that call `emitHoverCard()`. This reuses the same event bus already used by the `PlayCard` hover preview system — no new plumbing, no new state. The `CardPreview` overlay fires with the full card face on hover.
+
+Why `CardInstance` instead of just `Card`: `CardInstance` carries `iid`, `damage`, and other runtime fields. Storing it also keeps the door open for future display of face-down resource status, damage, etc.
+
+---
+
+**"Wrong card resourced" investigation and defensive guard**
+
+A bug was reported: player selected Luminara as a resource during setup, but the resource log and pile showed Anakin Skywalker. After a full code review, no engine-level bug was found — the iid system is sound (player 1 cards get iids `i0`–`i49`, player 2 gets `i50`–`i99`, no collision possible), `findCard` searches the hand by iid correctly, and there is no async race in the single-threaded reducer.
+
+Most probable explanations: (a) "Anakin Skywalker" the unit card (distinct from the Anakin leader) is in the Coordinate deck — it is confirmed in the `CARD_ABILITIES` registry as a Coordinate card. The setup hand shows `md`-size cards (≈83×116px) where names can be hard to read. The player may have clicked the wrong card. (b) Leader or base card ID leaking into `deck.cards` from the backend deck response would cause the wrong card to appear in hand. The backend `get_user_deck` correctly separates leaders, but this was an unverified assumption.
+
+Three UX fixes to prevent future ambiguity:
+1. **Setup cards enlarged to `lg` (110×154px)** — card names become clearly readable, reducing misclick risk.
+2. **Hover-selection glow** — `resourceHoveredIid` state added to `YourMat`. Hovering a card during setup or regroup applies the amber `is-selected` border, confirming which card will be resourced before the click commits.
+3. **Defensive filter in `deckToPlayerConfig`** — builds `excludedIds` from leader card IDs and base card ID. Any `deck.cards` entry matching an excluded ID is skipped with `console.warn` naming the card. This is a last-resort safety net with a clear diagnostic, not the primary fix — if a leader leaks into deck.cards this would have caught it and logged it.
+
+---
+
+### 2026-05-22: Deck builder — search query leaks across stages
+
+**Symptom.** Switching from leaders to bases (or any stage transition) shows an empty bases list. Backend returns the 59 expected bases; the frontend just doesn't display them.
+
+**Root cause.** The search input at the top of the deck builder was uncontrolled, and `searchQuery` state was never reset between stages. If you typed `"Anakin"` on the leaders stage to find a leader, then clicked Next: Base, the same query was sent as `?type=Base&search=Anakin` to the backend — which legitimately returns 0 results because no base card has any leader's name in its title. The visible input still showed the leftover text but most users wouldn't think to clear it because the search box looks like it belongs to whatever stage they're currently on.
+
+**Fix** (`DeckBuilderClient.tsx`):
+1. Added a controlled local `searchInput` state alongside the existing `searchQuery`. The input now has `value={searchInput}` so its DOM value tracks state, and `onChange` updates both `searchInput` (instant, controlled) and via debounce `searchQuery` (drives the API). Keeps the existing 300ms debounce behavior intact.
+2. Added a `useEffect` keyed on `currentStage` that calls `debouncedSearch.cancel()` (flushes any pending debounced setter that would otherwise re-set after we clear) and resets both `searchInput` and `searchQuery` to `''`. Runs on every stage transition, including the initial mount (where it's a no-op since both are already empty).
+
+**Why this wasn't caught before.** Three-stage deck building has been live for many sessions; the leak only manifests when a user actually types in the search box during one stage and then advances. Casual testing of "click Leader → click Base → click Build Deck" without typing never triggers it.
+
+**TypeScript: 0 errors.** No new dependencies.
+
+---
+
+### 2026-05-22: CSP regression — card images blocked (session 25 fallout)
+
+**Symptom.** Card images stopped loading in the deck builder (and everywhere else card art is shown — the cards browser, profile collection, deck view, game board). Discovered while building a Coordinate deck.
+
+**Root cause.** The CSP `img-src` directive added in session 25 (2026-05-21) listed only `cdn.jsdelivr.net` as an allowed image source. Actual SWU card art is served from `cdn.starwarsunlimited.com` (verified by querying every distinct hostname in `image_uri` and `image_back_uri` in `swu_cards.db` — only one CDN appears, and it's not jsdelivr). The browser silently blocks every card image as a CSP violation. The original comment claimed jsdelivr was the SWU card source, which was wrong — that's an old JimJafar fork mirror that the current build doesn't use.
+
+**Fix.** Added `https://cdn.starwarsunlimited.com` to:
+1. CSP `img-src` in `frontend/next.config.ts`
+2. `images.domains` and `images.remotePatterns` in the same file (so any future `<Image>` usage works without re-tripping over this)
+
+Kept `cdn.jsdelivr.net` in both for safety in case any legacy URL still references the JimJafar mirror, but it's not needed by anything in the current DB. Updated the surrounding comments to name both CDNs explicitly and explain the role of each.
+
+**Why this wasn't caught.** Session 25 didn't include a browser play-test of the card grid — TypeScript was the only check. CSP violations don't surface in `tsc`. Lesson: any change to `next.config.ts` security headers needs a browser smoke test of the cards page before being called done.
+
+**Restart required.** Next.js config changes (including `headers()`) are read at server start, not hot-reloaded. After pulling this fix, `./dev.sh` (or whatever runs `npm run dev`) must be restarted for the new CSP to take effect.
+
+---
+
 ### 2026-05-22: Coordinate keyword — Category B parser + engine, Category C plan
 
 **Goal.** Stop hard-coding every Coordinate card. Switch the primary path to a text parser that maps SWU's natural phrasings to typed effects; the manual `CARD_ABILITIES` registry stays as a fallback/override. Same registry-first / parser-fallback contract already used for events. As the card pool grows, new cards using known phrasings cost zero registry entries.

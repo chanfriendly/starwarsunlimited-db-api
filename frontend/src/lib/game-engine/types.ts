@@ -50,6 +50,13 @@ export interface PlayerState {
   hasResourced: boolean;
   /** During setup phase: how many more resources this player can still place (starts at 2) */
   setupResourcesLeft: number;
+  /**
+   * Ordered list of every card that has been placed face-down into this
+   * player's resource zone. Index 0 = first card resourced. Grows by 1 each
+   * time RESOURCE_CARD is applied; never shrinks. Used for hover-over
+   * identification of individual resource pips in the UI.
+   */
+  resourcePile: CardInstance[];
 }
 
 export interface LogEntry {

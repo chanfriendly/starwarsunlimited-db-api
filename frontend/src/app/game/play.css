@@ -560,17 +560,17 @@
 }
 .div-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-.res-readout {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 4px 10px;
-  border: 1px solid var(--line-2);
-  background: var(--bg);
+.last-log-entry {
+  max-width: 260px;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
 }
-.res-readout .res-val  { color: var(--saber-amber); font-weight: 700; }
-.res-readout .res-of   { color: var(--ink-3); }
-.res-readout .res-lbl  { font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-3); }
 
 .divider-log {
   border-top: 1px solid var(--line);
