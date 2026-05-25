@@ -1,0 +1,13 @@
+{
+  "id": "W1_004",
+  "name": "TIE Pilot",
+  "type": "unit",
+  "cost": 2,
+  "aspects": ["villainy"],
+  "arena": "space",
+  "power": 2,
+  "hp": 2,
+  "traits": ["imperial", "fighter"],
+  "keywords": [],
+  "abilities": []
+}

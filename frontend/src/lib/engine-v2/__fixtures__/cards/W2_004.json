@@ -1,0 +1,12 @@
+{
+  "id": "W2_004",
+  "name": "Medical Frigate",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["heroism"],
+  "arena": "space",
+  "power": 2,
+  "hp": 4,
+  "traits": ["rebel", "capital ship"],
+  "keywords": [{ "name": "restore", "value": 2 }]
+}

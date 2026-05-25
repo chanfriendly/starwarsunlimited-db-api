@@ -1,0 +1,13 @@
+{
+  "id": "W1_005",
+  "name": "Frontline Shocktrooper",
+  "type": "unit",
+  "cost": 4,
+  "aspects": ["aggression"],
+  "arena": "ground",
+  "power": 5,
+  "hp": 3,
+  "traits": ["republic", "clone", "trooper"],
+  "keywords": [],
+  "abilities": []
+}

@@ -1,0 +1,15 @@
+{
+  "id": "W1_010",
+  "name": "Veteran Smuggler",
+  "subtitle": "Outer Rim Mercenary",
+  "type": "unit",
+  "cost": 4,
+  "aspects": ["cunning", "heroism"],
+  "arena": "space",
+  "power": 3,
+  "hp": 5,
+  "traits": ["underworld", "vehicle"],
+  "unique": true,
+  "keywords": [],
+  "abilities": []
+}

@@ -1,0 +1,13 @@
+{
+  "id": "W1_009",
+  "name": "Scout Speeder",
+  "type": "unit",
+  "cost": 1,
+  "aspects": ["cunning"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 1,
+  "traits": ["rebel", "vehicle"],
+  "keywords": [],
+  "abilities": []
+}

@@ -1,0 +1,49 @@
+// Fixture aggregator — imports all Week 1+2 card JSON files so the demo
+// (and any future test) can pass them to buildRegistry() without enumerating
+// each path. Real production loading reads from disk/DB.
+
+import c001 from './cards/W1_001.json';
+import c002 from './cards/W1_002.json';
+import c003 from './cards/W1_003.json';
+import c004 from './cards/W1_004.json';
+import c005 from './cards/W1_005.json';
+import c006 from './cards/W1_006.json';
+import c007 from './cards/W1_007.json';
+import c008 from './cards/W1_008.json';
+import c009 from './cards/W1_009.json';
+import c010 from './cards/W1_010.json';
+import b001 from './cards/B_001.json';
+import b002 from './cards/B_002.json';
+
+import w2c001 from './cards/W2_001.json';
+import w2c002 from './cards/W2_002.json';
+import w2c003 from './cards/W2_003.json';
+import w2c004 from './cards/W2_004.json';
+import w2c005 from './cards/W2_005.json';
+import w2c006 from './cards/W2_006.json';
+import w2c007 from './cards/W2_007.json';
+import w2c008 from './cards/W2_008.json';
+import w2c009 from './cards/W2_009.json';
+import w2c010 from './cards/W2_010.json';
+
+import type { BaseSpec, CardSpec } from '../spec/types';
+
+export const W1_CARDS: CardSpec[] = [
+  c001, c002, c003, c004, c005, c006, c007, c008, c009, c010,
+] as CardSpec[];
+
+export const W1_BASES: BaseSpec[] = [b001, b002] as BaseSpec[];
+
+export const W2_CARDS: CardSpec[] = [
+  w2c001, w2c002, w2c003, w2c004, w2c005, w2c006, w2c007, w2c008, w2c009, w2c010,
+] as CardSpec[];
+
+export const ALL_W12_CARDS: CardSpec[] = [...W1_CARDS, ...W2_CARDS];
+
+import w3c001 from './cards/W3_001.json';
+import w3c002 from './cards/W3_002.json';
+import w3c003 from './cards/W3_003.json';
+
+export const W3_CARDS: CardSpec[] = [w3c001, w3c002, w3c003] as CardSpec[];
+
+export const ALL_CARDS: CardSpec[] = [...W1_CARDS, ...W2_CARDS, ...W3_CARDS];

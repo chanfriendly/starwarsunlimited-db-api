@@ -1,0 +1,29 @@
+{
+  "id": "W2_007",
+  "name": "Sniper Strike Team",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["cunning"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 3,
+  "traits": ["rebel", "trooper"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": {
+        "effect": "damage",
+        "amount": 2,
+        "target": {
+          "zone": "any_arena",
+          "controller": "opponent",
+          "selector": "chosen",
+          "count": 1
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "id": "W2_008",
+  "name": "Clone Sergeant",
+  "type": "unit",
+  "cost": 4,
+  "aspects": ["heroism"],
+  "arena": "ground",
+  "power": 3,
+  "hp": 4,
+  "traits": ["republic", "clone", "trooper"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "constant",
+      "grant": {
+        "target": {
+          "zone": "any_arena",
+          "controller": "self",
+          "filter": { "and": [{ "card_trait": "clone" }, { "not": { "card_trait": "creature" } }] }
+        },
+        "modifier": { "power": 1, "health": 1 }
+      }
+    }
+  ]
+}

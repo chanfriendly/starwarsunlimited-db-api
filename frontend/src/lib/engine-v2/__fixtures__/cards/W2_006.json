@@ -1,0 +1,12 @@
+{
+  "id": "W2_006",
+  "name": "Demolitions Droid",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["cunning"],
+  "arena": "ground",
+  "power": 3,
+  "hp": 2,
+  "traits": ["separatist", "droid"],
+  "keywords": [{ "name": "saboteur" }]
+}

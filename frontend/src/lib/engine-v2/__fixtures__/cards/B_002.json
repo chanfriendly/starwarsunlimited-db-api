@@ -1,0 +1,9 @@
+{
+  "id": "B_002",
+  "name": "Death Star",
+  "type": "base",
+  "hp": 30,
+  "aspects": ["aggression"],
+  "traits": ["location", "imperial"],
+  "abilities": []
+}

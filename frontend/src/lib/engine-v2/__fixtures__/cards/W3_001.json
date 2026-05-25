@@ -1,0 +1,25 @@
+{
+  "id": "W3_001",
+  "name": "Pelta Supply Frigate",
+  "type": "unit",
+  "cost": 6,
+  "aspects": ["heroism"],
+  "arena": "space",
+  "power": 3,
+  "hp": 6,
+  "traits": ["republic", "capital ship"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": {
+        "effect": "create_token",
+        "token_id": "clone_trooper",
+        "controller": "self",
+        "zone": "ground_arena",
+        "count": 1
+      }
+    }
+  ]
+}

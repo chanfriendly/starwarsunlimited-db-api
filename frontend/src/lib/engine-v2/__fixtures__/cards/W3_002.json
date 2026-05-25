@@ -1,0 +1,29 @@
+{
+  "id": "W3_002",
+  "name": "Sanctioner's Shuttle",
+  "type": "unit",
+  "cost": 4,
+  "aspects": ["villainy"],
+  "arena": "ground",
+  "power": 3,
+  "hp": 3,
+  "traits": ["imperial", "vehicle"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": {
+        "effect": "capture",
+        "target": {
+          "zone": "ground_arena",
+          "controller": "opponent",
+          "selector": "chosen",
+          "count": 1,
+          "filter": { "stat_power": { "max": 3 } }
+        },
+        "captor": { "self": true }
+      }
+    }
+  ]
+}

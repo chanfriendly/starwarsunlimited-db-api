@@ -1,0 +1,13 @@
+{
+  "id": "W1_006",
+  "name": "Hardened Sentry",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["vigilance"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 5,
+  "traits": ["separatist", "droid"],
+  "keywords": [],
+  "abilities": []
+}

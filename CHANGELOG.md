@@ -4,6 +4,282 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-05-25: Engine v2 Week 3 — choices, tokens, capture, interactive CLI (session 37)
+
+**Change**
+
+Week 3 lands the pending-choice protocol (synchronous Chooser API), the token system, the capture mechanic, and an interactive CLI driver — the first UAT-able artifact of v2. Scenario suite expanded to 18/18 passing. CLI plays full AI-vs-AI games to completion.
+
+**Design choices made in code**
+
+- **Synchronous Chooser callback over async PendingChoice.** The design doc (§6.1) sketches an async `pendingChoices` field returned from `step()`. For Week 3 the only consumers are (a) a Node CLI with blocking stdin, (b) scenario tests with predetermined picks, (c) an inline AI. All synchronous. The async lift is Week 4 when the web UI is wired to v2 — at that point we replace this sync boundary with a continuation/journal protocol. The Chooser API was designed so the primitives that consume it (`choose_one`, `optional`, scoped selectors with `chosen`) don't change shape during the swap.
+- **Tokens mirror their spec into the card registry on first creation.** Token specs live in a separate `TOKEN_REGISTRY` (because they aren't in player decks), but the rest of the engine — effective stats, predicates, triggers, selectors — looks up `reg.cards[cardId]`. Rather than add a parallel token lookup everywhere, `createToken` does a one-shot `reg.cards[spec.id] = spec` mirror. Token instances carry `isToken: true` so the few places that need the distinction (capture-becomes-set-aside) can branch.
+- **Capture cleans damage and defeats attached upgrades on entering the capture zone** per §v7 8.33.1. Token units that would be captured are set aside instead (§8.33.5).
+- **Rescue selector targets the sourcePlayer's first captive.** The Selector AST doesn't have a capture-zone-aware form yet — cards that need finer rescue targeting will trigger that addition (Greedo: Hated Smuggler, Bounty Hunter Cad Bane, etc.).
+- **Setup-decline tracked via perGameFlags.has('setup_declined').** `hasResourced` gets reset between passes so a player who declined once would be prompted again forever. The flag is set on DECLINE_RESOURCE during setup and cleared when setup transitions to round 1.
+- **Event-type cards resolve their When-Played ability inline, not through the trigger drain.** Events move directly to discard before their ability resolves (§v7 3.3). Going through the drain works but adds an unnecessary scan-and-match step when we already have the spec in hand. The triggered ability is dispatched directly to `applyEffect`.
+- **`getLegalActions` is the public legal-action enumerator** — used by the CLI and intended for any AI. Honors Sentinel constraints by checking Saboteur-or-not on the attacker and either narrowing defenders to Sentinels or including base + all enemies.
+- **Per-card setup of game state in scenario tests** bypasses initGame to construct deterministic positions. Tradeoff acknowledged: init logic isn't exercised by scenarios; it's covered by Week 1's `play-demo`.
+- **CLI Chooser fallback** when no pre-loaded answer is queued: pick leftmost / yes / first-N (same as `defaultChooser`) with a `[auto-choice]` log line. The full pre-fetch / interactive choose-target wiring requires walking the effect AST to find decision points before calling `step()` — small but didn't fit this session. CLI is still useful for vanilla play and observing token/capture mechanics; interactive option-branch picking is the first thing to land in Week 4.
+
+**Scenarios verified (18/18)**
+
+Week 2 holdovers: Grit, Sentinel force-target, Saboteur bypass + shield strip, Shielded onPlay, Ambush enters-ready, Raid, Restore, Overwhelm, triggered When-Played damage, triggered On-Attack draw, constant aura, end_of_phase lasting effect expiry.
+
+Week 3 new: Pelta create_token (Clone Trooper appears in ground arena), Sanctioner capture (target moves from p2 arena to p1's capturedByMe), Take Captive damage branch (scriptedChooser picks 'damage'), Take Captive capture branch (defaultChooser picks leftmost = capture), token unit fights and dies normally (damage + state-based defeat).
+
+**CLI driver verified**
+
+`npm run play-cli -- --ai both` runs a 7-round game with seeded deck construction. Observed mechanics in play:
+- p1 plays Pelta Supply Frigate → Clone Trooper token created in p1's ground arena
+- p2 plays Pelta — same flow, opponent side
+- p1 plays Sanctioner's Shuttle → captures a Demolitions Droid from p2's arena; visible in `captured: Demolitions Droid` line
+- p2 captures a Shield Generator
+- Game terminates correctly with `GAME_ENDED` event when Echo Base hits 0 HP
+- All keyword behaviors (Grit, Raid, Sentinel, Shielded, etc.) from Week 2 still working in mixed-deck play
+
+**Week 2 regression**: scenarios stay at 18/18 (was 13/13 with 5 new). Week 1 `play-demo` still passes.
+
+**Categories vs v1 parity (updated)**
+
+- ✅ Category A
+- ✅ Category B
+- ✅ Tokens (was 🔴 Category C)
+- ✅ Capture (was 🔴)
+- ✅ Pending choice via sync Chooser (was 🔴 — async PendingChoice still pending for web UI)
+- ✅ Events as a card type
+- 🟡 Bounty: AST supports `controlled_by: 'opponent'`; trigger drainer player-ordering still doesn't honor it
+- 🟡 Coordinate, Smuggle: small predicate/scan additions still needed
+- 🔴 Leaders, Upgrades, Indirect damage, Search, Look at, Disclose, The Force, Replacement effects: Week 4 scope
+
+**Files added**
+
+```
+runtime/chooser.ts                  Chooser API, defaultChooser, scriptedChooser
+state/tokens.ts                     TOKEN_REGISTRY (7 tokens hand-coded)
+primitives/tokens.ts                createToken primitive
+primitives/capture.ts               capture / rescue / releaseAllCaptivesFor
+legal.ts                            getLegalActions + describeAction
+scripts/play_cli.ts                 interactive CLI driver
+__fixtures__/cards/W3_001.json      Pelta Supply Frigate (create_token)
+__fixtures__/cards/W3_002.json      Sanctioner's Shuttle (capture)
+__fixtures__/cards/W3_003.json      Take Captive (event + choose_one)
+```
+
+**Files modified**: `spec/ast.ts`, `runtime/predicates.ts`, `runtime/selectors.ts`, `runtime/interpret.ts`, `runtime/triggers.ts`, `reducer.ts`, `index.ts`, `__fixtures__/index.ts`, `scripts/scenarios.ts`, `package.json`.
+
+`tsc --noEmit` clean across the frontend. Both `play-demo` and `scenarios` and `play-cli --ai both` pass.
+
+---
+
+### 2026-05-25: Engine v2 Week 2 — abilities + keywords + triggers (session 36)
+
+**Change**
+
+Week 2 lands Layer 2 of [engine-v2](frontend/src/lib/engine-v2/): the AST, the interpreter, the modifier aggregator, the trigger drain, and 8 v3 keywords (Ambush, Grit, Overwhelm, Raid, Restore, Saboteur, Sentinel, Shielded). With this in place, the engine handles every effect shape from v1's Category A and Category B without needing per-card code — new cards in those categories become pure JSON.
+
+**Design choices made in code**
+
+- **Closed-enum field paths.** `predicates.ts` uses an explicit set of field paths (`card_trait`, `stat_power`, `controller`, etc.). Underscored, not dotted — design doc uses dots for readability; TS implementation uses underscores to avoid bracket-access friction. Validator (Week 4) will accept either form.
+- **Modifier aggregation has three sources.** Constant abilities on in-play cards (re-resolved every read; supports `while` predicates), lasting effects in `state.lastingEffects` (snapshotted iid targets per §v7 7.7.3.D), and keyword `bonusPower` / `bonusHp` hooks (Grit). One `effectivePower` / `effectiveHp` call walks all three.
+- **Effective-vs-printed stats in predicate filters.** `predicates.ts` uses *printed* stats for filtering, not effective. Per the rulebook examples, "deal X damage to a unit with power 3 or less" filters on printed power; using effective would invite cycles (a modifier selecting modifiers that select modifiers).
+- **Trigger drain prefers the active player.** §v7 7.6.10 says the active player chooses who resolves first. Week 2 simplification picks the first pending trigger controlled by the active player, then falls back to insertion order. Player-chooses UI uses the same pending-choice mechanism as choose_one and ships when that protocol lands.
+- **Nested triggers stack at the front of the queue** per §v7 7.6.11 ("each new layer of abilities must be fully resolved before returning to an earlier layer"). Implemented in `drainTriggers` by prepending new triggers to `pendingTriggers`.
+- **Saboteur shield strip is inlined into the reducer's attack flow**, not driven through the keyword `onAttack` hook. The strip needs the defender iid in scope, which the generic onAttack ctx doesn't carry. Restore's base-heal uses the standard hook because it only needs the attacker's owner.
+- **Overwhelm computes excess vs `defenderHpBefore` at attack-time**, before combat damage applies. Per §v7 7.5.7.E, no overwhelm flow if a shield blocked the damage; per 7.5.7.F, the full damage routes to base if the defender left play before combat damage (e.g. via an On Attack ability). Week 2 implements the standard case; the leaves-play corner case lands when we have a card that needs it.
+- **Selector default is ALL matching, not first-1.** A scoped selector with neither `selector` nor `count` reads as "all units matching the filter" — the natural reading for constant-ability grants (`each friendly clone unit gets +1/+1`). Explicit `selector: "chosen"` triggers count-limited slicing. **Bug caught by scenario suite during verification** (Clone Sergeant aura buffed only the leftmost matching unit); fixed at `selectors.ts:resolveSelector`.
+- **`defeat` primitive bumps damage to ≥ HP** instead of inlining the discard move. This routes through the state-based fixpoint, which already emits `DEFEATED` with `lastKnown` snapshot and handles unattached-upgrade cascade. One path for "thing dies" instead of two.
+- **`give` writes a `LastingEffectRec`** with snapshotted target iids — not a re-resolving selector ref. Matches §v7 7.7.3.D.
+- **Lasting-effect expiry sweep** runs at end_of_attack (after `applyAttack`), end_of_phase (action-phase end), end_of_round (regroup end).
+
+**Scenarios verified (13/13)**
+
+`npm run scenarios` runs scenario-style assertions:
+- Grit damage→power scaling
+- Sentinel force-target validation (with attacker-throws-on-illegal-target)
+- Saboteur bypass + shield strip
+- Shielded onPlay shield grant
+- Ambush enters-ready
+- Raid attack bonus
+- Restore base heal on attack
+- Overwhelm excess routing to base
+- Triggered When Played dealing chosen damage
+- Triggered On Attack drawing a card
+- Constant aura buffing matching units
+- Lasting effect expiring at phase end
+
+**Week 1 regression check**: `npm run play-demo` still runs to the same Bob-wins-round-6 outcome.
+
+**Categories vs v1 parity**
+
+- ✅ Category A (STAT_BUFF, KEYWORD grant, ON_ATTACK_DRAW, ON_ATTACK_PREVENT_DAMAGE)
+- ✅ Category B (ON_ATTACK_DEAL_DAMAGE_TARGET, ON_ATTACK_DEBUFF_DEFENDER, ON_ATTACK_DEBUFF_TARGET, WHEN_PLAYED_DAMAGE_DUAL, AURA_BUFF_OTHERS)
+- 🟡 Bounty: `controlled_by: 'opponent'` exists in the AST; trigger drainer needs to honor it when picking resolution player (small)
+- 🟡 Coordinate: needs `player.controls_count` predicate path + `active_in_zone` for resource zone (Smuggle); both one-line additions
+- 🔴 Category C (tokens, capture, search, indirect, force) — Week 3 scope
+
+**Known gaps deliberately deferred to Week 3**
+
+- Choose-one / optional / prompt_target pending-choice protocol (interpreter auto-picks leftmost for `chosen` selectors)
+- Per-phase counter reset on phase start (currently only on round start)
+- Token primitives (create_token, give_experience), the token registry
+- Capture / rescue / release_captives
+- Indirect damage, divided damage
+- Move (arena→arena), search, look at, disclose
+- The Force token system
+- Replacement effects interception layer (the `replace` AST exists; nothing intercepts yet)
+- Leaders, events, upgrades as playable card types
+- 40+ specs (Week 2 added 10; design says Week 2 target was 50 cumulative)
+
+**Files added/modified**
+
+```
+spec/ast.ts                      [new] AST type contract
+state/effects.ts                 [new] LastingEffectRec
+runtime/predicates.ts            [new] card + trigger predicate eval
+runtime/selectors.ts             [new] Selector → ResolvedTarget[]
+runtime/modifiers.ts             [rewrite] multi-source aggregation
+runtime/interpret.ts             [new] Effect AST walker
+runtime/triggers.ts              [new] collect + drain
+primitives/keywords/             [new] 8 keyword files + index + types
+primitives/combat.ts             [unchanged]  (Shield shortcut still in place)
+reducer.ts                       [rewrite] hooks keyword onPlay/onAttack, Sentinel validation, Raid+Overwhelm, trigger drain via settleTriggers, lasting-effect sweep
+spec/types.ts                    [edit] Ability type now imported from ast.ts
+state/types.ts                   [edit] LastingEffect aliased to LastingEffectRec
+__fixtures__/cards/W2_001..010.json   [new] 10 keyword/ability-driven specs
+__fixtures__/index.ts            [edit] adds W2_CARDS, ALL_W12_CARDS
+scripts/scenarios.ts             [new] 13-scenario verification suite
+package.json                     [edit] adds "scenarios" script
+```
+
+`tsc --noEmit` clean across the whole frontend (v1 + v2 + UI).
+
+---
+
+### 2026-05-25: Engine v2 Week 1 implementation (session 35)
+
+**Change**
+
+Greenfield engine v2 lands under [frontend/src/lib/engine-v2/](frontend/src/lib/engine-v2/). 18 new files implement the L1 state model + minimal L2 primitives needed for vanilla 2-player play. v1 at `frontend/src/lib/game-engine/` is untouched and remains the production engine until v2 reaches parity.
+
+**Design choices made in code that weren't in the doc**
+
+- **`util/uuid.ts`**: chose a dependency-free monotonic generator (`g{timestamp36}{counter36}`) over `crypto.randomUUID()` to keep engine portable across Node runtimes without polyfill noise. IDs are opaque strings; cryptographic uniqueness isn't required.
+- **`init.ts` opening hand = 6 cards, mulligan skipped.** §v7 5.2 specifies a mulligan step. Out of Week 1 scope (no UI to support it). Decks are shuffled with a seedable RNG so the demo is reproducible.
+- **Setup resources enter PLAY READY** (`reducer.ts` `applyResourceCard`). v3/v7 don't spell out setup-resource readiness explicitly, but v1's `engine.ts:1140-1162` treats them as available (`{ total, available }` counts equal after setup) and real SWU play has round 1 productive. v2 marks setup resources `exhausted: false`, regroup-phase resources `exhausted: true` (§v7 5.5c).
+- **Shield token absorption is a primitive shortcut in `combat.damageUnit`**, not yet the full replacement-effect path. The proper model (per ENGINE_DESIGN §5.5) is a token upgrade carrying a `replace` modifier; that lands when the modifier layer ships in Week 2. The shortcut is correct for indirect-damage bypass (§v7 8.35.2.A).
+- **`runtime/state_based.ts` defeats units → discard with damage cleared**, per §v7 8.7 leaves-play implication that damage counters are removed when a card leaves play.
+- **`reducer.ts` initiative model:** taking initiative auto-passes the taker for the rest of the round (§v7 6.1.5b). The active-player advance in `advanceToNextTurn` skips any player flagged `hasTakenCounterThisRound`. Both players passing consecutively (`consecutivePasses >= playerOrder.length`) ends the action phase.
+- **No leader/upgrade/event routing** in `applyPlayCard` — throws explicit error for non-unit specs. Forces Week 2 to extend deliberately rather than letting silent fall-through bugs accumulate.
+
+**New tooling**
+
+- `tsx` added as devDep so TS files can run via `node` without a build step.
+- `npm run play-demo` exercises a full game end-to-end (seeded, deterministic).
+- `npm run type-check` runs `tsc --noEmit`.
+
+**Demo verification**
+
+Game converges in 6 rounds with deterministic seeded RNG (seed 42). Round 1 plays cheap units, rounds 2–6 attack into base. Bob wins; Alice's base hits 0 HP; `GAME_ENDED` event fires; state-based loop correctly marks the winner. Action log shows the full turn-by-turn play. `tsc --noEmit` exits clean across the entire frontend (v1 + v2 + UI all compile).
+
+**Known gaps — intentional, per design Week 2+ scope**
+
+- No abilities (all specs are `abilities: []`)
+- No leaders, upgrades, events, or tokens
+- No keyword definitions (Shield is a hard-coded shortcut)
+- No modifier aggregation (effective stats = printed stats)
+- No spec validator, no LLM cascade
+
+**Files added**
+
+```
+frontend/src/lib/engine-v2/
+  index.ts
+  actions.ts
+  reducer.ts
+  init.ts
+  util/uuid.ts
+  state/{types,bus,zones}.ts
+  spec/{types,loader}.ts
+  primitives/{state,move,card_flow,combat,meta}.ts
+  runtime/{modifiers,state_based}.ts
+  scripts/play_demo.ts
+  __fixtures__/index.ts
+  __fixtures__/cards/{W1_001..010,B_001,B_002}.json
+```
+
+`frontend/package.json` — added `tsx` devDep and `play-demo` / `type-check` scripts.
+
+---
+
+### 2026-05-25: Engine v2 design — v7 rules deltas folded in (session 34)
+
+**Change**
+
+v7 PDF dropped locally (CloudFront blocked direct fetch). Full v7 vocabulary now drives [ENGINE_DESIGN.md](ENGINE_DESIGN.md). Net diff captured in the doc's new §16:
+
+- **3 new keywords**: Piloting [Y], Hidden, Plot. Ambush/Shielded trigger windows widened to include "When Deployed" and "When Created".
+- **10 new primitives**: `indirect_damage`, `damage_divided`, `prevent_damage`, `move_arena`, `rescue`, `create_force_token`, `use_force`, `disclose`, `take_counter`, `if_you_do`, `replace`, plus the `force.*` namespace.
+- **Replacement effects** (§v7 7.7.5 Instead/Would) are now first-class in the modifier grammar. Shield token is modeled as a token upgrade carrying a `replace` clause rather than a hard-coded engine behavior — same authoring path as every other card.
+- **Event bus** gained `ARENA_MOVED`, `ATTACK_ENDED`, `RESCUED`, `TOKEN_CREATED`, `FORCE_TOKEN_CREATED`, `FORCE_USED`, `COUNTER_TAKEN`, `CARD_DISCLOSED`, `DAMAGE_PREVENTED`. `DEFEATED` now carries `lastKnown: CardSnapshot` per §v7 8.11.
+- **State model**: `PlayerState` gains `forceToken`, `creditTokens`, `countersHeld`, `hasTakenCounterThisRound`. `PlayerId` widened from `'player1' | 'player2'` to open string to enable 3–4-player Twin Suns (§v7 12) without a state-model refactor.
+
+**Open questions resolved (Christian, 2026-05-25)**
+
+- *Token registry source*: pull from SWU API via script (`tools/authoring/build_token_registry.py`). Matches keyword-sync approach; hands-off.
+- *Leader two-sidedness*: two ability lists per leader spec (`leader_abilities`, `leader_unit_abilities`); third optional list `leader_upgrade_abilities` for the rare §v7 3.4.4A deploy-as-upgrade case (e.g. Hera "We've Lost Enough").
+- *Choice UI*: inline prompt text + highlight valid objects in zones + pass button when effect uses "may". Engine surfaces `pendingChoice` with `kind, prompt, options?, validTargets?, canPass`.
+- *Set-cadence keyword refresh*: automated script (`tools/authoring/sync_keywords.py`) diffs SWU API keyword list against engine enum; new keywords land in `pending_review/` for human approval. Never auto-adds — prevents silent semantic drift.
+
+**New open question**
+
+Twin Suns multiplayer (2–4 players per §v7 12.1) vs 2-player-only v2. State model is already string-keyed `PlayerId` so 3–4-player generalization is mechanical. Recommendation: ship v2 at 2-player parity with v1, generalize in v2.1. Awaiting Christian's call.
+
+**No code in this session.** Awaiting sign-off on ENGINE_DESIGN.md §15 checklist before Week 1 begins.
+
+---
+
+### 2026-05-24: Engine v2 design contract — `ENGINE_DESIGN.md` (session 33)
+
+**Decision**
+
+v1's per-card / per-effect-category registry (`abilities.ts`) has well-understood limits: every novel mechanic requires both engine code AND parser patterns, and the Category C list in `abilities.ts:64-107` is growing. Rather than continue extending the registry, the next iteration moves cards out of code entirely.
+
+The design contract is captured in [ENGINE_DESIGN.md](ENGINE_DESIGN.md). Four layers:
+
+- **L1** Game state + event bus (bounded by the rulebook)
+- **L2** ~40-primitive AST interpreter, namespaced (`card_flow.*`, `combat.*`, `state.*`, `move.*`, `tokens.*`, `resource.*`, `choice.*`, `meta.*`) — grows only when a genuinely novel mechanic appears
+- **L3** Cards as declarative JSON specs (data, not code)
+- **L4** Authoring cascade: deterministic template matcher → local 8B model with GBNF grammar-constrained sampling (Mac mini, Qwen 2.5 7B-Instruct recommended) → Claude (opt-in for hard cases) → human review queue
+
+**Why this synthesis**
+
+- **Datalog-style production rules** for triggers (each triggered ability is `on: event + where: predicate + do: effect`)
+- **Algebraic effects + handlers** for action verbs (adding a primitive does not modify existing ones — the Pelta/Sanctioner's/Ki-Adi-Mundi cards from v1's Category C all collapse to data given three new handlers)
+- **ECS-style modifier layer** for continuous effects (effective stats derived live, generalizing v1's `keywords.ts:computePower` pattern)
+- **Controlled vocabulary** at the schema level so the LLM cannot invent primitives — the GBNF grammar enforces the closed enum at the token level during sampling
+
+**Alternatives considered**
+
+- *Single LLM call per card (Claude only).* Rejected: ongoing token cost, ignores the user's homelab inference goal, no determinism.
+- *Pure deterministic grammar (no LLM).* Rejected: the existing parser already shows the limits of regex templates for novel phrasings; the LLM tier exists precisely for the long tail.
+- *Magic-style stack with priority/interrupts.* Rejected: SWU has no instants; the action protocol is fixed at 5 steps.
+- *Lua transpile for Tabletop Simulator (the Steam app).* Out of scope — the "tabletop sim" in this project is the web app at `frontend/src/app/game/`.
+
+**Constraints honored**
+
+- v1 stays running; v2 lives at `frontend/src/lib/engine-v2/` with a clean boundary (no React imports). Greenfield rewrite. v1 retired only after parity.
+- JSON-only spec format (LLMs produce JSON more reliably than YAML; JSON Schema is the mature validator standard).
+- Local-first inference (homelab goal #4); Claude is opt-in.
+
+**v3-baseline keyword surface**
+
+v7 PDF blocked by CloudFront (403). Structural design is version-stable; only the keyword enum differs. v3 keywords locked: Ambush, Grit, Overwhelm, Raid X, Restore X, Saboteur, Sentinel, Shielded, Bounty (em-dash), Smuggle Y, Coordinate (em-dash), Exploit X. v7 additions extend the enum and add one keyword file each — no architecture change.
+
+**No code in this session.** Awaiting sign-off on ENGINE_DESIGN.md §15 checklist before Week 1 work begins.
+
+---
+
 ### 2026-05-24: Layout fixes — opponent resources repositioned, card preview aspect ratio (session 32)
 
 **Opponent resources row order (`TopOppMat.tsx`)**

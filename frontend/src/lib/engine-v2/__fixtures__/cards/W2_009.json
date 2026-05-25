@@ -1,0 +1,12 @@
+{
+  "id": "W2_009",
+  "name": "Clone Recon Trooper",
+  "type": "unit",
+  "cost": 2,
+  "aspects": ["heroism"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 2,
+  "traits": ["republic", "clone", "trooper"],
+  "keywords": []
+}

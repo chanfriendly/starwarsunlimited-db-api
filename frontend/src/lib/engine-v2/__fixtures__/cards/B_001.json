@@ -1,0 +1,9 @@
+{
+  "id": "B_001",
+  "name": "Echo Base",
+  "type": "base",
+  "hp": 30,
+  "aspects": ["vigilance"],
+  "traits": ["location", "hoth"],
+  "abilities": []
+}

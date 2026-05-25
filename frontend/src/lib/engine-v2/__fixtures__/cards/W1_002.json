@@ -1,0 +1,13 @@
+{
+  "id": "W1_002",
+  "name": "Rookie Pilot",
+  "type": "unit",
+  "cost": 1,
+  "aspects": ["heroism"],
+  "arena": "space",
+  "power": 1,
+  "hp": 2,
+  "traits": ["rebel", "fighter"],
+  "keywords": [],
+  "abilities": []
+}

@@ -1,0 +1,13 @@
+{
+  "id": "W1_003",
+  "name": "Death Star Stormtrooper",
+  "type": "unit",
+  "cost": 2,
+  "aspects": ["villainy"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 2,
+  "traits": ["imperial", "trooper"],
+  "keywords": [],
+  "abilities": []
+}

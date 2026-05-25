@@ -1,0 +1,13 @@
+{
+  "id": "W1_008",
+  "name": "Star Destroyer",
+  "type": "unit",
+  "cost": 7,
+  "aspects": ["villainy", "command"],
+  "arena": "space",
+  "power": 7,
+  "hp": 7,
+  "traits": ["imperial", "capital ship"],
+  "keywords": [],
+  "abilities": []
+}

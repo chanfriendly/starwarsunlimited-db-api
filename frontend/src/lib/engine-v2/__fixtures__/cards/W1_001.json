@@ -1,0 +1,13 @@
+{
+  "id": "W1_001",
+  "name": "Battlefield Marine",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["heroism"],
+  "arena": "ground",
+  "power": 3,
+  "hp": 3,
+  "traits": ["rebel", "trooper"],
+  "keywords": [],
+  "abilities": []
+}

@@ -33,10 +33,16 @@ DB_DIR=$(pwd)/databases python backend/scripts/backup_db.py
 cd backend && python -m pytest tests/
 
 # Type check frontend
-cd frontend && npx tsc --noEmit
+cd frontend && npx tsc --noEmit            # or: npm run type-check
 
 # Lint frontend
 cd frontend && npm run lint
+
+# engine-v2 (Twin Suns rules engine v2, lives at frontend/src/lib/engine-v2/)
+cd frontend && npm run scenarios           # 18-test verification suite
+cd frontend && npm run play-demo           # headless Week-1 2-player loop
+cd frontend && npm run play-cli            # interactive terminal driver (UAT)
+cd frontend && npm run play-cli -- --ai both    # AI-vs-AI watch mode
 ```
 
 **URLs (dev):**
@@ -68,10 +74,12 @@ cd frontend && npm run lint
 ```
 Browser
   └─ Next.js Frontend (:4000 / :3000 internal)
-       ├─ App Router pages: /cards, /deck-builder, /decks/[id], /profile, /login, /signup
+       ├─ App Router pages: /cards, /deck-builder, /decks/[id], /profile, /login, /signup, /game
        ├─ src/app/api/** — server-side route handlers that PROXY to backend
        ├─ src/components/ — UI components (Radix UI + Tailwind)
        ├─ src/contexts/ — AuthContext (JWT token), DeckBuilderContext (deck state)
+       ├─ src/lib/game-engine/ — Twin Suns RULES ENGINE v1 (powers /game UI today)
+       ├─ src/lib/engine-v2/   — Twin Suns RULES ENGINE v2 (in progress; see ENGINE_DESIGN.md)
        └─ src/lib/ — client-side API wrappers + fetch utilities [MUST EXIST — see Critical Rules]
             ├─ api.ts — typed fetch functions for all endpoints
             ├─ fetch-utils.ts — fetchWithAuth helper using localStorage token
@@ -121,6 +129,8 @@ Production:
 
 **Don't add AI features yet.** `requirements-ml.txt` lists the ML deps (`qdrant-client`, `sentence-transformers`, `torch`) but they are not wired into the app. Don't implement vector search or AI features without a clear spec — the dependency weight is significant.
 
+**Two rules engines coexist. Don't mix them.** `frontend/src/lib/game-engine/` is v1 (the production engine powering `/game`). `frontend/src/lib/engine-v2/` is the greenfield rewrite per [ENGINE_DESIGN.md](ENGINE_DESIGN.md) — declarative JSON card specs walked by a ~50-primitive AST interpreter, target of zero-code-per-set sustainability. v2 has a clean boundary (no React imports) and currently powers a headless CLI driver (`npm run play-cli`) for UAT before the eventual UI rewire. Check `PROGRESS.md` for what week v2 is in before extending it.
+
 **Environment files are configuration, not secrets storage.** `.env.prod` currently contains the live JWT secret — this is a known security issue logged in PROGRESS.md. Never add new secrets to committed files.
 
 ---
@@ -146,3 +156,4 @@ Production:
 - **Never bypass TypeScript errors with `// @ts-ignore` or `as any` without a comment explaining why.** The lib/ module is already fragile — type safety is the primary correctness check.
 - **Don't add new npm packages or Python packages without updating both `package.json`/`requirements.txt` and documenting in CHANGELOG.md.** The backend already has heavyweight ML deps (torch, sentence-transformers) that slow Docker builds significantly.
 - **The dev and prod Docker networks are different** (`twinsuns_network` vs `twinsuns`). Don't mix compose files across environments.
+- **Don't refactor `frontend/src/lib/game-engine/` (v1) while v2 is in progress.** v1 powers the production `/game` UI; v2 lives separately at `frontend/src/lib/engine-v2/` and is the active development target. Bugfixes to v1's observed behavior are fine; speculative refactors aren't — v1 gets retired when v2 reaches parity per [ENGINE_DESIGN.md §9](ENGINE_DESIGN.md).

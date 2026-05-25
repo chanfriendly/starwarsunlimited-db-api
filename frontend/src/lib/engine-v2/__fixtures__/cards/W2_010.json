@@ -1,0 +1,24 @@
+{
+  "id": "W2_010",
+  "name": "Field Commander",
+  "type": "unit",
+  "cost": 4,
+  "aspects": ["command"],
+  "arena": "ground",
+  "power": 3,
+  "hp": 3,
+  "traits": ["rebel", "trooper"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.attack_declared",
+      "where": { "attacker": "self" },
+      "do": {
+        "effect": "draw",
+        "player": "self",
+        "count": 1
+      }
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "id": "W3_003",
+  "name": "Take Captive",
+  "type": "event",
+  "cost": 2,
+  "aspects": ["villainy"],
+  "traits": ["gambit"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": {
+        "effect": "choose_one",
+        "prompt": "Choose one",
+        "options": [
+          {
+            "label": "Capture a 3-or-less power enemy unit",
+            "value": "capture",
+            "do": {
+              "effect": "capture",
+              "target": {
+                "zone": "any_arena",
+                "controller": "opponent",
+                "selector": "chosen",
+                "count": 1,
+                "filter": { "stat_power": { "max": 3 } }
+              },
+              "captor": {
+                "zone": "any_arena",
+                "controller": "self",
+                "selector": "chosen",
+                "count": 1
+              }
+            }
+          },
+          {
+            "label": "Deal 2 damage to an enemy unit",
+            "value": "damage",
+            "do": {
+              "effect": "damage",
+              "amount": 2,
+              "target": {
+                "zone": "any_arena",
+                "controller": "opponent",
+                "selector": "chosen",
+                "count": 1
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "id": "W2_002",
+  "name": "Rebel Pathfinder",
+  "type": "unit",
+  "cost": 2,
+  "aspects": ["heroism"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 1,
+  "traits": ["rebel", "trooper"],
+  "keywords": [{ "name": "raid", "value": 1 }, { "name": "ambush" }]
+}

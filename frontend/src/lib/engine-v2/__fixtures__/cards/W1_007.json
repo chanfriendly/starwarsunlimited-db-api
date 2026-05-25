@@ -1,0 +1,13 @@
+{
+  "id": "W1_007",
+  "name": "Heavy Bomber",
+  "type": "unit",
+  "cost": 5,
+  "aspects": ["aggression"],
+  "arena": "space",
+  "power": 4,
+  "hp": 4,
+  "traits": ["rebel", "bomber"],
+  "keywords": [],
+  "abilities": []
+}

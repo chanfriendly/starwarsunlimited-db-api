@@ -1,0 +1,12 @@
+{
+  "id": "W2_005",
+  "name": "Battering Tank",
+  "type": "unit",
+  "cost": 5,
+  "aspects": ["aggression"],
+  "arena": "ground",
+  "power": 6,
+  "hp": 4,
+  "traits": ["imperial", "vehicle"],
+  "keywords": [{ "name": "overwhelm" }]
+}

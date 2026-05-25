@@ -1,0 +1,12 @@
+{
+  "id": "W2_003",
+  "name": "Shield Generator",
+  "type": "unit",
+  "cost": 2,
+  "aspects": ["vigilance"],
+  "arena": "ground",
+  "power": 1,
+  "hp": 3,
+  "traits": ["rebel", "vehicle"],
+  "keywords": [{ "name": "shielded" }, { "name": "sentinel" }]
+}
