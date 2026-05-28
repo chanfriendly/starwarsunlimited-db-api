@@ -1,0 +1,24 @@
+{
+  "id": "W6_001",
+  "name": "Tactical Maneuver",
+  "type": "event",
+  "cost": 1,
+  "aspects": ["command"],
+  "traits": ["plan"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "do": {
+        "effect": "move",
+        "target": {
+          "zone": "any_arena",
+          "controller": "self",
+          "selector": "chosen",
+          "count": 1
+        },
+        "to": "other_arena"
+      }
+    }
+  ]
+}

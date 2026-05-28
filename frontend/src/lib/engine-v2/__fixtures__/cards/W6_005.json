@@ -1,0 +1,21 @@
+{
+  "id": "W6_005",
+  "name": "Tactical Brief",
+  "type": "event",
+  "cost": 2,
+  "aspects": ["heroism", "command"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "do": {
+        "effect": "search",
+        "player": "self",
+        "count": 3,
+        "filter": { "card_trait": "republic" },
+        "to": "hand",
+        "reveal": true
+      }
+    }
+  ]
+}

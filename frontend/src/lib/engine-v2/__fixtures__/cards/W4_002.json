@@ -1,0 +1,10 @@
+{
+  "id": "W4_002",
+  "name": "Battle Plates",
+  "type": "upgrade",
+  "cost": 2,
+  "aspects": ["vigilance"],
+  "powerModifier": 2,
+  "hpModifier": 2,
+  "traits": ["modification"]
+}

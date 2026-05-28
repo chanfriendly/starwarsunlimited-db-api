@@ -1,0 +1,25 @@
+{
+  "id": "W5_003",
+  "name": "Clone Strategist",
+  "type": "leader",
+  "cost": 6,
+  "aspects": ["heroism", "vigilance"],
+  "arena": "ground",
+  "power": 5,
+  "hp": 6,
+  "traits": ["republic", "clone", "officer"],
+  "leaderAbilities": [
+    {
+      "type": "constant",
+      "grant": {
+        "target": {
+          "zone": "any_arena",
+          "controller": "self",
+          "filter": { "card_trait": "clone" }
+        },
+        "modifier": { "power": 1 }
+      }
+    }
+  ],
+  "leaderUnitAbilities": []
+}

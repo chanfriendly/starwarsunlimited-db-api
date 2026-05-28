@@ -1,0 +1,22 @@
+{
+  "id": "W6_006",
+  "name": "Lightning Storm",
+  "type": "event",
+  "cost": 3,
+  "aspects": ["aggression"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "do": {
+        "effect": "divided_damage",
+        "amount": 4,
+        "indirect": true,
+        "pool": {
+          "zone": "any_arena",
+          "controller": "opponent"
+        }
+      }
+    }
+  ]
+}

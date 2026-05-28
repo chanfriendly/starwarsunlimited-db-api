@@ -27,11 +27,15 @@ export function readyAll(state: GameState, playerId: string): { state: GameState
     return { ...c, exhausted: false };
   });
 
+  // Leaders also ready during regroup so their action abilities reset each round.
+  const newLeaders = p.leaders.map(l => l.exhausted ? { ...l, exhausted: false } : l);
+
   const newP = {
     ...p,
     groundArena: readyArr(p.groundArena),
     spaceArena: readyArr(p.spaceArena),
     resources: readyArr(p.resources),
+    leaders: newLeaders,
   };
   return {
     state: { ...state, players: { ...state.players, [playerId]: newP } },

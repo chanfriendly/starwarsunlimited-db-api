@@ -51,8 +51,21 @@ export function resolveSelector(ctx: EvalCtx, sel: Selector): ResolvedTarget[] {
     return collectArena(ctx, [ctx.sourcePlayer], ARENA_ZONES, sel.filter);
   }
   if ('attached_to_self' in sel && sel.attached_to_self) {
-    // Upgrade abilities target their host. Not exercised by Week 2 demo;
-    // returns empty until upgrades ship.
+    // Upgrade abilities target their host. The "self" of an upgrade is the
+    // upgrade itself; the host is the unit whose `upgrades[]` contains it.
+    if (!ctx.sourceIid) return [];
+    for (const pid of ctx.state.playerOrder) {
+      const ps = ctx.state.players[pid];
+      if (!ps) continue;
+      for (const z of ARENA_ZONES) {
+        const arr = ps[z === 'ground_arena' ? 'groundArena' : 'spaceArena'];
+        for (const host of arr) {
+          if (host.upgrades.some(u => u.iid === ctx.sourceIid)) {
+            return [{ kind: 'unit', iid: host.iid, controller: pid }];
+          }
+        }
+      }
+    }
     return [];
   }
   if ('exclude' in sel && sel.exclude) {

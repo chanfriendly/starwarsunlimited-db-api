@@ -1,0 +1,19 @@
+{
+  "id": "W6_003",
+  "name": "Reconnaissance",
+  "type": "event",
+  "cost": 1,
+  "aspects": ["cunning"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "do": {
+        "effect": "look_at",
+        "player": "opponent",
+        "source": "deck_top",
+        "count": 3
+      }
+    }
+  ]
+}

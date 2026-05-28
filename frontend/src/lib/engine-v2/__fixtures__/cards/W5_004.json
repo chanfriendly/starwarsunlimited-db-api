@@ -1,0 +1,24 @@
+{
+  "id": "W5_004",
+  "name": "Mother Talzin (Whispering Witch)",
+  "type": "leader",
+  "cost": 5,
+  "aspects": ["villainy", "cunning"],
+  "arena": "ground",
+  "power": 3,
+  "hp": 6,
+  "traits": ["nightsister", "force"],
+  "leaderAbilities": [
+    {
+      "type": "triggered",
+      "on": "event.defeated",
+      "where": { "controller": "self" },
+      "do": {
+        "effect": "draw",
+        "player": "self",
+        "count": 1
+      }
+    }
+  ],
+  "leaderUnitAbilities": []
+}

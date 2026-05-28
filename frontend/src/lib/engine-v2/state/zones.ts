@@ -57,6 +57,39 @@ export function findCard(state: GameState, iid: string): { inst: CardInstance; l
   return undefined;
 }
 
+/** Locate an upgrade by iid: returns the host unit + index within its upgrades array. */
+export interface UpgradeLocation { hostIid: string; controller: PlayerId; zone: Zone; index: number }
+
+export function findUpgrade(state: GameState, iid: string): { inst: CardInstance; loc: UpgradeLocation } | undefined {
+  for (const pid of state.playerOrder) {
+    const p = state.players[pid];
+    for (const z of ['ground_arena', 'space_arena'] as Zone[]) {
+      const arr = getZoneArr(p, z);
+      for (const host of arr) {
+        const idx = host.upgrades.findIndex(u => u.iid === iid);
+        if (idx >= 0) return { inst: host.upgrades[idx], loc: { hostIid: host.iid, controller: pid, zone: z, index: idx } };
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Find the host unit of an upgrade, by upgrade iid. */
+export function findHostOfUpgrade(state: GameState, upgradeIid: string): { inst: CardInstance; controller: PlayerId; zone: Zone } | undefined {
+  for (const pid of state.playerOrder) {
+    const p = state.players[pid];
+    for (const z of ['ground_arena', 'space_arena'] as Zone[]) {
+      const arr = getZoneArr(p, z);
+      for (const host of arr) {
+        if (host.upgrades.some(u => u.iid === upgradeIid)) {
+          return { inst: host, controller: pid, zone: z };
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
 export function withPlayer(state: GameState, pid: PlayerId, p: PlayerState): GameState {
   return { ...state, players: { ...state.players, [pid]: p } };
 }

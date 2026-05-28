@@ -39,6 +39,10 @@ export interface PredicateLeaf {
   self_exhausted?: boolean;
   self_upgraded?: boolean;
   player_has_force_token?: boolean;
+  /** Count of units the *controller of the card under evaluation* has in any arena.
+   *  Used by Coordinate ("if you control 3 or more units…") via a constant
+   *  ability's `while:` clause. Counts both arenas combined. */
+  controller_unit_count?: Range;
 }
 
 export interface PredicateAnd { and: Predicate[] }
@@ -120,6 +124,9 @@ export interface DamageEffect {
   target: Selector;
   combat?: boolean;
   unpreventable?: boolean;
+  /** Indirect damage has no specific source per §v7 8.35; it bypasses shields
+   *  and is non-combat. Used by AOE / distributed damage abilities. */
+  indirect?: boolean;
 }
 
 export interface HealEffect {
@@ -219,6 +226,59 @@ export interface RescueEffect {
   target: Selector;
 }
 
+/** Move a unit between arenas. `to: 'other_arena'` swaps to the opposite arena
+ *  of its current one (Plot units, etc.). Non-arena targets are skipped. */
+export interface MoveEffect {
+  effect: 'move';
+  target: Selector;
+  to: 'ground_arena' | 'space_arena' | 'other_arena';
+}
+
+/** Peek at a hidden zone without changing state. The runtime emits a
+ *  CARD_REVEALED event per peeked card so the chooser/UI can display them. */
+export interface LookAtEffect {
+  effect: 'look_at';
+  player: PlayerRef;       // whose zone is being peeked
+  source: 'deck_top' | 'opponent_hand';
+  count?: number;          // for deck_top; ignored for opponent_hand
+}
+
+/** Disclose: reveal a card from your hand matching a filter, optionally
+ *  conferring a benefit (the do-block belongs in the calling sequence). The
+ *  primitive itself emits CARD_DISCLOSED with the disclosed card's aspects so
+ *  downstream code can branch on them. Per §v7 7.4 Disclose keyword. */
+export interface DiscloseEffect {
+  effect: 'disclose';
+  player: PlayerRef;
+  filter?: Predicate;
+  count?: number;
+}
+
+/** Search the top N of a deck for a card matching `filter`, move it to `to`,
+ *  return the rest to the deck (in order — true shuffling isn't deterministic
+ *  here yet). The chooser picks among matches. */
+export interface SearchEffect {
+  effect: 'search';
+  player: PlayerRef;
+  count: number;
+  filter?: Predicate;
+  to: 'hand' | 'discard';
+  reveal?: boolean;        // default true: emit CARD_REVEALED for the chosen card
+}
+
+/** Divided damage: distribute `amount` damage among any number of candidates in
+ *  `pool`. The chooser is consulted once per point — each prompt is a
+ *  choose_one over the surviving pool. Default behavior (no scripted choices)
+ *  is deterministic: every point lands on the leftmost remaining candidate.
+ *  Defaults to indirect — per §v7 8.35.1, divided damage from an ability is
+ *  non-combat and shieldless unless the source explicitly says otherwise. */
+export interface DividedDamageEffect {
+  effect: 'divided_damage';
+  amount: number;
+  pool: Selector;
+  indirect?: boolean;      // default true
+}
+
 export type Effect =
   | DamageEffect
   | HealEffect
@@ -236,7 +296,12 @@ export type Effect =
   | OptionalEffect
   | CreateTokenEffect
   | CaptureEffect
-  | RescueEffect;
+  | RescueEffect
+  | MoveEffect
+  | LookAtEffect
+  | DiscloseEffect
+  | SearchEffect
+  | DividedDamageEffect;
 
 // ---------------------------------------------------------------------------
 // Abilities
@@ -279,6 +344,11 @@ export interface TriggerPredicate {
   card_type?: string;
   card_aspect?: AspectIcon;
   combat?: boolean;
+  /** For base-damage events: the controller of the base being damaged. Used
+   *  by `damage_base` replacements that guard the source's own base
+   *  (`where: { base_controller: 'self' }`) or the opponent's base
+   *  (`base_controller: 'opponent'`). */
+  base_controller?: PlayerRef;
   // composition
   and?: TriggerPredicate[];
   or?: TriggerPredicate[];
@@ -313,15 +383,38 @@ export interface ConstantAbility {
   };
 }
 
-export type Ability = TriggeredAbility | ActionAbility | ConstantAbility;
+// Replacement ability — intercepts a would-be event and substitutes a
+// different effect (per §v7 7.7.5). Supported event kinds:
+//   - 'damage_unit': fires before any damage-to-unit application (combat or
+//     non-combat). The replacement's `with` runs INSTEAD; damage doesn't land.
+//   - 'damage_base': fires before damage applies to a base (combat or
+//     non-combat). Typical match: `where: { base_controller: 'self' }` to
+//     guard your own base. `with` runs INSTEAD.
+//   - 'defeat_unit': fires before a unit at lethal damage is moved to discard.
+//     The replacement's `with` typically heals (resetting damage) so the
+//     state-based fixpoint doesn't immediately re-detect the defeat. Cards
+//     that don't clear damage will infinite-loop and be caught by the 256-step
+//     state-based guard.
+export interface ReplacementAbility {
+  type: 'replacement';
+  on: 'damage_unit' | 'damage_base' | 'defeat_unit';
+  where?: TriggerPredicate;
+  /** Effect to run INSTEAD of the original. Use `noop` to suppress the
+   *  original outright (true prevention for damage; not safe for defeat — the
+   *  unit would still be at lethal damage next pass). */
+  with: Effect;
+}
+
+export type Ability = TriggeredAbility | ActionAbility | ConstantAbility | ReplacementAbility;
 
 // ---------------------------------------------------------------------------
 // Discriminator helpers
 // ---------------------------------------------------------------------------
 
-export const isTriggered = (a: Ability): a is TriggeredAbility => a.type === 'triggered';
-export const isAction    = (a: Ability): a is ActionAbility    => a.type === 'action';
-export const isConstant  = (a: Ability): a is ConstantAbility  => a.type === 'constant';
+export const isTriggered   = (a: Ability): a is TriggeredAbility   => a.type === 'triggered';
+export const isAction      = (a: Ability): a is ActionAbility      => a.type === 'action';
+export const isConstant    = (a: Ability): a is ConstantAbility    => a.type === 'constant';
+export const isReplacement = (a: Ability): a is ReplacementAbility => a.type === 'replacement';
 
 export const isPredicateAnd = (p: Predicate): p is PredicateAnd => 'and' in p && Array.isArray((p as PredicateAnd).and);
 export const isPredicateOr  = (p: Predicate): p is PredicateOr  => 'or'  in p && Array.isArray((p as PredicateOr).or);

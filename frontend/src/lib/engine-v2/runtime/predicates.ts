@@ -91,6 +91,12 @@ export function evalCardPredicate(
     if (has !== leaf.player_has_force_token) return false;
   }
 
+  if (leaf.controller_unit_count !== undefined) {
+    const ps = ctx.state.players[instController];
+    const n = ps ? (ps.groundArena.length + ps.spaceArena.length) : 0;
+    if (!inRange(n, leaf.controller_unit_count)) return false;
+  }
+
   return true;
 }
 
@@ -146,6 +152,16 @@ export function evalTriggerPredicate(
     if (event.kind === 'DAMAGE_DEALT' && event.combat !== p.combat) return false;
   }
 
+  if (p.base_controller !== undefined) {
+    // Only meaningful on DAMAGE_DEALT events whose target is a base. Other
+    // events shape-mismatch — treat as no-match.
+    if (event.kind !== 'DAMAGE_DEALT') return false;
+    if (typeof event.targetIid === 'string') return false; // unit target, not base
+    const baseOwner = event.targetIid.base;
+    const want = resolvePlayer(p.base_controller, ctx);
+    if (want !== 'any' && want !== baseOwner) return false;
+  }
+
   return true;
 }
 
@@ -161,6 +177,11 @@ function eventCardIid(event: GameEvent): string | undefined {
     case 'ATTACK_DECLARED':   return event.attackerIid;
     case 'ATTACK_ENDED':      return event.attackerIid;
     case 'TOKEN_CREATED':     return event.iid;
+    // For damage events the "card of interest" is the TARGET — this is what
+    // replacement abilities check with `where: { card: 'self' }` (i.e. "this
+    // damage is hitting me"). Base damage carries `{ base: pid }` for the
+    // target and has no card iid.
+    case 'DAMAGE_DEALT':      return typeof event.targetIid === 'string' ? event.targetIid : undefined;
     case 'LEADER_DEPLOYED':   return event.leaderIid;
     case 'LEADER_DEFEATED':   return event.leaderIid;
     default: return undefined;

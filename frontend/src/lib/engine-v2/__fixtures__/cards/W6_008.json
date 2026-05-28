@@ -1,0 +1,33 @@
+{
+  "id": "W6_008",
+  "name": "Phoenix Sentinel",
+  "type": "unit",
+  "cost": 4,
+  "aspects": ["heroism", "vigilance"],
+  "arena": "ground",
+  "power": 3,
+  "hp": 3,
+  "traits": ["force", "rebel"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "replacement",
+      "on": "defeat_unit",
+      "where": { "card": "self" },
+      "with": {
+        "effect": "sequence",
+        "steps": [
+          {
+            "effect": "heal",
+            "target": { "self": true },
+            "amount": 999
+          },
+          {
+            "effect": "exhaust",
+            "target": { "self": true }
+          }
+        ]
+      }
+    }
+  ]
+}

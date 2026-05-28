@@ -10,7 +10,7 @@
 //   3. Lasting effects in state.lastingEffects targeting this unit
 //   4. Keyword hooks (Grit's per-damage power bonus)
 
-import type { CardInstance, CardRegistry, GameState, PlayerId } from '../state/types';
+import type { CardInstance, CardRegistry, GameState, PlayerId, Zone } from '../state/types';
 import type { LastingEffectRec } from '../state/effects';
 import type { Ability, ConstantAbility, KeywordGrant, Modifier } from '../spec/ast';
 import { isConstant } from '../spec/ast';
@@ -19,6 +19,7 @@ import { getZoneArr } from '../state/zones';
 import { evalCardPredicate, type EvalCtx } from './predicates';
 import { resolveSelector } from './selectors';
 import { KEYWORDS } from '../primitives/keywords';
+import { synthLeaderInstance, UNDEPLOYED_LEADER_IID_PREFIX } from './triggers';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -36,8 +37,29 @@ function cardAbilities(reg: CardRegistry, inst: CardInstance): Ability[] {
   if (spec.type === 'unit' || spec.type === 'event' || spec.type === 'upgrade' || spec.type === 'token') {
     return spec.abilities ?? [];
   }
+  if (spec.type === 'leader') {
+    // Synthetic un-deployed leader instance → leaderAbilities. In-arena
+    // leader-unit CardInstance (cardId = leader id) → leaderUnitAbilities.
+    if (inst.iid.startsWith(UNDEPLOYED_LEADER_IID_PREFIX)) return spec.leaderAbilities ?? [];
+    return spec.leaderUnitAbilities ?? [];
+  }
   return [];
 }
+
+/** Does this constant ability apply when its source is sitting in `sourceZone`?
+ *  - active_in_zone undefined → applies only while in an arena (default for
+ *    "in-play" abilities)
+ *  - active_in_zone set → must exactly match the source zone (Smuggle uses
+ *    'resource_zone', etc.) */
+function constantAppliesInZone(ab: ConstantAbility, sourceZone: Zone): boolean {
+  const required = ab.active_in_zone;
+  if (required === undefined) return sourceZone === 'ground_arena' || sourceZone === 'space_arena';
+  return required === sourceZone;
+}
+
+// Zones that may host an active constant ability. Arenas cover normal play;
+// resource_zone covers Smuggle constants.
+const CONSTANT_SOURCE_ZONES: Zone[] = ['ground_arena', 'space_arena', 'resource_zone'];
 
 // Walk all in-play cards and lasting effects to find modifiers that affect
 // the given (targetIid, targetController). Returns a flat array of Modifiers.
@@ -49,20 +71,60 @@ function collectModifiersFor(
 ): Modifier[] {
   const mods: Modifier[] = [];
 
-  // (a) Constant abilities on in-play cards
+  // (a) Constant abilities on cards in zones that can host them
   for (const pid of state.playerOrder) {
     const p = state.players[pid];
-    for (const z of ['ground_arena', 'space_arena'] as const) {
+    for (const z of CONSTANT_SOURCE_ZONES) {
       const arr = getZoneArr(p, z);
       for (const source of arr) {
+        // Constants from the source card itself
         for (const ab of cardAbilities(reg, source)) {
           if (!isConstant(ab)) continue;
+          if (!constantAppliesInZone(ab, z)) continue;
           const ctx: EvalCtx = { state, reg, sourceIid: source.iid, sourcePlayer: pid };
           if (ab.while && !evalSourcePredicate(ab.while, ctx, source, pid)) continue;
           const targets = resolveSelector(ctx, ab.grant.target);
           if (targets.some(t => t.kind === 'unit' && t.iid === targetIid)) {
             mods.push(ab.grant.modifier);
           }
+        }
+        // Constants from upgrades attached to the source (only arenas — upgrades
+        // never live on cards outside of arenas).
+        if (z === 'ground_arena' || z === 'space_arena') {
+          for (const up of source.upgrades) {
+            for (const ab of cardAbilities(reg, up)) {
+              if (!isConstant(ab)) continue;
+              // Upgrade constants always apply while the host is in play.
+              const ctx: EvalCtx = { state, reg, sourceIid: up.iid, sourcePlayer: pid };
+              if (ab.while && !evalSourcePredicate(ab.while, ctx, up, pid)) continue;
+              const targets = resolveSelector(ctx, ab.grant.target);
+              if (targets.some(t => t.kind === 'unit' && t.iid === targetIid)) {
+                mods.push(ab.grant.modifier);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // (a') Constant abilities on un-deployed leaders. Leaders aren't in an
+  // arena, so the zone-gating logic doesn't apply — these are always-on while
+  // the leader sits on the un-deployed side.
+  for (const pid of state.playerOrder) {
+    const p = state.players[pid];
+    for (let i = 0; i < p.leaders.length; i++) {
+      const leader = p.leaders[i];
+      if (leader.isDeployed) continue;
+      const synth = synthLeaderInstance(state, pid, i);
+      if (!synth) continue;
+      for (const ab of cardAbilities(reg, synth)) {
+        if (!isConstant(ab)) continue;
+        const ctx: EvalCtx = { state, reg, sourceIid: synth.iid, sourcePlayer: pid };
+        if (ab.while && !evalSourcePredicate(ab.while, ctx, synth, pid)) continue;
+        const targets = resolveSelector(ctx, ab.grant.target);
+        if (targets.some(t => t.kind === 'unit' && t.iid === targetIid)) {
+          mods.push(ab.grant.modifier);
         }
       }
     }
@@ -88,29 +150,85 @@ function evalSourcePredicate(p: ConstantAbility['while'], ctx: EvalCtx, source: 
 // Public reads
 // ---------------------------------------------------------------------------
 
+/** Sum of UpgradeSpec.powerModifier across all upgrades attached to a unit. */
+function upgradePowerBonus(reg: CardRegistry, inst: CardInstance): number {
+  let n = 0;
+  for (const up of inst.upgrades) {
+    const spec = reg.cards[up.cardId];
+    if (!spec) continue;
+    if (spec.type === 'upgrade' && spec.powerModifier) n += spec.powerModifier;
+    if (spec.type === 'token' && spec.tokenType === 'upgrade' && spec.powerModifier) n += spec.powerModifier;
+  }
+  return n;
+}
+
+/** Sum of UpgradeSpec.hpModifier across all upgrades attached to a unit. */
+function upgradeHpBonus(reg: CardRegistry, inst: CardInstance): number {
+  let n = 0;
+  for (const up of inst.upgrades) {
+    const spec = reg.cards[up.cardId];
+    if (!spec) continue;
+    if (spec.type === 'upgrade' && spec.hpModifier) n += spec.hpModifier;
+    if (spec.type === 'token' && spec.tokenType === 'upgrade' && spec.hpModifier) n += spec.hpModifier;
+  }
+  return n;
+}
+
+function upgradeKeywords(reg: CardRegistry, inst: CardInstance): KeywordGrant[] {
+  const out: KeywordGrant[] = [];
+  for (const up of inst.upgrades) {
+    const spec = reg.cards[up.cardId];
+    if (!spec) continue;
+    if ((spec.type === 'upgrade' || spec.type === 'token') && 'keywords' in spec && spec.keywords) {
+      for (const k of spec.keywords) out.push({ name: k.name.toLowerCase(), value: k.value });
+    }
+  }
+  return out;
+}
+
+/** Printed unit stats — used for leader-unit-side power lookups when the spec
+ *  is a LeaderSpec rather than a UnitSpec. */
+function printedPower(reg: CardRegistry, inst: CardInstance): number {
+  const spec = reg.cards[inst.cardId];
+  if (!spec) return 0;
+  if (spec.type === 'unit') return spec.power;
+  if (spec.type === 'leader' && typeof spec.power === 'number') return spec.power;
+  if (spec.type === 'token' && spec.tokenType === 'unit' && typeof spec.power === 'number') return spec.power;
+  return 0;
+}
+
+function printedHp(reg: CardRegistry, inst: CardInstance): number {
+  const spec = reg.cards[inst.cardId];
+  if (!spec) return 1;
+  if (spec.type === 'unit') return spec.hp;
+  if (spec.type === 'leader' && typeof spec.hp === 'number') return spec.hp;
+  if (spec.type === 'token' && spec.tokenType === 'unit' && typeof spec.hp === 'number') return spec.hp;
+  return 1;
+}
+
 export function effectivePower(
   state: GameState,
   reg: CardRegistry,
   inst: CardInstance,
   ownerId: PlayerId,
 ): number {
-  const spec = reg.cards[inst.cardId];
-  if (!spec || !isUnit(spec)) return 0;
-  let p = spec.power;
+  let p = printedPower(reg, inst);
 
   // Modifiers from constants + lasting effects
   for (const m of collectModifiersFor(state, reg, inst.iid, ownerId)) {
     if (m.power) p += m.power;
   }
 
-  // Keyword bonuses (Grit; also any future "bonusPower" keyword)
-  for (const kw of cardKeywords(reg, inst)) {
+  // Upgrades contribute their powerModifier directly to the host's stats.
+  p += upgradePowerBonus(reg, inst);
+
+  // Keyword bonuses (Grit; also any future "bonusPower" keyword).
+  // Include keywords granted by upgrades (e.g. an upgrade with Grit).
+  const allKeywords = [...cardKeywords(reg, inst), ...upgradeKeywords(reg, inst)];
+  for (const kw of allKeywords) {
     const def = KEYWORDS[kw.name];
     if (def?.bonusPower) p += def.bonusPower({ state, reg, inst, owner: ownerId, value: kw.value });
   }
-  // Coordinate-granted keywords are not yet implemented; effective-keyword
-  // aggregation handles that path so a Grit-grant via Coordinate would also
-  // surface here once Coordinate ships.
 
   return Math.max(0, p);
 }
@@ -121,13 +239,13 @@ export function effectiveHp(
   inst: CardInstance,
   ownerId: PlayerId,
 ): number {
-  const spec = reg.cards[inst.cardId];
-  if (!spec || !isUnit(spec)) return 1;
-  let h = spec.hp;
+  let h = printedHp(reg, inst);
   for (const m of collectModifiersFor(state, reg, inst.iid, ownerId)) {
     if (m.health) h += m.health;
   }
-  for (const kw of cardKeywords(reg, inst)) {
+  h += upgradeHpBonus(reg, inst);
+  const allKeywords = [...cardKeywords(reg, inst), ...upgradeKeywords(reg, inst)];
+  for (const kw of allKeywords) {
     const def = KEYWORDS[kw.name];
     if (def?.bonusHp) h += def.bonusHp({ state, reg, inst, owner: ownerId, value: kw.value });
   }
@@ -143,9 +261,9 @@ export function remainingHp(
   return effectiveHp(state, reg, inst, ownerId) - inst.damage;
 }
 
-// Effective keyword set = printed + granted via constant-ability modifiers.
-// Returns the keyword names lowercased; numeric values are tracked separately
-// via `effectiveKeywordValue`.
+// Effective keyword set = printed + granted via constant-ability modifiers +
+// keywords on attached upgrades. Returns names lowercased; numeric values are
+// tracked separately via `effectiveKeywordValue`.
 export function effectiveKeywords(
   state: GameState,
   reg: CardRegistry,
@@ -154,6 +272,7 @@ export function effectiveKeywords(
 ): Set<string> {
   const out = new Set<string>();
   for (const kw of cardKeywords(reg, inst)) out.add(kw.name);
+  for (const kw of upgradeKeywords(reg, inst)) out.add(kw.name);
   for (const m of collectModifiersFor(state, reg, inst.iid, ownerId)) {
     if (m.keyword) out.add(m.keyword.toLowerCase());
     if (m.keywords) for (const k of m.keywords) out.add(k.name.toLowerCase());
@@ -170,10 +289,13 @@ export function effectiveKeywordValue(
   keyword: string,
 ): number | undefined {
   const want = keyword.toLowerCase();
-  for (const kw of cardKeywords(reg, inst)) {
-    if (kw.name === want && kw.value !== undefined) return kw.value;
-  }
   let total: number | undefined;
+  for (const kw of cardKeywords(reg, inst)) {
+    if (kw.name === want && kw.value !== undefined) total = (total ?? 0) + kw.value;
+  }
+  for (const kw of upgradeKeywords(reg, inst)) {
+    if (kw.name === want && kw.value !== undefined) total = (total ?? 0) + kw.value;
+  }
   for (const m of collectModifiersFor(state, reg, inst.iid, ownerId)) {
     if (m.keyword?.toLowerCase() === want && m.keyword_value !== undefined) {
       total = (total ?? 0) + m.keyword_value;

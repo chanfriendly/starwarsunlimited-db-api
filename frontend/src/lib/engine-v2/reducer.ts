@@ -6,34 +6,37 @@
 // Defeated) are wired in through the interpreter + trigger drain.
 
 import type { PlayerAction } from './actions';
-import type { CardRegistry, GameState, PlayerId, StepResult } from './state/types';
+import type { CardInstance, CardRegistry, GameState, PlayerId, StepResult } from './state/types';
 import type { LastingEffectRec } from './state/effects';
 import type { GameEvent } from './state/bus';
 import { findCard, getZoneArr, mapInstance, withPlayer } from './state/zones';
 import { isUnit, type CardSpec } from './spec/types';
 import { draw } from './primitives/card_flow';
-import { damageBase, damageUnit, snapshot } from './primitives/combat';
+import { snapshot } from './primitives/combat';
+import { dealDamageToBase, dealDamageToUnit } from './runtime/damage';
 import { exhaust, readyAll } from './primitives/state';
-import { moveToZone } from './primitives/move';
+import { moveToZone, attachUpgrade } from './primitives/move';
 import { runStateBased } from './runtime/state_based';
 import { effectivePower, effectiveHp, hasEffectiveKeyword, effectiveKeywordValue } from './runtime/modifiers';
 import { nextActivePlayer, opponentOf } from './state/types';
 import { KEYWORDS, defeatDefenderShields } from './primitives/keywords';
-import { settleTriggers } from './runtime/triggers';
+import { settleTriggers, isLimitExhausted, bumpLimit, parseUndeployedLeaderIid, makeUndeployedLeaderIid, synthLeaderInstance } from './runtime/triggers';
 import type { Chooser } from './runtime/chooser';
 import { applyEffect } from './runtime/interpret';
-import { isTriggered, type TriggeredAbility } from './spec/ast';
+import { isTriggered, type ActionAbility, type Ability, type TriggeredAbility } from './spec/ast';
+import { resolveSelector } from './runtime/selectors';
+import { resolvePlayer } from './runtime/predicates';
 
 function settle(state: GameState, reg: CardRegistry, eventsIn: GameEvent[], chooser?: Chooser): StepResult {
   const stepped: GameState = { ...state, step: state.step + 1 };
-  const sb = runStateBased(stepped, reg);
+  const sb = runStateBased(stepped, reg, chooser);
   // Triggered abilities watching the events from this step (including any
   // DEFEATED events from the state-based loop) get a chance to fire.
   const settled = settleTriggers(sb.state, reg, [...eventsIn, ...sb.events], chooser);
   // Triggered effects may produce more events that themselves change state →
-  // run state-based one more time. One extra pass is enough for Week 2
-  // because no current trigger creates units mid-resolution.
-  const sb2 = runStateBased(settled.state, reg);
+  // run state-based one more time. One extra pass is enough for current
+  // mechanics because no trigger creates units mid-resolution.
+  const sb2 = runStateBased(settled.state, reg, chooser);
   return { next: sb2.state, events: [...eventsIn, ...sb.events, ...settled.events, ...sb2.events] };
 }
 
@@ -66,7 +69,9 @@ export function step(state: GameState, action: PlayerAction, reg: CardRegistry, 
     case 'RESOURCE_CARD':       return applyResourceCard(state, action.player, action.iid, reg, chooser);
     case 'DECLINE_RESOURCE':    return applyDeclineResource(state, action.player, reg, chooser);
 
-    case 'PLAY_CARD':           return applyPlayCard(state, action.player, action.iid, reg, chooser);
+    case 'PLAY_CARD':           return applyPlayCard(state, action.player, action.iid, reg, chooser, action.targetIid);
+    case 'DEPLOY_LEADER':       return applyDeployLeader(state, action.player, action.leaderIndex, reg, chooser);
+    case 'USE_ACTION_ABILITY':  return applyActionAbility(state, action.player, action.sourceIid, action.leaderIndex, action.abilityIndex, action.targetIid, reg, chooser);
     case 'ATTACK':              return applyAttack(state, action.player, action.attackerIid, action.defenderIid, reg, chooser);
     case 'TAKE_COUNTER':        return applyTakeCounter(state, action.player, action.counter, reg, chooser);
     case 'PASS':                return applyPass(state, action.player, reg, chooser);
@@ -96,7 +101,7 @@ function applyResourceCard(state: GameState, pid: PlayerId, iid: string, reg: Ca
   const events: GameEvent[] = [{ kind: 'RESOURCE_PLACED', player: pid, iid }];
   next = log(next, `${pid} resources a card.`, pid);
 
-  if (state.phase === 'setup') return advanceSetupAfterResource(next, reg, events, chooser);
+  if (state.phase === 'setup') return advanceSetupAfterResource(next, reg, events, chooser, false);
   if (state.phase === 'regroup') return advanceRegroupAfterResource(next, reg, events, chooser);
   return settle(next, reg, events, chooser);
 }
@@ -104,28 +109,39 @@ function applyResourceCard(state: GameState, pid: PlayerId, iid: string, reg: Ca
 function applyDeclineResource(state: GameState, pid: PlayerId, reg: CardRegistry, chooser?: Chooser): StepResult {
   const p = state.players[pid];
   const next = withPlayer(state, pid, { ...p, hasResourced: true });
-  if (state.phase === 'setup') return advanceSetupAfterResource(next, reg, [], chooser);
+  if (state.phase === 'setup') return advanceSetupAfterResource(next, reg, [], chooser, true);
   if (state.phase === 'regroup') return advanceRegroupAfterResource(next, reg, [], chooser);
   return settle(next, reg, [], chooser);
 }
 
-function advanceSetupAfterResource(state: GameState, reg: CardRegistry, events: GameEvent[], chooser?: Chooser): StepResult {
+/** Advance setup after a player just placed a resource or declined.
+ *  `declined=true` means the call came from DECLINE_RESOURCE — that's when
+ *  the player is bowing out before reaching the 2-resource cap and gets the
+ *  `setup_declined` flag. After a normal RESOURCE_CARD, the active player
+ *  still has resources left to place; just rotate to the next player. */
+function advanceSetupAfterResource(
+  state: GameState, reg: CardRegistry,
+  events: GameEvent[], chooser: Chooser | undefined,
+  declined: boolean,
+): StepResult {
   const SETUP_RESOURCES = 2;
-  // A player is "done" with setup if they hit the cap OR they declined
-  // (hasResourced=true via DECLINE_RESOURCE). Need to track per-player
-  // setup-done across passes since hasResourced gets reset.
-  const setupDone = (pid: PlayerId) =>
-    state.players[pid].resources.length >= SETUP_RESOURCES ||
-    state.players[pid].perGameFlags.has('setup_declined');
 
-  // Mark current player as declined-out if they have hasResourced=true and
-  // didn't actually hit the cap (i.e. they declined).
+  // Mark the active player as declined ONLY when the call came via
+  // DECLINE_RESOURCE and they haven't already maxed out. (The previous code
+  // also flagged after a normal RESOURCE_CARD because both paths set
+  // `hasResourced=true` — that's bug #1 from session-45 UAT.)
   let s = state;
-  if (s.players[s.activePlayer].hasResourced && s.players[s.activePlayer].resources.length < SETUP_RESOURCES) {
+  if (declined && s.players[s.activePlayer].resources.length < SETUP_RESOURCES) {
     const p = s.players[s.activePlayer];
     const flags = new Set(p.perGameFlags); flags.add('setup_declined');
     s = withPlayer(s, s.activePlayer, { ...p, perGameFlags: flags });
   }
+
+  // Read from the post-flag state — earlier code used the closure-captured
+  // `state` and the flag wouldn't be visible until the next call.
+  const setupDone = (pid: PlayerId) =>
+    s.players[pid].resources.length >= SETUP_RESOURCES ||
+    s.players[pid].perGameFlags.has('setup_declined');
 
   const allDone = s.playerOrder.every(setupDone);
   if (allDone) {
@@ -169,7 +185,7 @@ function startActionPhase(state: GameState, reg: CardRegistry, events: GameEvent
 // Action phase
 // ---------------------------------------------------------------------------
 
-function applyPlayCard(state: GameState, pid: PlayerId, iid: string, reg: CardRegistry, chooser?: Chooser): StepResult {
+function applyPlayCard(state: GameState, pid: PlayerId, iid: string, reg: CardRegistry, chooser?: Chooser, targetIid?: string): StepResult {
   if (state.activePlayer !== pid) throw new Error(`${pid} is not the active player`);
   if (state.phase !== 'action') throw new Error(`Cannot play card outside action phase`);
 
@@ -179,13 +195,13 @@ function applyPlayCard(state: GameState, pid: PlayerId, iid: string, reg: CardRe
   }
   const spec = reg.cards[found.inst.cardId];
   if (!spec) throw new Error(`Unknown spec for ${iid}`);
-  if (spec.type !== 'unit' && spec.type !== 'event') {
-    throw new Error(`Week 3 only supports unit and event cards. Got ${spec.type}`);
+  if (spec.type !== 'unit' && spec.type !== 'event' && spec.type !== 'upgrade') {
+    throw new Error(`PLAY_CARD does not support ${spec.type}`);
   }
 
   const p = state.players[pid];
   const readyResources = p.resources.filter(r => !r.exhausted);
-  const cost = spec.type === 'unit' ? (spec.cost ?? 0) : (spec.cost ?? 0);
+  const cost = spec.cost ?? 0;
   if (readyResources.length < cost) throw new Error(`Insufficient resources: need ${cost}, have ${readyResources.length}`);
 
   let s = state;
@@ -195,6 +211,22 @@ function applyPlayCard(state: GameState, pid: PlayerId, iid: string, reg: CardRe
     const r = exhaust(s, ri);
     s = r.state;
     events.push({ kind: 'RESOURCE_SPENT', player: pid, iid: ri });
+  }
+
+  if (spec.type === 'upgrade') {
+    if (!targetIid) throw new Error(`Upgrade requires a target unit`);
+    const hostFound = findCard(s, targetIid);
+    if (!hostFound) throw new Error(`Upgrade target ${targetIid} not found`);
+    if (hostFound.loc.controller !== pid) throw new Error(`Upgrade target must be friendly`);
+    if (hostFound.loc.zone !== 'ground_arena' && hostFound.loc.zone !== 'space_arena') {
+      throw new Error(`Upgrade target must be in an arena`);
+    }
+    const att = attachUpgrade(s, iid, targetIid);
+    s = att.state;
+    events.push(...att.events);
+    events.push({ kind: 'CARD_PLAYED', iid, cardId: spec.id, controller: pid });
+    s = log(s, `${pid} plays upgrade ${spec.name} (${cost}) on ${hostFound.inst.iid}.`, pid);
+    return advanceToNextTurn(s, pid, reg, events, undefined, chooser);
   }
 
   if (spec.type === 'event') {
@@ -242,6 +274,248 @@ function applyPlayCard(state: GameState, pid: PlayerId, iid: string, reg: CardRe
     s = r.state;
     events.push(...r.events);
   }
+
+  return advanceToNextTurn(s, pid, reg, events, undefined, chooser);
+}
+
+function applyDeployLeader(
+  state: GameState, pid: PlayerId, leaderIndex: number,
+  reg: CardRegistry, chooser?: Chooser,
+): StepResult {
+  if (state.activePlayer !== pid) throw new Error(`${pid} is not the active player`);
+  if (state.phase !== 'action') throw new Error(`Cannot deploy leader outside action phase`);
+
+  const p = state.players[pid];
+  const leader = p.leaders[leaderIndex];
+  if (!leader) throw new Error(`No leader at index ${leaderIndex}`);
+  if (leader.isDeployed) throw new Error(`Leader is already deployed`);
+
+  const spec = reg.cards[leader.cardId];
+  if (!spec || spec.type !== 'leader') throw new Error(`Invalid leader spec for ${leader.cardId}`);
+
+  const cost = spec.cost ?? 0;
+  const readyResources = p.resources.filter(r => !r.exhausted);
+  if (readyResources.length < cost) {
+    throw new Error(`Insufficient resources: need ${cost}, have ${readyResources.length}`);
+  }
+
+  let s = state;
+  const events: GameEvent[] = [];
+  for (let i = 0; i < cost; i++) {
+    const ri = readyResources[i].iid;
+    const r = exhaust(s, ri);
+    s = r.state;
+    events.push({ kind: 'RESOURCE_SPENT', player: pid, iid: ri });
+  }
+
+  // Create the leader-unit CardInstance. Enters exhausted (deployed leaders
+  // can't attack the same turn they deploy, same as normal unit plays).
+  const iid = `i${s._nextIid}`;
+  s = { ...s, _nextIid: s._nextIid + 1 };
+  const leaderUnit: CardInstance = {
+    iid,
+    cardId: leader.cardId,
+    damage: 0,
+    exhausted: true,
+    upgrades: [],
+    shieldTokens: 0,
+    isToken: false,
+    enteredZoneAt: s.step,
+  };
+  const arena: 'ground_arena' | 'space_arena' = spec.arena === 'space' ? 'space_arena' : 'ground_arena';
+  const targetP = s.players[pid];
+  const newArenaArr = (arena === 'ground_arena' ? targetP.groundArena : targetP.spaceArena).slice();
+  newArenaArr.push(leaderUnit);
+  const newLeaders = targetP.leaders.slice();
+  newLeaders[leaderIndex] = {
+    ...leader,
+    side: 'leader_unit',
+    isDeployed: true,
+    unitIid: iid,
+  };
+  s = withPlayer(s, pid, {
+    ...targetP,
+    ...(arena === 'ground_arena' ? { groundArena: newArenaArr } : { spaceArena: newArenaArr }),
+    leaders: newLeaders,
+  });
+
+  events.push({ kind: 'LEADER_DEPLOYED', player: pid, leaderIid: iid, as: 'unit' });
+  s = log(s, `${pid} deploys leader ${spec.name} (${cost}).`, pid, 'critical');
+
+  return advanceToNextTurn(s, pid, reg, events, undefined, chooser);
+}
+
+/** Look up an action ability source: either an in-play CardInstance or an
+ *  un-deployed leader. Returns the abilities array + source iid + the source's
+ *  exhausted state + (for leaders) the leaderIndex. */
+function resolveActionSource(
+  state: GameState, reg: CardRegistry, pid: PlayerId,
+  sourceIid: string | undefined, leaderIndex: number | undefined,
+): { abilities: Ability[]; iid: string; exhausted: boolean; leaderIndex?: number; isLeaderInst?: boolean } {
+  if (sourceIid !== undefined && leaderIndex !== undefined) {
+    throw new Error(`USE_ACTION_ABILITY: pass sourceIid OR leaderIndex, not both`);
+  }
+  if (sourceIid !== undefined) {
+    // sourceIid may reference a card in arena, an upgrade attached to one, or
+    // the synthetic id of an un-deployed leader (in case a caller chooses to
+    // address leaders by iid rather than index).
+    const synth = parseUndeployedLeaderIid(sourceIid);
+    if (synth) return resolveActionSource(state, reg, pid, undefined, synth.idx);
+
+    const found = findCard(state, sourceIid);
+    if (found) {
+      if (found.loc.controller !== pid) throw new Error(`Source ${sourceIid} is not yours`);
+      const spec = reg.cards[found.inst.cardId];
+      if (!spec) throw new Error(`Unknown spec for ${sourceIid}`);
+      const abs = spec.type === 'leader'
+        ? (spec.leaderUnitAbilities ?? [])
+        : ('abilities' in spec ? spec.abilities ?? [] : []);
+      return { abilities: abs, iid: sourceIid, exhausted: found.inst.exhausted };
+    }
+    // Upgrade lookup
+    for (const ppid of state.playerOrder) {
+      const p = state.players[ppid];
+      for (const z of ['ground_arena', 'space_arena'] as const) {
+        const arr = getZoneArr(p, z);
+        for (const host of arr) {
+          const up = host.upgrades.find(u => u.iid === sourceIid);
+          if (up) {
+            if (ppid !== pid) throw new Error(`Source ${sourceIid} is not yours`);
+            const spec = reg.cards[up.cardId];
+            const abs = spec && 'abilities' in spec ? (spec.abilities ?? []) : [];
+            return { abilities: abs, iid: sourceIid, exhausted: up.exhausted };
+          }
+        }
+      }
+    }
+    throw new Error(`Source ${sourceIid} not found`);
+  }
+  if (leaderIndex !== undefined) {
+    const leader = state.players[pid].leaders[leaderIndex];
+    if (!leader) throw new Error(`No leader at index ${leaderIndex}`);
+    const spec = reg.cards[leader.cardId];
+    if (!spec || spec.type !== 'leader') throw new Error(`Invalid leader spec`);
+    const abs = leader.isDeployed
+      ? (spec.leaderUnitAbilities ?? [])
+      : (spec.leaderAbilities ?? []);
+    const iid = leader.isDeployed && leader.unitIid
+      ? leader.unitIid
+      : makeUndeployedLeaderIid(pid, leaderIndex);
+    return { abilities: abs, iid, exhausted: leader.exhausted, leaderIndex, isLeaderInst: !leader.isDeployed };
+  }
+  throw new Error(`USE_ACTION_ABILITY: must pass sourceIid or leaderIndex`);
+}
+
+function applyActionAbility(
+  state: GameState, pid: PlayerId,
+  sourceIid: string | undefined, leaderIndex: number | undefined,
+  abilityIndex: number, targetIid: string | undefined,
+  reg: CardRegistry, chooser?: Chooser,
+): StepResult {
+  void targetIid; // targets are resolved by the Chooser at effect time
+  if (state.activePlayer !== pid) throw new Error(`${pid} is not the active player`);
+  if (state.phase !== 'action') throw new Error(`Cannot use ability outside action phase`);
+
+  const src = resolveActionSource(state, reg, pid, sourceIid, leaderIndex);
+  const ability = src.abilities[abilityIndex];
+  if (!ability) throw new Error(`No ability at index ${abilityIndex}`);
+  if (ability.type !== 'action') throw new Error(`Ability ${abilityIndex} is not an action ability (type=${ability.type})`);
+
+  if (ability.limit && isLimitExhausted(state, pid, 'act', src.iid, abilityIndex, ability.limit)) {
+    throw new Error(`Limit ${ability.limit} reached for this ability`);
+  }
+
+  const cost = ability.cost ?? {};
+  if (cost.exhaust && src.exhausted) throw new Error(`Source is exhausted`);
+
+  const p = state.players[pid];
+  const readyResources = p.resources.filter(r => !r.exhausted);
+  const resCost = cost.resources ?? 0;
+  if (readyResources.length < resCost) {
+    throw new Error(`Insufficient resources: need ${resCost}, have ${readyResources.length}`);
+  }
+
+  let s = state;
+  const events: GameEvent[] = [];
+
+  // Pay exhaust
+  if (cost.exhaust) {
+    if (src.isLeaderInst && src.leaderIndex !== undefined) {
+      // Exhaust the un-deployed LeaderInstance directly.
+      const ps = s.players[pid];
+      const newLeaders = ps.leaders.slice();
+      newLeaders[src.leaderIndex] = { ...newLeaders[src.leaderIndex], exhausted: true };
+      s = withPlayer(s, pid, { ...ps, leaders: newLeaders });
+    } else {
+      // Exhaust the in-arena CardInstance (or attached upgrade — exhaust works
+      // through mapInstance, which only walks arena cards; if/when an upgrade
+      // gets an action ability with exhaust cost, mapInstance will need an
+      // upgrade-aware variant).
+      const r = exhaust(s, src.iid);
+      s = r.state;
+      events.push(...r.events);
+    }
+  }
+
+  // Pay resource cost
+  for (let i = 0; i < resCost; i++) {
+    const ri = readyResources[i].iid;
+    const r = exhaust(s, ri);
+    s = r.state;
+    events.push({ kind: 'RESOURCE_SPENT', player: pid, iid: ri });
+  }
+
+  // Pay discard cost
+  if (cost.discard) {
+    const who = resolvePlayer(cost.discard.player, { state: s, reg, sourcePlayer: pid });
+    const dpid = who === 'any' ? pid : who;
+    const dp = s.players[dpid];
+    const toDiscard = dp.hand.slice(0, cost.discard.count);
+    if (toDiscard.length < cost.discard.count) throw new Error(`Cannot pay discard cost: not enough cards in hand`);
+    const remaining = dp.hand.slice(cost.discard.count);
+    s = withPlayer(s, dpid, { ...dp, hand: remaining, discard: [...dp.discard, ...toDiscard] });
+    for (const c of toDiscard) events.push({ kind: 'CARD_DISCARDED', player: dpid, iid: c.iid, from: 'hand' });
+  }
+
+  // Pay defeat cost — selector resolved against the source's perspective.
+  if (cost.defeat) {
+    const ctx = { state: s, reg, sourceIid: src.iid, sourcePlayer: pid, chooser };
+    const targets = resolveSelector(ctx, cost.defeat);
+    for (const t of targets) {
+      if (t.kind !== 'unit') continue;
+      s = mapInstance(s, t.iid, c => ({ ...c, damage: c.damage + 9999 }));
+    }
+  }
+
+  // Pay remove_shield cost
+  if (cost.remove_shield) {
+    const ctx = { state: s, reg, sourceIid: src.iid, sourcePlayer: pid, chooser };
+    const targets = resolveSelector(ctx, cost.remove_shield);
+    for (const t of targets) {
+      if (t.kind !== 'unit') continue;
+      s = mapInstance(s, t.iid, c => c.shieldTokens > 0 ? { ...c, shieldTokens: c.shieldTokens - 1 } : c);
+    }
+  }
+
+  // Bump the limit counter (after costs paid, before effect — so a card whose
+  // effect references the limit-tracked counter sees the post-fire state).
+  if (ability.limit) {
+    s = bumpLimit(s, pid, 'act', src.iid, abilityIndex, ability.limit);
+  }
+
+  // Resolve the effect.
+  const r = applyEffect({ state: s, reg, sourceIid: src.iid, sourcePlayer: pid, chooser }, (ability as ActionAbility).do);
+  s = r.state;
+  events.push(...r.events);
+
+  const sName = (() => {
+    if (src.leaderIndex !== undefined) {
+      const spec = reg.cards[state.players[pid].leaders[src.leaderIndex].cardId];
+      return spec?.name ?? `leader#${src.leaderIndex}`;
+    }
+    return src.iid;
+  })();
+  s = log(s, `${pid} uses action ability on ${sName}.`, pid);
 
   return advanceToNextTurn(s, pid, reg, events, undefined, chooser);
 }
@@ -313,7 +587,7 @@ function applyAttack(
 
   // Combat damage.
   if (defenderIid === 'base') {
-    const dmg = damageBase(s, reg, oppId, attackerPower, { combat: true }, attackerIid);
+    const dmg = dealDamageToBase(s, reg, oppId, attackerPower, { combat: true }, attackerIid, chooser);
     s = dmg.state;
     events.push(...dmg.events);
     events.push({ kind: 'ATTACK_ENDED', attackerIid, defenderIid: 'base', damageDealt: attackerPower });
@@ -329,10 +603,10 @@ function applyAttack(
     // can route to base if defender is defeated by combat damage.
     const defenderHpBefore = effectiveHp(s, reg, defenderFound.inst, oppId) - defenderFound.inst.damage;
 
-    const d1 = damageUnit(s, reg, defenderIid, attackerPower, { combat: true }, attackerIid);
+    const d1 = dealDamageToUnit(s, reg, defenderIid, attackerPower, { combat: true }, attackerIid, chooser);
     s = d1.state;
     events.push(...d1.events);
-    const d2 = damageUnit(s, reg, attackerIid, defenderPower, { combat: true }, defenderIid);
+    const d2 = dealDamageToUnit(s, reg, attackerIid, defenderPower, { combat: true }, defenderIid, chooser);
     s = d2.state;
     events.push(...d2.events);
 
@@ -343,7 +617,7 @@ function applyAttack(
       const shieldBlocked = d1.events.some(e => e.kind === 'DAMAGE_PREVENTED');
       const excess = attackerPower - Math.max(0, defenderHpBefore);
       if (!shieldBlocked && excess > 0 && defenderHpBefore <= attackerPower) {
-        const ow = damageBase(s, reg, oppId, excess, { combat: true }, attackerIid);
+        const ow = dealDamageToBase(s, reg, oppId, excess, { combat: true }, attackerIid, chooser);
         s = ow.state;
         events.push(...ow.events);
         s = log(s, `Overwhelm: ${excess} excess damage to base.`, pid);
@@ -399,6 +673,15 @@ function advanceToNextTurn(
   else s = { ...s, consecutivePasses: 0 };
 
   if (s.consecutivePasses >= s.playerOrder.length) return endActionPhase(s, reg, events, chooser);
+
+  // Defensive: if EVERY player has taken their counter this round, there's
+  // no one left to switch to. The skip-loop below would bounce between them
+  // until the safety counter ran out, leaving `activePlayer` on a seat with
+  // no legal actions and no auto-pass — the soft-hang from bug #2. End the
+  // action phase instead.
+  if (s.playerOrder.every(o => s.players[o].hasTakenCounterThisRound)) {
+    return endActionPhase(s, reg, events, chooser);
+  }
 
   let next = nextActivePlayer(s);
   let safety = s.playerOrder.length + 1;

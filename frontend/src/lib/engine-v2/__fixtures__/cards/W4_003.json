@@ -1,0 +1,19 @@
+{
+  "id": "W4_003",
+  "name": "Tactical Visor",
+  "type": "upgrade",
+  "cost": 1,
+  "aspects": ["vigilance"],
+  "powerModifier": 0,
+  "hpModifier": 0,
+  "traits": ["modification"],
+  "abilities": [
+    {
+      "type": "constant",
+      "grant": {
+        "target": { "attached_to_self": true },
+        "modifier": { "keyword": "sentinel" }
+      }
+    }
+  ]
+}

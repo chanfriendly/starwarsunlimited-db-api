@@ -2,16 +2,20 @@
 //
 // When an effect needs player input — choose_one branch, chosen-target
 // selector, optional "you may", replacement ordering — the interpreter
-// calls the configured Chooser. This is sync because:
-//   • The CLI driver uses blocking readline.
-//   • Scenario tests provide predetermined-pick choosers.
-//   • An AI provides a heuristic chooser.
+// calls the configured Chooser. This is the synchronous foundation; async
+// (UI-friendly) resumption lives in runtime/async_step.ts as a replay-based
+// wrapper that invokes step() with a journal-backed chooser and throws a
+// PendingChoiceSignal when the journal is exhausted. The Chooser API stays
+// unchanged — that's why the async lift was a wrapper, not a rewrite.
 //
-// The eventual web UI needs ASYNC (the engine must pause and surface
-// PendingChoice to the React layer). That's the Week-4 lift: replace this
-// synchronous boundary with a continuation/journal protocol so step() can
-// return a PendingChoice + serializable continuation. The Chooser API is
-// designed to be swappable — sites that use it today won't change shape.
+// Sync callers:
+//   • Scenario tests (scriptedChooser).
+//   • The greedy AI in play_cli (default + heuristic choosers).
+//   • Any callsite that wants to drive step() directly.
+//
+// Async callers:
+//   • play_cli's human turns (stepAsync + readline-prompted resolveStep loop).
+//   • The eventual useGameV2 React hook.
 
 import type { PlayerId } from '../state/types';
 import type { ResolvedTarget } from '../spec/ast';

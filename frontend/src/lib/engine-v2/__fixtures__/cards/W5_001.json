@@ -1,0 +1,27 @@
+{
+  "id": "W5_001",
+  "name": "Admiral Ackbar (Stay on Target)",
+  "type": "leader",
+  "cost": 5,
+  "aspects": ["heroism", "command"],
+  "arena": "ground",
+  "power": 4,
+  "hp": 6,
+  "traits": ["rebel", "official"],
+  "leaderAbilities": [
+    {
+      "type": "action",
+      "cost": { "resources": 1, "exhaust": true },
+      "do": {
+        "effect": "exhaust",
+        "target": {
+          "zone": "any_arena",
+          "controller": "opponent",
+          "selector": "chosen",
+          "count": 1
+        }
+      }
+    }
+  ],
+  "leaderUnitAbilities": []
+}

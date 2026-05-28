@@ -1,0 +1,25 @@
+{
+  "id": "W4_001",
+  "name": "Clone General",
+  "type": "leader",
+  "cost": 4,
+  "aspects": ["heroism", "command"],
+  "arena": "ground",
+  "power": 4,
+  "hp": 5,
+  "traits": ["republic", "clone", "officer"],
+  "leaderAbilities": [],
+  "leaderUnitAbilities": [
+    {
+      "type": "constant",
+      "grant": {
+        "target": {
+          "zone": "any_arena",
+          "controller": "self",
+          "filter": { "card_trait": "clone" }
+        },
+        "modifier": { "power": 1, "health": 1 }
+      }
+    }
+  ]
+}

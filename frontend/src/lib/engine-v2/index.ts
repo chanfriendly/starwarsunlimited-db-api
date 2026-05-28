@@ -6,6 +6,9 @@ export { initGame } from './init';
 export { buildRegistry } from './spec/loader';
 export { getLegalActions, describeAction } from './legal';
 export { defaultChooser, declineChooser, scriptedChooser } from './runtime/chooser';
+export { stepAsync, resolveStep } from './runtime/async_step';
+export type { AsyncStepResult, PendingStep } from './runtime/async_step';
+export type { ResolvedTarget } from './spec/ast';
 
 export type { PlayerAction } from './actions';
 export type {

@@ -1,0 +1,26 @@
+{
+  "id": "W4_004",
+  "name": "Coordinated Strike Captain",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["heroism", "command"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 3,
+  "traits": ["republic", "clone", "officer"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "constant",
+      "while": { "controller_unit_count": { "min": 3 } },
+      "grant": {
+        "target": {
+          "zone": "any_arena",
+          "controller": "self",
+          "filter": { "card_trait": "clone" }
+        },
+        "modifier": { "power": 1 }
+      }
+    }
+  ]
+}

@@ -5,7 +5,15 @@ import type { PlayerId } from './state/types';
 
 export type PlayerAction =
   | { kind: 'START_GAME' }
-  | { kind: 'PLAY_CARD'; player: PlayerId; iid: string }
+  /** `targetIid` is required when the played card is an upgrade — it names the
+   *  friendly unit to attach to. Ignored for units and events. */
+  | { kind: 'PLAY_CARD'; player: PlayerId; iid: string; targetIid?: string }
+  | { kind: 'DEPLOY_LEADER'; player: PlayerId; leaderIndex: number }
+  /** Use an `Action [...]: …` ability on a card or leader. Exactly one of
+   *  `sourceIid` (for in-play units, upgrades, or deployed leader-units) and
+   *  `leaderIndex` (for un-deployed leaders) must be set. `abilityIndex`
+   *  references the position in that source's ability list. */
+  | { kind: 'USE_ACTION_ABILITY'; player: PlayerId; sourceIid?: string; leaderIndex?: number; abilityIndex: number; targetIid?: string }
   | { kind: 'ATTACK'; player: PlayerId; attackerIid: string; defenderIid: string | 'base' }
   | { kind: 'TAKE_COUNTER'; player: PlayerId; counter: 'initiative' | 'blast' | 'plan' }
   | { kind: 'PASS'; player: PlayerId }

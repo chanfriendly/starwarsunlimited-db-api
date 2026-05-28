@@ -6,6 +6,419 @@
 
 ## Current Status
 
+*(2026-05-26 session 46)* **Engine v2 UAT bug fixes — setup resources, initiative-take, leader-attack power display. Three real bugs and one cosmetic, all from the first browser play session. Scenarios 66/66. TypeScript: 0 errors.**
+
+### Bugs reported in session-45 UAT + fixes
+
+**Bug #1: only able to place 1 resource during setup (AI got 2 — correct).** `advanceSetupAfterResource` was setting the `setup_declined` flag whenever `(hasResourced && resources < 2)`, which fires after EVERY `RESOURCE_CARD` action (not just declines, since both action paths set `hasResourced=true`). First action by p1 → flagged as declined → skipped for the rest of setup → p2 gets both placements. Fix: pass an explicit `declined: boolean` parameter; only set the flag on `DECLINE_RESOURCE`. Also restructured the helper so `setupDone` reads from the post-flag state instead of the captured input (the previous closure-captured state didn't see the flag until the *next* call).
+
+**Bug #2: game hangs after taking initiative.** Two compounding issues. (a) `legal.ts` only checked the asking player's own `countersHeld.includes('initiative')` when deciding whether to offer `TAKE_COUNTER` — so after p1 took initiative, `TAKE_COUNTER` was still legal for p2. If both players ended up with `hasTakenCounterThisRound=true`, the skip-loop in `advanceToNextTurn` bounced between them until the safety counter ran out, leaving `activePlayer` on a seat with no legal actions and no auto-advance. (b) `advanceToNextTurn` had no defensive end-action-phase fallback. Fix: `legal.ts` now checks `state.playerOrder.some(o => state.players[o].hasTakenCounterThisRound)` and suppresses `TAKE_COUNTER` if ANYONE took it this round. `advanceToNextTurn` now ends the action phase if every player has taken their counter, as a defensive backstop.
+
+**Bug #3: only able to PASS after deploying leader.** Likely not a bug — deploy costs 4 → 0 ready resources → hand cards unaffordable → no units to attack with → PASS is the only legal action. The leader entered exhausted per §v7 (correct). Closing as expected behavior.
+
+**Bug #4: Clone General attack shows `?` power.** `describeAction`'s ATTACK case gated power lookup on `isUnit(spec)` which is false for leader specs. Fix: replaced with `effectivePower(state, reg, attacker.inst, controller)` — now leaders and tokens display their actual power, including any aura/upgrade buffs.
+
+**Verification:**
+- `npx tsc --noEmit` — clean.
+- `npm run scenarios` — 66/66 passing (61 holdovers + 5 new for the UAT fixes).
+- `npm run play-cli -- --ai both` — completes.
+- `/playtest` and `/playtest/smoke` SSR — both 200, no error indicators.
+
+**New scenarios (5):**
+- "UAT bug #1: RESOURCE_CARD during setup does NOT set setup_declined flag" — drives a real setup phase, places one resource, asserts no flag and active switches.
+- "UAT bug #1: full setup gives both players 2 resources" — alternating placements through to action phase, both players at 2 resources.
+- "UAT bug #2: TAKE_COUNTER not legal for opponent after I take initiative" — hand-builds a state where p1 has taken initiative, asserts p2's legal actions don't include `TAKE_COUNTER`.
+- "UAT bug #2: action phase ends gracefully if both players took counter" — defensive — handcrafts both flags set, confirms one PASS transitions to regroup.
+- "UAT bug #4: describeAction shows real power for leader attacks" — Clone General as the attacker; asserts the description contains "5 power" (printed 4 + 1 from own clone aura), not "? power".
+
+---
+
+*(2026-05-26 session 45)* **Engine v2 Week 7b landed — `/playtest` browser route + base-damage replacements + deterministic deck shuffle in `search`. v2 engine runs end-to-end in the browser; the replacement layer now covers all damage (unit and base, combat and non-combat); `search` shuffles the deck per §v7 8.36 with a state-derived seed for replay safety. Scenarios 61/61. TypeScript: 0 errors.**
+
+The UI UAT artifact ships. Visit `/playtest`, pick a mode (Human vs AI / AI vs AI / Human vs Human), click START GAME. The board renders both players' mats with deployed leaders, units (with effective stats accounting for upgrades + auras), upgrade stacks, capture zones, resource pips. AI seats auto-dispatch via the heuristic chooser; human seats dispatch via the legal-actions list and surface async prompts (`choose_one`, `prompt_target`, `optional`) through a modal overlay.
+
+**New module: `frontend/src/lib/engine-v2-react/`**
+- `useGameV2.ts` — the React adapter. Holds `GameState`, threads `stepAsync`/`resolveStep` for human turns, auto-dispatches AI turns via synchronous `step()` + heuristic chooser. Returns `{ state, pending, events, legalActions, isMyTurn, isAiThinking, dispatch, resolveChoice, restart }`. Engine is pure-functional, so no ref-to-mutable-instance like v1's `useGame` needed — just `useState<GameState>`.
+- `ai.ts` — ported `aiPick` from `play_cli.ts` (greedy: highest-cost playable card → deploy → ATTACK base → ATTACK → action ability → counter → pass). Plus `aiChooser` (auto-leftmost/yes/first-N) for chooser callbacks during AI turns.
+- `index.ts` — public exports.
+
+**New route: `/playtest`** under `frontend/src/app/playtest/`:
+- `page.tsx` — server component wrapper.
+- `PlaytestClient.tsx` — top-level client; setup → playing → ended state machine, deck/leader/base selection from fixtures, AI-mode toggle.
+- `Board.tsx` — root board layout. Two PlayerMats stacked vertically, action picker + event ticker on the right, choice modal overlay when pending.
+- `PlayerMat.tsx` — per-player display: base + HP + counters, leader chips, ground arena, space arena, capture zone, resource pips, hand (own perspective shows contents; opponent perspective shows facedown).
+- `UnitCard.tsx` — single unit display. Effective power/HP via `effectivePower`/`effectiveHp` (so aura buffs + upgrade modifiers are visible), damage indicator, exhausted overlay, shield count, upgrade stack below.
+- `ActionPicker.tsx` — legal-actions list grouped by kind (PLAY / DEPLOY / ABILITY / ATTACK / RESOURCE / OTHER), each as a clickable button using `describeAction`.
+- `ChoicePromptModal.tsx` — modal overlay rendering `choose_one` (option buttons), `prompt_target` (multi-select target picker with confirm), `optional` (yes/no). Targets are pretty-printed via `renderTarget`.
+- `smoke/` subroute — developer-only headless verification harness that mounts `Board` directly with a deterministic config (skips the setup screen). Used for SSR-time smoke testing.
+
+**Modified files (1)**
+- `lib/engine-v2/index.ts` — added `export type { ResolvedTarget }` so the modal can render targets typed correctly.
+
+**Verification:**
+- `npx tsc --noEmit` — clean.
+- `npm run scenarios` — 61/61 passing (57 holdovers + 3 new for base-damage replacements + 1 new for deck-shuffle-after-search, with the prior "no matches → deck unchanged" scenario updated to the new §v7 8.36 behavior).
+- `npm run play-cli -- --ai both` — completes (engine end-to-end stable).
+- **`/playtest` SSR** — HTTP 200, 31KB response, all setup-screen strings present.
+- **`/playtest/smoke` SSR** — HTTP 200, 43KB response, Board mounts with both PlayerMats; GROUND/SPACE/HAND/RESOURCES sections present for each seat; Echo Base + Death Star base names rendered; zero runtime error indicators.
+
+**Base-damage replacements (bonus — added after the UI work):**
+
+The Week 6c replacement layer covered damage-to-unit and defeat-unit; this session extends it to base damage so the layer is now complete for damage events.
+
+- **`ReplacementAbility.on` widened to `'damage_unit' | 'damage_base' | 'defeat_unit'`.**
+- **`TriggerPredicate.base_controller?: PlayerRef`** — new predicate field for matching "the base being damaged belongs to X." Typical use: `where: { base_controller: 'self' }` on a unit's `damage_base` replacement.
+- **`runtime/damage.ts` exports `dealDamageToBase`** mirroring `dealDamageToUnit`. Consults `damage_base` replacements first, falls through to `damageBase`. Used by `interpret.ts applyDamageToTarget` (base branch) and `reducer.ts applyAttack` (both base attacks and Overwhelm excess).
+- **Fixture: Aegis Shield Generator (W7_001)** — space unit (1/5) with `replacement on: 'damage_base' where: { base_controller: 'self' } with: { effect: 'noop' }`. Guards friendly base from all damage as long as it's in play.
+- **3 new scenarios**: Aegis prevents combat damage to its controller's base; Aegis does NOT fire when its controller attacks the opponent's base (asymmetry verified); Overwhelm excess damage is also intercepted (confirms `applyAttack`'s second base-damage call site is wired).
+
+**Deterministic deck shuffle in `search` (bonus #2):**
+
+`applySearch` previously left the deck in its pre-search order. Per §v7 8.36 the deck shuffles after a search regardless of whether a card was taken. Closing this gap required a deterministic PRNG (since the async step model replays from the original state, any randomness must be reproducible).
+
+- **`util/rng.ts`** — `mulberry32` seedable PRNG + `shuffleDeterministic` Fisher-Yates. No `Math.random` anywhere.
+- **`applySearch` shuffles on all three exit paths** — match found, no match, declined — using `state.step` as the seed. Two `search` calls in the same step would produce the same shuffle (acceptable for the rare double-search case); consecutive top-level steps get fresh randomness.
+- **2 scenario updates** — the prior "deck unchanged on no-match" scenario flipped to verify the new behavior: same cards retained but order may differ. New scenario: running the same search twice from the same starting state produces the same shuffled deck (replay determinism verified).
+
+**Playtest UX polish (bonus #3 — added so the user can productively test):**
+
+- **`GameLog.tsx`** — scrollable side panel reading `state.log` directly. Auto-scrolls to newest entry, critical lines highlighted amber, round number prefix on every line. Shows last 60 entries. Lives in the right-side aside next to the action picker.
+- **Keyboard shortcuts:**
+  - **ActionPicker**: numeric keys 1-9 trigger the n-th legal action globally; `p` triggers PASS. Bracketed number chip rendered next to each button so the mapping is visible. A hint line ("Click or press the bracketed number / `p` to pass") appears when the user is on-turn.
+  - **ChoicePromptModal**: numeric keys pick options (choose_one) or toggle candidates (prompt_target); `Enter` confirms target selection; `Esc` declines if `canPass`; `y`/`n` answer optional prompts. Shortcut chips render on each option/button.
+- Listeners use `window.addEventListener('keydown', …)` with cleanup; modifier keys (Ctrl/Cmd/Alt) are ignored; inputs/textareas are excluded (defensive — no inputs currently).
+
+**Design decisions (in code):**
+- **Pure-functional engine → simpler React adapter.** v1's `useGame` had to hold the engine instance in a ref because the engine mutated state internally; the Strict Mode double-mount caused engine drift. v2 has no such issue — state is plain data, stored in `useState`. The hook is roughly 150 lines vs v1's 147 + a ton of subtle correctness commentary.
+- **AI uses synchronous `step()`, not `stepAsync`.** Same call-site split as the CLI: AI doesn't need pause semantics, going through the replay wrapper would add overhead for no benefit. The chooser callback gives the AI its picks deterministically.
+- **`stateRef` for the auto-dispatch closure.** The AI's `setTimeout` callback reads `stateRef.current` rather than the closed-over `state`, so a state change between schedule and fire is honored.
+- **Strict Mode safety.** All state mutations go through `setState`; no refs-to-engine pattern; effects use cleanup that clears timeouts. Verified clean by render in dev mode.
+- **Smoke route as a verification artifact.** `/playtest/smoke` skips the setup screen and mounts the Board directly. This let me verify the playing-mode render path in SSR without driving an actual browser click. It's a developer tool, not a user-facing feature — kept in the route tree because it's harmless.
+- **Fixture cards, not real SWU cards.** The playtest deck uses W1-W6 fixture JSON. Real deck integration (mapping deck-builder output → `DeckConfig` + authoring specs for the player's actual cards) is the next batch.
+
+**Path to full UI UAT, updated:**
+- ✅ Async PendingChoice protocol (session 43)
+- ✅ CLI choice prompting (session 44)
+- ✅ `useGameV2` hook + Board + ChoicePromptModal + AI auto-dispatch (THIS session)
+- 🎯 Next: wire deck-builder output → `DeckConfig`; hand-author specs for cards in a real playtest deck; polish UI (card text on hover, contextual click-to-play, keyboard shortcuts)
+- Then: capture-zone UI polish, upgrade-stacking visual polish, animations, sound
+
+The Week 7b plumbing is the line above which everything is engine work and below which is product/UX work. The engine is now demonstrably wired end-to-end in the browser.
+
+---
+
+*(2026-05-26 session 44)* **Engine v2 Week 7a follow-up — CLI rewired to stepAsync for human players. Long-standing "CLI choice prompting" gap closed. Scenarios 57/57. TypeScript: 0 errors. AI-vs-AI play-cli still completes; human turns now prompt interactively for every choose_one / chosen-target / optional decision.**
+
+Session 43 landed the async step protocol as a wrapper around `step()`. This session is the first real driver to consume it — the CLI.
+
+- **AI players keep using synchronous `step()`** with a heuristic `aiChooser` (auto-pick leftmost / yes / first-N). Zero behavior change for AI turns.
+- **Human players go through `stepAsync`/`resolveStep`.** A new `executeHumanAction` function drives the loop: start with `stepAsync`, if `pending` call `promptHuman` to render the prompt via readline and read the pick, call `resolveStep`, repeat until settled.
+- **`promptHuman` renders all three prompt kinds** — `choose_one` (numbered options + optional `p` to pass), `prompt_target` (numbered candidates with full unit names + counts + optional decline), `optional` (y/n). Targets are pretty-printed with controller + card name (e.g. "p2's Battlefield Marine<i17>").
+- **The old auto-pick fallback (`cliChooser` with `pendingAnswers` queue) is gone.** That was the documented "CLI choice prompting" gap. The new path either prompts the human or uses the AI chooser — no silent leftmost picks during human turns.
+- **Chooser comment block updated** in `runtime/chooser.ts` to reflect that the async lift has landed; the synchronous API is the foundation that `async_step.ts` wraps.
+
+**Modified files (2):**
+- `scripts/play_cli.ts` — removed the auto-pick `cliChooser`; replaced with `aiChooser` (for AI players only) + new `promptHuman` + `executeHumanAction` (for human players via `stepAsync`); main loop dispatches by player type.
+- `runtime/chooser.ts` — doc comment updated.
+
+**Design decisions (in code):**
+- **AI keeps the synchronous path** rather than going through `stepAsync` with a fallback chooser. Two reasons: (a) `stepAsync` adds replay overhead the AI doesn't need; (b) leaving the AI on `step()` keeps the synchronous API exercised by a real driver, not just tests. If we want a unified path later, adding a `fallbackChooser` parameter to `stepAsync` is a small change.
+- **`executeHumanAction` returns `{ next, events }` shaped identically to `step()`** so the main loop's event-display code (DEFEATED, TOKEN_CREATED, CAPTURED, GAME_ENDED) didn't need to change.
+- **No "back" / "undo" on prompts.** A human who picks wrong during a multi-prompt resolution is stuck for that step. Could be added later by tracking journal depth and rewinding `pending`, but adds UI surface without changing the engine.
+
+**Path to UI UAT, updated:**
+- ✅ Async PendingChoice protocol (session 43)
+- ✅ ~~CLI choice prompting~~ (this session) — bonus: validates the async API design under a real driver before React arrives
+- 🎯 Next: `useGameV2` React hook wrapping `stepAsync`/`resolveStep` + a `ChoicePromptModal` component
+- Then: GameBoard.tsx wired to v2 actions + ~20 hand-authored playtest cards + capture-zone UI + upgrade-stacking visual
+
+---
+
+*(2026-05-26 session 43)* **Engine v2 Week 7a landed — async step protocol (replay-based PendingChoice). Scenarios 57/57. TypeScript: 0 errors. The single biggest blocker to UI UAT is now closed.**
+
+This was the long-standing "Week 4 lift" deferred since the start: how does the engine pause for player input in a browser, where a React component can't synchronously block on a click? Solved without rewriting any of the engine internals.
+
+**The pattern: replay-based resumption.** The engine stays fully synchronous and pure (no RNG / Date.now / object iteration in the `step()` path — audited). Every player-input point already flows through the swappable `Chooser` callback, so the async surface is a thin wrapper:
+
+1. `stepAsync(state, action, reg)` invokes the existing synchronous `step()` with a **replay chooser** backed by a journal of pre-answered picks.
+2. If the engine asks for a pick the journal doesn't have, the replay chooser throws an internal `PendingChoiceSignal`. `stepAsync` catches it and returns `{ kind: 'pending', pending }` — a resumable handle carrying the original state + action + journal.
+3. The UI passes the player's pick to `resolveStep(pending, result)`. The pick is appended to the journal and `step()` re-runs from the original state. The engine's determinism guarantees the same intermediate state up to the next unanswered choice point.
+4. Eventually no more choices are needed and `step()` settles. Returns `{ kind: 'settled', next, events }`.
+
+**Cost:** O(choices²) re-execution per step — N+1 runs total for N prompts. For typical card abilities (0–2 prompts) this is negligible. The pathological case (Lightning Storm = 4 prompts) ran cleanly under verification.
+
+**Critically, no engine internals changed.** The synchronous `step()` and `Chooser` API are untouched. Tests + CLI keep using them directly. The async layer is the engine-to-UI adapter only.
+
+**New files (1):**
+- `runtime/async_step.ts` — `PendingChoiceSignal` (internal), `PendingStep` (resumable handle), `AsyncStepResult` (discriminated union), `stepAsync` + `resolveStep` (public API).
+
+**Modified files:**
+- `index.ts` — exports `stepAsync`, `resolveStep`, `AsyncStepResult`, `PendingStep`.
+- `scripts/scenarios.ts` — 5 new async-protocol scenarios.
+
+**Determinism audit (must hold for replay to be sound):**
+- `Math.random`: only in `init.ts` (deck shuffle at game start) — NOT in `step()`.
+- `Date.now`: only in `util/uuid.ts` — used by `initGame` once, NOT in `step()`.
+- `Object.keys/entries/values`: never used in the engine; iteration uses `state.playerOrder` (deterministic).
+- Map/Set iteration: only `Set<string>` in `perGameFlags`; insertion-ordered + deterministic. No `Map`s in state.
+- iid generation: `state._nextIid` counter, threaded through state mutations.
+
+The runtime was already pure by design. The replay model just made the property load-bearing.
+
+**Scenarios (57/57 passing):**
+- 52 holdovers (Weeks 2-6c) all green
+- 5 new W7a: no-choice action settles on first call; choose_one prompts return pending with the right shape; single-choice resolves to settled (or another pending); replay determinism (two stepAsync calls with same inputs produce identical settled state); 4 sequential prompts surface one-at-a-time and settle on the 4th resolve (verified using Lightning Storm divided damage)
+
+**Known gaps deliberately deferred (Week 7b+):**
+- **CLI wiring to stepAsync** — the CLI still uses the synchronous chooser (which auto-picks for choose_one / chosen-target). Wiring it through stepAsync would make the readline driver truly interactive for branching plays. Small task; not blocking.
+- **PendingStep serialization** — useful if we want to persist mid-step state across browser refreshes. Right now PendingStep holds a live `GameState` reference; serialization is straightforward (the engine state is plain JSON-able data) but not load-bearing for the initial UAT.
+- **PendingChoice ordering** when multiple replacements match the same event (Week 7 gap from session 42).
+- **Base-damage replacements**, leader-as-base-upgrade, true deck shuffle in `search` (long-standing gaps).
+- **Visual UI surface** — the next-largest blocker after the async protocol. `useGameV2` hook + GameBoard rewiring + capture-zone UI + choice-prompt modals.
+
+**Path to UI UAT, updated:**
+- ✅ ~~Async PendingChoice protocol~~ (this session)
+- **🎯 Next**: `useGameV2` hook + GameBoard wiring to v2 + choice-prompt modal component
+- Then: hand-author ~20 cards for a playtest deck
+- Then: capture-zone UI, upgrade-stacking visual, action-ability buttons on v2
+
+---
+
+*(2026-05-26 session 42)* **Engine v2 Week 6c landed — combat damage onto the replacement layer + `defeat_unit` replacement. Scenarios 52/52. TypeScript: 0 errors. play-demo + play-cli AI-vs-AI still run end-to-end.**
+
+- **New module `runtime/damage.ts`** is the single chokepoint for damage-to-unit application. Both the combat path (`reducer.ts applyAttack`) and the non-combat path (`interpret.ts applyDamage` + `applyDividedDamage`) call `dealDamageToUnit` instead of `damageUnit` directly. The replacement layer is consulted uniformly: combat damage now respects damage_unit replacements (previously documented as a gap and locked by a scenario).
+- **`defeat_unit` replacement** added. `ReplacementAbility.on` now accepts `'damage_unit' | 'defeat_unit'`. `runtime/replacements.ts` exposes `collectDefeatUnitReplacements` + `makeProspectiveDefeatEvent`. `state_based.ts` rewritten to process one dead unit per fixpoint pass — collects defeat replacements for the candidate unit, runs the matched replacement instead of moving to discard, and lets the next iteration re-check. The 64-step guard was raised to 256 to absorb the slower per-defeat cadence.
+- **The locked "Replacement: does NOT intercept combat damage" scenario is now the positive assertion** "Replacement: intercepts combat damage too" — verifying Force Barrier (1/4) takes 0 damage from a 3-power attacker and emits `DAMAGE_PREVENTED` naming itself as the source. The attacker still takes 1 strikeback (the replacement only prevents incoming damage on its source; the defender's outbound damage is separate).
+- **Leader flip-back is unchanged at the API level** — still lives in `state_based.ts` as a direct branch. Migrating it to a true defeat_unit replacement would require a leader-specific effect (return-to-leader-zone), and that adds an AST primitive for a single use case. Deferred until a second leader pattern needs it.
+- **Chooser now threads through `runStateBased`** so defeat-replacement effects can prompt the player.
+
+**New files (2):**
+- `runtime/damage.ts` — `dealDamageToUnit` wraps `damageUnit` with replacement consultation. Single import surface for both combat and non-combat damage call sites.
+- `__fixtures__/cards/W6_008.json` — Phoenix Sentinel (3/3 ground; defeat replacement that heals self to full and exhausts).
+
+**Modified files:**
+- `spec/ast.ts` — `ReplacementAbility.on` widened to `'damage_unit' | 'defeat_unit'`; doc updated.
+- `runtime/replacements.ts` — factored out shared `collectReplacements(state, reg, event, on)`; added `collectDefeatUnitReplacements` + `makeProspectiveDefeatEvent`.
+- `runtime/state_based.ts` — rewritten to process one dead unit per pass + consult defeat replacements; takes `chooser?` parameter; 256-step guard.
+- `runtime/interpret.ts` — `damageUnitWithReplacements` removed; `applyDamageToTarget` and `applyDividedDamage` delegate to `dealDamageToUnit`.
+- `reducer.ts` — `applyAttack` calls `dealDamageToUnit` for both defender and attacker combat damage; `settle` threads `chooser` to `runStateBased`.
+- `__fixtures__/index.ts` — registers W6_008.
+- `scripts/scenarios.ts` — combat-damage replacement scenario flipped from "locked gap" to positive assertion; 3 new defeat-replacement scenarios.
+
+**Design decisions (in code):**
+- **`runtime/damage.ts` is the cycle-breaker.** The cleanest way to get combat damage onto the replacement layer was extracting damage dispatch into a third module. `primitives/combat.ts` doesn't import `applyEffect` (no cycle there); `runtime/damage.ts` imports both `damageUnit` (from combat) and `applyEffect` (from interpret) — the cycle between damage.ts and interpret.ts is value-level only, which TS resolves at call time, matching the existing modifiers↔triggers↔interpret cycle pattern.
+- **One dead unit per state-based pass instead of all-at-once.** The previous code processed all dead in a single iteration. With defeat replacements that mutate state (e.g. heal one unit, damage another), the read-after-write semantics require recomputing the dead set after each replacement. Processing one at a time keeps the loop correct without bookkeeping the mid-iteration changes. Guard raised from 64 to 256 to absorb the slower cadence — still tiny relative to the state space.
+- **DEFEATED event suppressed when replacement matches.** The semantics are "this defeat doesn't happen." If the replacement fires, no DEFEATED event is emitted — triggers listening for `event.defeated` correctly don't fire either. If the replacement's effect doesn't lower damage below lethal, the next state-based pass tries to defeat again and the 256 guard catches an infinite loop.
+- **Leader flip-back stays a direct branch.** Migrating it to a defeat replacement would need a `return_to_leader_zone` effect — too much AST surface for one use case. The pattern is identical (flip-back replaces discard), but expressing it as a generic effect when no card other than the implicit leader machinery uses it adds complexity for no win. Re-evaluate when a second similar mechanic appears.
+- **256-step state-based guard.** Each defeat or replacement is one tick. 256 is high enough for any plausible chain without being so high that a misbehaving card stalls the engine.
+
+**Scenarios (52/52 passing):**
+- 13 W2 + 5 W3 + 11 W4 + 8 W5 + 7 W6a + 5 W6b holdovers
+- 3 new W6c: Phoenix heals self instead of being defeated; Phoenix survives a 6-power combat hit via defeat replacement; leader flip-back still works under the new state-based loop (regression check)
+
+**Known gaps deliberately deferred (Week 7+):**
+- **Base-damage replacements** — `dealDamageToBase` wrapper + base-damage collector in replacements.ts. Mirror of `dealDamageToUnit`. Unblocks "If your base would take damage, prevent it" cards.
+- **More replacement event kinds** — `zone_change`, `card_drawn`, etc.
+- **Replacement ordering chooser** when multiple replacements match the same event.
+- **Distribution-prompt chooser variant** for `divided_damage` AI-driven splits.
+- **CLI interactive choice prompting** + async PendingChoice for the web UI.
+- **Leader-as-base-upgrade** (Twin Suns §v7 3.4.4A).
+- **True deck shuffle in `search`**.
+- **Leader flip-back as a replacement** (cosmetic refactor — see above).
+
+---
+
+*(2026-05-26 session 41)* **Engine v2 Week 6b landed — divided damage + minimal replacement-effects layer. Scenarios 49/49. TypeScript: 0 errors. play-demo + play-cli AI-vs-AI still run end-to-end.**
+
+- **`divided_damage`** — distributes N damage across a candidate pool via per-point chooser prompts. Default chooser dumps all points on the leftmost candidate; scripted chooser can split across targets (2+1+1 verified). Indirect by default per §v7 8.35.1.
+- **`ReplacementAbility`** AST + `runtime/replacements.ts` collector. Replacement abilities intercept a would-be event and substitute a different effect per §v7 7.7.5. Initial scope: `on: 'damage_unit'` only. The non-combat damage path (`applyDamageToTarget`) consults the replacement layer before calling `damageUnit` — when a replacement matches, emits `DAMAGE_PREVENTED { by: <source iid> }` and runs the replacement's `with` effect instead.
+- **Combat damage gap documented + locked.** Combat damage in `applyAttack` still goes through `damageUnit` directly (and the hardcoded shield path). Moving combat damage onto the replacement layer requires breaking the cycle between `primitives/combat.ts` and `runtime/interpret.ts` — landed as its own batch (Week 6c). The "Replacement: does NOT intercept combat damage" scenario locks the current behavior so we notice when this changes.
+- **`unpreventable: true` bypasses both replacements and shields.** Honors §v7 7.7.5 — explicit unpreventable damage skips the entire prevention layer.
+- **`eventCardIid` now resolves `DAMAGE_DEALT` → `targetIid`** so replacement `where: { card: 'self' }` reads as "this damage is hitting me."
+
+**New files (3):**
+- `runtime/replacements.ts` — `collectDamageUnitReplacements` scanner + `makeProspectiveDamageEvent` helper.
+- `__fixtures__/cards/W6_006.json` — Lightning Storm (event, 3, `divided_damage 4 indirect across enemy units`).
+- `__fixtures__/cards/W6_007.json` — Force Barrier (1/4 unit, replacement: `if damage would hit me, do nothing`).
+
+**Modified files:**
+- `spec/ast.ts` — `DividedDamageEffect`; `ReplacementAbility`; `isReplacement` guard.
+- `runtime/interpret.ts` — `applyDividedDamage`; new `damageUnitWithReplacements` helper interposed between `applyDamageToTarget` and `damageUnit`; threads `chooser` through `applyDamage`.
+- `runtime/predicates.ts` — `eventCardIid` handles `DAMAGE_DEALT`.
+- `__fixtures__/index.ts` — registers W6_006 + W6_007.
+- `scripts/scenarios.ts` — 5 new Week-6b scenarios.
+
+**Design decisions (in code):**
+- **`divided_damage` loops per point through the chooser** rather than introducing a new `distribute` prompt shape. Each iteration is a `choose_one` over surviving candidates with `value = iid`. Same pattern as `disclose` / `search`. A distribution-prompt chooser variant (returns `Map<iid, amount>`) would be cleaner for AI heuristics but isn't load-bearing for the current scenarios.
+- **Replacement scope: damage_unit only.** The architectural extension point is in place (`runtime/replacements.ts` is the only place that needs to grow new collectors for `defeat_unit`, `zone_change`, etc.). Shipping more replacement event kinds without driver cards to validate them adds dead code.
+- **Combat damage stays on the hardcoded path for now.** Breaking the cycle (combat → interpret → effect resolution → combat) needs a refactor: extract damage dispatch into a third module that both `combat.ts` and `interpret.ts` import. Postponed to its own batch so this one stays small.
+- **Multiple-replacement order: source-creation order.** Per §v7 7.7.5 the affected player chooses the order. Until a chooser pass for prevention-ordering ships, source-creation order is deterministic and matches the existing trigger-drain convention.
+- **`unpreventable` bypasses replacements *and* shields.** The shield check lives inside `damageUnit`; the replacement layer is gated by the same flag. Both bail when `unpreventable=true`.
+
+**Scenarios (49/49 passing):**
+- 13 W2 + 5 W3 + 11 W4 + 8 W5 + 7 W6a holdovers
+- 5 new W6b: divided damage default chooser dumps on leftmost; divided damage scripted chooser splits 2+1+1; replacement prevents non-combat damage and emits DAMAGE_PREVENTED; replacement does NOT intercept combat damage (locks the current gap); unpreventable / no-match damage lands normally
+
+**Known gaps deliberately deferred (Week 6c+):**
+- **Combat damage replacements** — needs a refactor to break the cycle between `primitives/combat.ts` and `runtime/interpret.ts`. Most-impactful next batch.
+- **Replacement event kinds beyond `damage_unit`** — defeat, zone_change, base damage.
+- **Replacement ordering chooser** when multiple replacements match the same event.
+- **CLI choice prompting** + **Async PendingChoice** (long-standing).
+- **Leader-as-base-upgrade** (Twin Suns §v7 3.4.4A).
+- **True deck shuffle in `search`** — RNG/permutation through the chooser.
+
+---
+
+*(2026-05-26 session 40)* **Engine v2 Week 6a landed — five missing primitives (move, indirect damage, look_at, disclose, search). Scenarios 44/44. TypeScript: 0 errors. play-demo + play-cli AI-vs-AI still run end-to-end.**
+
+These primitives were declared in PROGRESS as "AST exists" — but the AST didn't actually have them. Week 6a closes that gap: the AST now declares all six (including `divided_damage`, which I left for the next batch since its chooser-driven distribution is novel) and the interpreter implements five of them.
+
+- **`move { target, to: 'ground_arena' | 'space_arena' | 'other_arena' }`** — swaps a unit between arenas. `'other_arena'` is computed against the unit's current zone (the Plot keyword pattern). Emits `ARENA_MOVED`.
+- **Indirect damage** — added `indirect?: boolean` to `DamageEffect`. The runtime already supported indirect (bypasses shields per §v7 8.35.2.A); the AST simply exposes it. `applyDamage` threads the flag through to `damageUnit` / `damageBase`.
+- **`look_at { player, source: 'deck_top' | 'opponent_hand', count? }`** — peek at hidden information. State unchanged; emits `CARD_REVEALED` per peeked card so the chooser/UI can display.
+- **`disclose { player, filter?, count? }`** — chooser-picked reveal from hand. Emits `CARD_DISCLOSED { player, iids, aspects }` so downstream effects can branch on the disclosed card's aspects (Force-card-disclose patterns).
+- **`search { player, count, filter?, to: 'hand' | 'discard', reveal? }`** — peek top N, chooser picks a matching card, moves it to hand/discard, returns the rest to the deck in order. (True shuffle is gapped — RNG isn't piped into the interpreter; documented and doesn't affect any current scenario since cards are random-access only by top/bottom.)
+
+**New files (5):**
+- `__fixtures__/cards/W6_001.json` — Tactical Maneuver (event, 1, `move target to other_arena`).
+- `__fixtures__/cards/W6_002.json` — Ion Burst (event, 2, indirect 2 damage to chosen enemy).
+- `__fixtures__/cards/W6_003.json` — Reconnaissance (event, 1, `look_at opponent deck_top 3`).
+- `__fixtures__/cards/W6_004.json` — Reveal Plans (event, 1, `disclose self`).
+- `__fixtures__/cards/W6_005.json` — Tactical Brief (event, 2, `search top 3 for republic → hand`).
+
+**Modified files:**
+- `spec/ast.ts` — added `MoveEffect`, `LookAtEffect`, `DiscloseEffect`, `SearchEffect` to the Effect union; added `indirect?: boolean` to `DamageEffect`.
+- `runtime/interpret.ts` — new `applyMove` / `applyLookAt` / `applyDisclose` / `applySearch`; `applyDamageToTarget` now threads the `indirect` flag through to `damageUnit` / `damageBase`.
+- `__fixtures__/index.ts` — registers W6_CARDS into ALL_CARDS.
+- `scripts/scenarios.ts` — 7 new Week-6 scenarios.
+
+**Design decisions (in code):**
+- **`move` is implemented inline in `applyMove`, not through `moveToZone`,** because `moveToZone` emits `ZONE_CHANGED` while arena-to-arena moves emit `ARENA_MOVED` per §v7 7.5.3. We want only the more-specific event for arena swaps.
+- **`look_at` is a pure event emitter** — no state mutation. The `CARD_REVEALED` event is the artifact; the actual "hidden information" model is the UI's concern, not the engine's.
+- **`disclose` uses the chooser to pick among hand cards matching the filter.** The chooser sees the cards as `choose_one` options (label = card name, value = iid). Future cards that want the choice gated by the disclosed aspects can read the `CARD_DISCLOSED.aspects` payload from the events stream.
+- **`search` returns non-picked cards to the deck in order**, not shuffled, because the interpreter doesn't carry an RNG. Per §v7 8.36 the searched portion should be shuffled — this is documented as a gap but doesn't affect any current scenario (cards are random-access only by top/bottom).
+- **No-match search is a state no-op.** The deck stays in its original order; no shuffle happens because there's nothing to interleave.
+
+**Scenarios (44/44 passing):**
+- 13 W2 + 5 W3 + 11 W4 + 8 W5 holdovers
+- 7 new W6: ground→space via `other_arena`; space→ground via `other_arena`; indirect damage bypasses shield (and doesn't consume it); look_at fires CARD_REVEALED per peeked card; disclose emits CARD_DISCLOSED with the picked card's aspects; search top-3 picks the matching card and lands it in hand; search with no matches leaves the deck untouched
+
+**Known gaps deliberately deferred (Week 6b):**
+- **`divided_damage`** — distributing N damage among any number of targets via a chooser-driven distribution prompt. Novel interaction (chooser returns a Map<iid, amount>, not just a pick), so I deferred to its own batch.
+- **Replacement effects layer** (Instead/Would) — still a direct branch in state_based for leader flip-back.
+- **CLI choice prompting** + **Async PendingChoice** for the web UI (long-standing gap).
+- **Leader-as-base-upgrade** (Twin Suns §v7 3.4.4A).
+- **True deck shuffle in `search`** — needs RNG piped through the interpreter or a chooser-supplied permutation.
+
+---
+
+*(2026-05-25 session 39)* **Engine v2 Week 5 landed — action abilities (`Action [...]: …`) + un-deployed leader abilities. Scenarios 37/37. TypeScript: 0 errors. play-demo + play-cli AI-vs-AI still run end-to-end.**
+
+This is the next-biggest v1 leader-parity chunk after Week 4. The two land together because un-deployed leaders are mostly *action* ability sources (Ahsoka "Snips," Admiral Ackbar exhaust-an-enemy, etc.) — implementing one without the other would leave most of v1's 47 leaders dormant.
+
+- **New action**: `USE_ACTION_ABILITY { player, sourceIid?, leaderIndex?, abilityIndex, targetIid? }`. Exactly one of sourceIid/leaderIndex.
+- **`applyActionAbility` dispatcher** validates limit + cost, pays exhaust/resources/discard/defeat/remove_shield, bumps the per-source-per-ability counter, then routes `do` through `applyEffect`.
+- **Un-deployed leaders surface** as synthetic `CardInstance`s with iid `LEAD:<pid>:<idx>` so the existing modifier scan, trigger collector, chooser context, and limit accounting all work uniformly. The synth is read-only — never enters a zone, never mutated.
+- **`cardAbilities` in modifiers/triggers** branches on iid prefix when looking at a leader spec: `LEAD:` → `leaderAbilities`; else → `leaderUnitAbilities`.
+- **Limit helpers** (`isLimitExhausted`, `bumpLimit`, `limitKey`) extracted from triggers and exported; both triggered and action abilities use them with distinct `'trig'` / `'act'` tags so a card with both at the same index counts separately.
+- **`readyAll`** now also readies LeaderInstances so action-ability `exhaust` resets each round.
+- **`legal.ts`** enumerates `USE_ACTION_ABILITY` for every in-arena unit/upgrade + every leader (un-deployed → leaderAbilities; deployed leader-unit → leaderUnitAbilities), gated by cost-payable + limit-not-exhausted.
+
+**New files (4):**
+- `__fixtures__/cards/W5_001.json` — Admiral Ackbar (Stay on Target) — un-deployed leader with `Action [1, Exhaust]: exhaust an enemy unit`.
+- `__fixtures__/cards/W5_002.json` — Targeting Computer Sentry — in-arena unit with `Action [Exhaust] (once_per_round): 1 dmg to a chosen enemy`.
+- `__fixtures__/cards/W5_003.json` — Clone Strategist — un-deployed leader with a constant `+1 power to friendly clones`.
+- `__fixtures__/cards/W5_004.json` — Mother Talzin (Whispering Witch) — un-deployed leader with `Triggered (on friendly defeated): draw 1`.
+
+**Modified files:**
+- `actions.ts` — new `USE_ACTION_ABILITY` variant.
+- `runtime/triggers.ts` — synthetic-leader helpers + `LEAD:` prefix, `inPlayCards` includes un-deployed leaders, `locateSource` handles synthetic iids + walks upgrades, `cardAbilities` branches on iid prefix, drain uses `cardAbilities` (not direct spec.abilities) so leader specs resolve, limit helpers extracted + exported.
+- `runtime/modifiers.ts` — `cardAbilities` branches on iid prefix; constant scan now iterates un-deployed leaders too (always-on, no zone gating).
+- `primitives/state.ts` — `readyAll` readies leaders.
+- `reducer.ts` — new `applyActionAbility` + `resolveActionSource` helper; dispatcher case for `USE_ACTION_ABILITY`.
+- `legal.ts` — enumeration of action abilities across units/upgrades/leaders + `pushActionAbilities` helper + `describeAction` covers the new action.
+- `__fixtures__/index.ts` — registers W5_CARDS into ALL_CARDS.
+- `scripts/scenarios.ts` — 8 new Week-5 scenarios.
+
+**Design decisions (in code):**
+- **Synthetic CardInstance for un-deployed leaders** keeps the modifier/trigger/chooser machinery iid-keyed and unchanged. The discriminator is the `LEAD:` iid prefix — chosen over a side-channel "is-leader" flag because the prefix is self-describing in logs and survives serialization.
+- **Limit counter `tag` parameter** (`'trig' | 'act'`) keeps triggered and action limits distinct. A future card with both kinds at the same source iid won't collide.
+- **Cost-payable check at enumeration is loose**: defeat/remove_shield costs aren't validated by `legal.ts` because they require selector resolution (target sets may depend on chooser policy). The reducer throws at fire time if the selector picks nothing. This matches how PLAY_CARD treats triggered effects.
+- **Targets resolved by the Chooser at effect time, not in legal enumeration.** Action abilities don't enumerate per-target — the chooser picks when `applyEffect` walks a `chosen` selector. This avoids combinatorial explosion in the legal-actions list and mirrors how Week 3's choose_one resolves.
+- **Un-deployed leader constants are always-on** (no `active_in_zone` gating), modeled per §v7 3.4.4. If a future card needs "while-not-deployed only" gating that's already implicit; "while-deployed only" lives on `leaderUnitAbilities` automatically.
+
+**Scenarios (37/37 passing):**
+- 13 Week-2 + 5 Week-3 + 11 Week-4 holdovers
+- 8 new Week-5: action ability fires + costs pay + source exhausts; once_per_round blocks second fire; exhausted-source rejection; insufficient-resources rejection; un-deployed leader constant buffs friendlies; un-deployed leader triggered (Mother Talzin draw-on-defeat); action ability `[1 resource, exhaust]` on un-deployed leader; limit resets at end of round (round-transition smoke test through regroup)
+
+**Known gaps deliberately deferred (Week 6):**
+- **Leader-as-base-upgrade** (Twin Suns §v7 3.4.4A) — `leaderUpgradeAbilities` is read but unused.
+- **Replacement effects layer** (Instead/Would).
+- **CLI choice prompting** + **Async PendingChoice** for the web UI.
+- **Remaining primitives**: indirect_damage, divided_damage, arena-move, search, look_at, disclose.
+- **Action ability with cost.exhaust on attached upgrades** — `exhaust(s, iid)` uses `mapInstance` which only walks arena cards, not upgrades. If a future card needs an upgrade with an action ability whose cost includes exhaust, `mapInstance` needs an upgrade-aware variant. Not blocking any current card.
+
+---
+
+*(2026-05-25 session 38)* **Engine v2 Week 4 landed — leaders + upgrades + Coordinate + Smuggle. Scenarios 29/29. TypeScript: 0 errors. play-demo + play-cli AI-vs-AI still run end-to-end.**
+
+Closes the biggest v1 → v2 parity gap. v2 now supports:
+
+- **Leader deploy** — `DEPLOY_LEADER { player, leaderIndex }` action. Pays cost, creates a CardInstance with `cardId = leaderSpec.id` in the spec's arena (default ground), flips the LeaderInstance (`isDeployed=true`, `unitIid` set), emits `LEADER_DEPLOYED`. Deployed leader-units enter exhausted.
+- **Leader-unit-side abilities** — constants and triggered abilities on `leaderUnitAbilities` surface automatically because the leader-unit instance sits in an arena and `cardAbilities` was extended to read `leaderUnitAbilities` from leader specs. No special case in the scan loop.
+- **Leader flip-back on lethal damage** — state-based defeat now branches: if the defeated card matches a `LeaderInstance.unitIid`, flip back (`isDeployed=false`, `unitIid=undefined`, `exhausted=false`) and emit `LEADER_DEFEATED`. No discard entry. Per §v7 3.4.5.
+- **Upgrade attach** — `PLAY_CARD { iid, targetIid }` for upgrades. Pays cost, pushes the upgrade CardInstance into `host.upgrades[]`, emits `UPGRADE_ATTACHED`.
+- **Upgrade stat + keyword stacking** — `effectivePower`/`effectiveHp` add `UpgradeSpec.powerModifier`/`hpModifier` from each upgrade on the host; `effectiveKeywords` merges upgrade keywords; constant abilities on upgrades fire through the modifier scan with the upgrade as source, and `attached_to_self` selector resolves to the host.
+- **Upgrade detach on host defeat** — state-based defeat routes the host's upgrades to the host owner's discard (cleared of damage/exhaust) with `UPGRADE_DETACHED` events.
+- **Coordinate** — `controller_unit_count?: Range` predicate field. Coordinate cards are constant abilities with `while: { controller_unit_count: { min: 3 } }`. No new ability kind.
+- **Smuggle** — `active_in_zone: 'resource_zone'` on constant abilities. The modifier scan walks resource_zone in addition to the two arenas and gates each constant by zone match.
+
+**New files (5):**
+- `__fixtures__/cards/W4_001.json` — Clone General (leader, 4/5 ground, +1/+1 aura to friendly clones).
+- `__fixtures__/cards/W4_002.json` — Battle Plates (upgrade, +2/+2).
+- `__fixtures__/cards/W4_003.json` — Tactical Visor (upgrade, grants Sentinel via `attached_to_self`).
+- `__fixtures__/cards/W4_004.json` — Coordinated Strike Captain (Coordinate +1 power to clones).
+- `__fixtures__/cards/W4_005.json` — Smuggled Cache (+1 power to friendlies while in resource zone).
+
+**Modified files:**
+- `spec/ast.ts` — added `controller_unit_count?: Range` to PredicateLeaf.
+- `actions.ts` — `PLAY_CARD` gained `targetIid?`; new `DEPLOY_LEADER`.
+- `state/zones.ts` — added `findUpgrade` + `findHostOfUpgrade`.
+- `runtime/predicates.ts` — `controller_unit_count` evaluator.
+- `runtime/modifiers.ts` — leader-unit ability surfacing; resource_zone scan with `active_in_zone` gating; upgrade-host modifier aggregation in `effectivePower`/`effectiveHp`/`effectiveKeywords`/`effectiveKeywordValue`; `printedPower`/`printedHp` helpers so leader-unit stats route through the same code path.
+- `runtime/selectors.ts` — `attached_to_self` finds the host of the source upgrade.
+- `runtime/triggers.ts` — `inPlayCards` flattens host upgrades; cardAbilities reads `leaderUnitAbilities`.
+- `runtime/state_based.ts` — upgrade detach + leader flip-back on defeat.
+- `primitives/move.ts` — `attachUpgrade` helper.
+- `reducer.ts` — `applyPlayCard` routes upgrades through `attachUpgrade`; new `applyDeployLeader`.
+- `init.ts` — `DeckConfig.leaderIds?`; `newPlayer` instantiates LeaderInstance entries.
+- `legal.ts` — `PLAY_CARD` enumerated per friendly host for upgrades; new `DEPLOY_LEADER` enumeration; `describeAction` covers both.
+- `__fixtures__/index.ts` — registers W4_CARDS in ALL_CARDS.
+- `scripts/scenarios.ts` — 11 new Week-4 scenarios.
+
+**Design decisions (in code):**
+- **Leaders skip a "leader zone" pseudo-arena.** A deployed leader is a normal CardInstance in `groundArena`/`spaceArena`; the LeaderInstance is just bookkeeping (which arena card is the leader-unit, is it deployed). The scan loop didn't need a branch for this — `cardAbilities` just returns `leaderUnitAbilities` for leader specs and the rest is transparent.
+- **Leader flip-back lives in state_based, not a replacement-effects layer.** Replacement effects ship when more than one card actually needs them.
+- **Upgrade stats stack directly in `effectivePower`/`effectiveHp`, not via synthesized Modifier records.** `UpgradeSpec.powerModifier` is a spec field, not a Modifier. Direct aggregation is the most common upgrade path; synthesizing Modifiers would add indirection for vanilla +N/+N cards.
+- **Coordinate as a `while:` predicate, not a custom ability kind.** ConstantAbility already has `while: Predicate`. New predicate field `controller_unit_count: Range` counts units across both arenas.
+- **Smuggle via `active_in_zone`, not a keyword definition.** Constant abilities with `active_in_zone: 'resource_zone'` only fire while the source sits in the resource zone.
+- **`leaderIds?` on DeckConfig is optional.** Scenarios that bypass initGame don't need leaders; Twin Suns format passes 2 leader ids at the call site.
+
+**Scenarios (29/29 passing):**
+- 13 Week-2 holdovers
+- 5 Week-3 holdovers
+- 11 new Week-4: upgrade stat boost, upgrade keyword grant via attached_to_self, upgrade attach via PLAY_CARD, upgrade detach on host defeat, Coordinate active at 3 units, Coordinate inactive at 2 units, Smuggle active in resource zone, Smuggle inactive in arena, leader deploy lands as 4/5 in ground, leader-unit aura buffs other clones, leader flip-back on lethal (no discard entry)
+
+**Known gaps deliberately deferred (Week 5):**
+- **Action abilities** (`Action [Exhaust]: …`) — the AST has `ActionAbility`; needs a `USE_ACTION_ABILITY` action and dispatcher. Ahsoka "Snips" et al. land here.
+- **Un-deployed leader abilities** — `leaderAbilities` is read but never surfaced. Mother Talzin / Asajj Ventress need this.
+- **Leader-as-base-upgrade** (Twin Suns §v7 3.4.4A) — leader upgrades that attach to your base and provide a leader-unit ability. Needs `LeaderInstance.leaderUpgradeIids` + `leaderUpgradeAbilities` surfacing.
+- **Replacement effects layer** (Instead/Would).
+- **CLI choice prompting** + **Async PendingChoice** for the web UI.
+- **Remaining primitives**: indirect_damage, divided_damage, arena-move, search, look_at, disclose.
+
+---
+
 *(2026-05-25 session 37)* **Engine v2 Week 3 landed — pending-choice + tokens + capture + interactive CLI. Scenarios 18/18. CLI plays AI-vs-AI games to completion. UAT artifact ready.**
 
 **👉 UAT moment**: `cd frontend && npm run play-cli` — Christian can now play full games at the terminal (human-vs-human, human-vs-AI, or AI-vs-AI). The game UI in the browser still runs on v1 untouched; v2 powers the CLI only.
@@ -621,6 +1034,8 @@ Login was broken in production: `auth_token` cookie was set with `Secure: true` 
 ## What's Next
 
 **Priority order — top item is immediately actionable:**
+
+0. **UI UAT path — next is real card data + UX polish.** Sessions 43-45 delivered the full engine→browser stack: async PendingChoice (43), CLI rewire to stepAsync (44), and the `/playtest` browser route with `useGameV2` + Board + ChoicePromptModal + AI auto-dispatch (45). The route uses W1-W6 fixture cards. Next concrete steps: (a) translate deck-builder output (v1-shape) → `DeckConfig` for the playtest; (b) hand-author specs for ~20 real SWU cards a player has in their deck (or build the L4 cascade pipeline from ENGINE_DESIGN.md); (c) UX polish — click-to-play, target highlighting, card text on hover, animations. Lower-priority engine gaps: base-damage replacements, replacement ordering chooser, true deck shuffle in search, leader-as-base-upgrade.
 
 1. **UAT: Full tabletop simulator match** — User will play a complete game and report what doesn't work. Known areas to exercise: Coordinate ability flows (Kit Fisto, Padmé Pursuing Peace, Reckless Torrent, Clone Commander Cody, Clone Dive Trooper), attack-event two-step (Shoot First / One Way Out / Vanquish), resource hover during gameplay, leader abilities (Chirrut, Admiral Ackbar). After the match, address reported issues before moving to new features.
 

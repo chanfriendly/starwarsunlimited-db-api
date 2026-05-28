@@ -7,7 +7,7 @@
 
 import { v4 as uuid } from './util/uuid';
 import type {
-  BaseInstance, CardInstance, CardRegistry, GameState, PlayerId, PlayerState,
+  BaseInstance, CardInstance, CardRegistry, GameState, LeaderInstance, PlayerId, PlayerState,
 } from './state/types';
 import type { BaseSpec } from './spec/types';
 
@@ -16,6 +16,9 @@ export interface DeckConfig {
   displayName: string;
   baseId: string;
   deckCardIds: string[];
+  /** Leader card ids. Twin Suns format uses 2; classic SWU uses 1. Optional
+   *  (some test setups don't need leaders). */
+  leaderIds?: string[];
 }
 
 export interface GameConfig {
@@ -65,6 +68,13 @@ function newPlayer(
   const hand = shuffled.slice(0, SETUP_HAND_SIZE);
   const remaining = shuffled.slice(SETUP_HAND_SIZE);
 
+  const leaders: LeaderInstance[] = (cfg.leaderIds ?? []).map(lid => {
+    const spec = reg.cards[lid];
+    if (!spec) throw new Error(`Unknown leader ${lid} for ${cfg.playerId}`);
+    if (spec.type !== 'leader') throw new Error(`${lid} is not a leader spec (type=${spec.type})`);
+    return { cardId: lid, side: 'leader', isDeployed: false, exhausted: false };
+  });
+
   return {
     id: cfg.playerId,
     displayName: cfg.displayName,
@@ -75,7 +85,7 @@ function newPlayer(
     creditTokens: [],
     groundArena: [],
     spaceArena: [],
-    leaders: [],
+    leaders,
     base: newBase(baseSpec),
     forceToken: false,
     capturedByMe: [],

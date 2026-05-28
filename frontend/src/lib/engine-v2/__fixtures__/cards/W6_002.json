@@ -1,0 +1,24 @@
+{
+  "id": "W6_002",
+  "name": "Ion Burst",
+  "type": "event",
+  "cost": 2,
+  "aspects": ["aggression"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "do": {
+        "effect": "damage",
+        "amount": 2,
+        "indirect": true,
+        "target": {
+          "zone": "any_arena",
+          "controller": "opponent",
+          "selector": "chosen",
+          "count": 1
+        }
+      }
+    }
+  ]
+}

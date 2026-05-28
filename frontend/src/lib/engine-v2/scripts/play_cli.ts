@@ -6,9 +6,9 @@
 //      cd frontend && npm run play-cli -- --ai both (both AI; you watch)
 
 import * as readline from 'node:readline';
-import type { Chooser, ChoicePrompt, ChoiceResult } from '../index';
+import type { Chooser, ChoicePrompt, ChoiceResult, AsyncStepResult, PendingStep } from '../index';
 import {
-  buildRegistry, describeAction, getLegalActions, initGame, step,
+  buildRegistry, describeAction, getLegalActions, initGame, step, stepAsync, resolveStep,
 } from '../index';
 import type { CardInstance, GameState, PlayerId } from '../index';
 import { ALL_W12_CARDS, W1_BASES, W3_CARDS } from '../__fixtures__';
@@ -43,27 +43,11 @@ function ask(q: string): Promise<string> {
   return new Promise(resolve => rl.question(q, ans => resolve(ans)));
 }
 
-// Synchronous version using a busy wait on a promise — we await at the top
-// level of the script, so the engine's synchronous Chooser callback runs
-// inside our event loop turn. To make Chooser truly synchronous, we resolve
-// it via a closure that captures the most recent async user input. The
-// engine never actually pauses; it asks Chooser, which has the answer pre-loaded
-// from the async UI loop. Pattern: the outer loop reads input async, then calls
-// step() with a chooser that knows the pre-resolved answer.
-//
-// For Week 3 simplicity, we implement: when the engine needs a choice DURING
-// reducer execution, we use a stack-based pre-loaded answer queue. The outer
-// driver loop pre-fetches likely answers before calling step(). For complex
-// nested choice paths this is incomplete; we mark such cases and fall back to
-// the defaultChooser (leftmost). Real async choice handling is Week 4.
-
-let pendingAnswers: ChoiceResult[] = [];
-const cliChooser: Chooser = (prompt: ChoicePrompt) => {
-  if (pendingAnswers.length > 0) return pendingAnswers.shift()!;
-  // No pre-loaded answer: fall back to leftmost / yes / first-N.
-  // This handles the common case where choose_one and chosen-selector decisions
-  // are made BEFORE the step() call (in the pre-fetch phase below).
-  console.log(`  [auto-choice: ${prompt.kind} → leftmost/yes/first]`);
+// AI players keep using synchronous step() with a heuristic chooser — the
+// engine never pauses; the chooser auto-picks deterministically. Human
+// players go through stepAsync (see runtime/async_step.ts), which surfaces
+// each PendingChoice to readline interactively.
+const aiChooser: Chooser = (prompt: ChoicePrompt) => {
   if (prompt.kind === 'choose_one') return { kind: 'option', value: prompt.options[0]?.value ?? '' };
   if (prompt.kind === 'prompt_target') return { kind: 'targets', targets: prompt.candidates.slice(0, prompt.count) };
   return { kind: 'yes' };
@@ -170,6 +154,97 @@ async function humanPick(state: GameState, pid: PlayerId) {
 }
 
 // ---------------------------------------------------------------------------
+// Interactive PendingChoice resolution (human players only)
+// ---------------------------------------------------------------------------
+
+function renderTarget(state: GameState, t: { kind: 'unit' | 'base'; iid?: string; controller: PlayerId }): string {
+  if (t.kind === 'base') {
+    const p = state.players[t.controller];
+    const baseSpec = reg.bases[p.base.cardId];
+    return `${t.controller}'s ${baseSpec?.name ?? 'base'}`;
+  }
+  const iid = (t as { iid: string }).iid;
+  // Find the unit in either arena.
+  for (const z of ['groundArena', 'spaceArena'] as const) {
+    const found = state.players[t.controller][z].find(c => c.iid === iid);
+    if (found) {
+      const spec = reg.cards[found.cardId];
+      return `${t.controller}'s ${spec?.name ?? iid}<${iid}>`;
+    }
+  }
+  return `${t.controller}/${iid}`;
+}
+
+async function promptHuman(state: GameState, prompt: ChoicePrompt): Promise<ChoiceResult> {
+  console.log(`\n  ▶ ${prompt.player} must resolve a choice`);
+  switch (prompt.kind) {
+    case 'choose_one': {
+      console.log(`    ${prompt.prompt}`);
+      prompt.options.forEach((o, i) => console.log(`    [${i}] ${o.label}`));
+      if (prompt.canPass) console.log(`    [p] pass / decline`);
+      while (true) {
+        const ans = (await ask(`    > choose: `)).trim().toLowerCase();
+        if (ans === 'q' || ans === 'quit') { rl.close(); process.exit(0); }
+        if (prompt.canPass && (ans === 'p' || ans === 'pass')) return { kind: 'pass' };
+        const i = parseInt(ans, 10);
+        if (!Number.isNaN(i) && i >= 0 && i < prompt.options.length) {
+          return { kind: 'option', value: prompt.options[i].value };
+        }
+        console.log(`    invalid — pick 0..${prompt.options.length - 1}${prompt.canPass ? ' or p' : ''}`);
+      }
+    }
+    case 'prompt_target': {
+      console.log(`    ${prompt.prompt} (need ${prompt.count}${prompt.minCount < prompt.count ? `, min ${prompt.minCount}` : ''})`);
+      prompt.candidates.forEach((t, i) => console.log(`    [${i}] ${renderTarget(state, t)}`));
+      if (prompt.canPass) console.log(`    [p] decline`);
+      while (true) {
+        const ans = (await ask(`    > pick ${prompt.count} indices (space-separated): `)).trim().toLowerCase();
+        if (ans === 'q' || ans === 'quit') { rl.close(); process.exit(0); }
+        if (prompt.canPass && (ans === 'p' || ans === 'pass' || ans === '')) return { kind: 'pass' };
+        const parts = ans.split(/\s+/).filter(Boolean);
+        const idxs = parts.map(p => parseInt(p, 10));
+        if (idxs.length === 0 || idxs.some(i => Number.isNaN(i) || i < 0 || i >= prompt.candidates.length)) {
+          console.log(`    invalid — pick ${prompt.count} indices from 0..${prompt.candidates.length - 1}`);
+          continue;
+        }
+        if (idxs.length < prompt.minCount || idxs.length > prompt.count) {
+          console.log(`    need ${prompt.minCount}-${prompt.count} picks, got ${idxs.length}`);
+          continue;
+        }
+        const targets = idxs.map(i => prompt.candidates[i]);
+        return { kind: 'targets', targets };
+      }
+    }
+    case 'optional': {
+      console.log(`    ${prompt.prompt} (y/n)`);
+      while (true) {
+        const ans = (await ask(`    > [y/n]: `)).trim().toLowerCase();
+        if (ans === 'q' || ans === 'quit') { rl.close(); process.exit(0); }
+        if (ans === 'y' || ans === 'yes') return { kind: 'yes' };
+        if (ans === 'n' || ans === 'no')  return { kind: 'no' };
+        console.log(`    invalid — type y or n`);
+      }
+    }
+  }
+}
+
+/** Drive a human action through stepAsync, prompting interactively for every
+ *  pending choice the engine surfaces. Returns the settled result. */
+async function executeHumanAction(state: GameState, action: import('../actions').PlayerAction): Promise<{ next: GameState; events: import('../state/bus').GameEvent[] }> {
+  let r: AsyncStepResult = stepAsync(state, action, reg);
+  let pending: PendingStep | undefined = r.kind === 'pending' ? r.pending : undefined;
+  // We collect events across the full step+resumes by replaying through the
+  // final settled result — the engine's events are emitted on the final run.
+  while (r.kind === 'pending') {
+    const pick = await promptHuman(state, r.pending.prompt);
+    pending = r.pending;
+    r = resolveStep(r.pending, pick, reg);
+  }
+  void pending;
+  return { next: r.next, events: r.events };
+}
+
+// ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
 
@@ -200,7 +275,7 @@ async function main() {
     ],
   }, reg);
 
-  let r = step(state, { kind: 'START_GAME' }, reg, cliChooser);
+  let r: { next: GameState; events: import('../state/bus').GameEvent[] } = step(state, { kind: 'START_GAME' }, reg, aiChooser);
   state = r.next;
 
   console.log(`\n🎲 Twin Suns engine-v2 — interactive CLI`);
@@ -210,7 +285,6 @@ async function main() {
   let safety = 1000;
   while (!state.winner && safety-- > 0) {
     render(state);
-    pendingAnswers = []; // reset before each step
 
     const pid = state.activePlayer;
     let action;
@@ -228,7 +302,11 @@ async function main() {
     }
 
     try {
-      r = step(state, action, reg, cliChooser);
+      if (aiPlayers.has(pid)) {
+        r = step(state, action, reg, aiChooser);
+      } else {
+        r = await executeHumanAction(state, action);
+      }
     } catch (e) {
       console.log(`❌ ${e instanceof Error ? e.message : e}`);
       continue;

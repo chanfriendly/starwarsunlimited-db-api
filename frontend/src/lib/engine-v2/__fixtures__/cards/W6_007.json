@@ -1,0 +1,20 @@
+{
+  "id": "W6_007",
+  "name": "Force Barrier",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["heroism", "vigilance"],
+  "arena": "ground",
+  "power": 1,
+  "hp": 4,
+  "traits": ["force", "jedi"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "replacement",
+      "on": "damage_unit",
+      "where": { "card": "self" },
+      "with": { "effect": "noop" }
+    }
+  ]
+}

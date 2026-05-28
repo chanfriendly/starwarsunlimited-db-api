@@ -1,0 +1,25 @@
+{
+  "id": "W4_005",
+  "name": "Smuggled Cache",
+  "type": "unit",
+  "cost": 1,
+  "aspects": ["cunning"],
+  "arena": "ground",
+  "power": 1,
+  "hp": 1,
+  "traits": ["scoundrel"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "constant",
+      "active_in_zone": "resource_zone",
+      "grant": {
+        "target": {
+          "zone": "any_arena",
+          "controller": "self"
+        },
+        "modifier": { "power": 1 }
+      }
+    }
+  ]
+}

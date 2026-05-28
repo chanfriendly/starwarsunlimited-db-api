@@ -1,0 +1,17 @@
+{
+  "id": "W6_004",
+  "name": "Reveal Plans",
+  "type": "event",
+  "cost": 1,
+  "aspects": ["cunning"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "do": {
+        "effect": "disclose",
+        "player": "self"
+      }
+    }
+  ]
+}
