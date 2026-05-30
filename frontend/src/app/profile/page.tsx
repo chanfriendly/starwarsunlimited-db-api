@@ -87,15 +87,24 @@ function DeckCard({ deck, onDelete }: { deck: SavedDeck; onDelete: (id: string) 
             {/* Leader thumbnails */}
             {deck.leaders && deck.leaders.length > 0 && (
                 <div style={{ display: 'flex', gap: 8 }}>
-                    {deck.leaders.map(leader => (
-                        <div key={leader.id} style={{ width: 40, height: 40, overflow: 'hidden', border: '1px solid var(--ts-line-2)', flexShrink: 0 }}>
-                            <img
-                                src={leader.image_uri || leader.image_url || ''}
-                                alt={leader.name}
-                                style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: '50% 20%' }}
-                            />
-                        </div>
-                    ))}
+                    {deck.leaders.map(leader => {
+                        const leaderImg = leader.image_uri || leader.image_url;
+                        return (
+                            <div key={leader.id} style={{ width: 40, height: 40, overflow: 'hidden', border: '1px solid var(--ts-line-2)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--ts-panel-2)' }}>
+                                {leaderImg ? (
+                                    <img
+                                        src={leaderImg}
+                                        alt={leader.name}
+                                        style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: '50% 20%' }}
+                                    />
+                                ) : (
+                                    <span style={{ fontSize: 14, color: 'var(--ts-ink-2)', fontFamily: 'var(--ts-font-display)' }}>
+                                        {leader.name?.charAt(0) ?? '?'}
+                                    </span>
+                                )}
+                            </div>
+                        );
+                    })}
                 </div>
             )}
 
@@ -156,12 +165,16 @@ function CollectionCard({
             display: 'flex',
             flexDirection: 'column',
         }}>
-            <div style={{ aspectRatio: '2/3', overflow: 'hidden' }}>
-                <img
-                    src={card.image_uri || card.image_url || ''}
-                    alt={card.name}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                />
+            <div style={{ aspectRatio: '2/3', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--ts-panel-2)' }}>
+                {(card.image_uri || card.image_url) ? (
+                    <img
+                        src={card.image_uri || card.image_url}
+                        alt={card.name}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                    />
+                ) : (
+                    <span style={{ fontSize: 11, color: 'var(--ts-ink-2)', textAlign: 'center', padding: 8 }}>{card.name}</span>
+                )}
             </div>
 
             <div style={{ padding: '8px', flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>

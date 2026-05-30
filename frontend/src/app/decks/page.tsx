@@ -57,7 +57,7 @@ function DeckCard({
           {deck.leaders.map((leader, i) => (
             <div key={leader.id} style={{ flex: 1, overflow: 'hidden', borderRight: i < deck.leaders.length - 1 ? '1px solid var(--ts-line)' : 'none' }}>
               <img
-                src={leader.image_uri || leader.image_url || ''}
+                src={leader.image_uri || leader.image_url || undefined}
                 alt={leader.name}
                 style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: '50% 18%' }}
               />

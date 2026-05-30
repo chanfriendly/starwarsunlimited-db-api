@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { SavedDeck, CollectionItem, Card } from '@/lib/api';
+import { copyToClipboard } from '@/lib/utils';
 
 interface Props {
   deck: SavedDeck;
@@ -164,9 +165,15 @@ export function DeckExportModal({ deck, collection, onClose }: Props) {
   );
 
   async function handleCopy() {
-    await navigator.clipboard.writeText(textExport);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
+    // Clipboard writes can be rejected (NotAllowedError) when the document
+    // isn't focused, the context lacks clipboard-write permission, or the
+    // browser blocks it. Guard + fall back to a legacy execCommand copy, and
+    // never let an unhandled rejection escape.
+    const ok = await copyToClipboard(textExport);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    }
   }
 
   const missingTotal = missingRows.reduce((s, r) => s + (r.price_usd ?? 0) * r.needQuantity, 0);

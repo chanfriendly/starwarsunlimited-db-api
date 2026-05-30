@@ -1,0 +1,19 @@
+{
+  "id": "W7_003",
+  "name": "Resourceful Hauler",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["command"],
+  "arena": "ground",
+  "power": 3,
+  "hp": 3,
+  "traits": ["imperial", "vehicle"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "constant",
+      "while": { "controller_resource_count": { "min": 6 } },
+      "grant": { "target": { "self": true }, "modifier": { "power": 2 } }
+    }
+  ]
+}

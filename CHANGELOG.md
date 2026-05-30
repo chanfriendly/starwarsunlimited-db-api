@@ -4,6 +4,312 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-05-29: Production UI bug fixes — empty img src + unguarded clipboard (session 50b)
+
+**Change**
+
+Two runtime errors reported while viewing cards/decks (blocking deck-building UAT), both fixed. Frontend app bugs (not the v2 engine). All affected routes compile + 200.
+
+- **Empty `<img src="">`** (warned at `profile/page.tsx:92`): the pattern `src={image_uri || image_url || ''}` passes an empty string when a card/leader has no art, which makes the browser re-request the page and Next surfaces it as an error. Found **8 occurrences** (profile ×2, DeckViewClient ×3, PublicDeckViewClient ×3, decks/page ×1, GameCard ×1). Profile's two now conditionally render a name/initial placeholder instead of an `<img>`; the rest changed `|| ''` → `|| undefined` (React omits the attribute — the React-sanctioned fix per the warning text). No remaining empty-string src in the app.
+- **Unhandled `NotAllowedError` from `clipboard.writeText`** (`DeckExportModal.handleCopy`, unguarded): clipboard writes reject when the document isn't focused / lacks permission, surfacing as a scary console error. Added a shared `copyToClipboard(text)` helper in `lib/utils.ts` — tries the modern API, falls back to legacy `execCommand('copy')`, resolves to a boolean, never throws. Wired into both clipboard call sites (`DeckExportModal`, `DeckViewClient` share). `DeckViewClient` now distinguishes "link created but copy blocked" from "link generation failed" instead of mislabeling.
+
+**Verification:** `npx tsc --noEmit` clean; dev SSR of `/profile`, `/cards`, `/decks`, `/playtest` all compile + HTTP 200.
+
+**Files:** `app/profile/page.tsx`, `app/decks/[id]/DeckViewClient.tsx`, `app/decks/share/[token]/PublicDeckViewClient.tsx`, `app/decks/page.tsx`, `app/game/GameCard.tsx`, `components/DeckExportModal.tsx`, `lib/utils.ts` (new `copyToClipboard`).
+
+---
+
+### 2026-05-29: Deck-driven primitives — per-X scaling, keyword auras, 2 predicates (session 51c)
+
+**Change**
+
+Continued grinding the test deck. Added two predicates, a per-X scaling modifier, keyword-grant aura + conditional self-grant templates, and a self-phase-buff. Test deck 33% → **40%** (17 → 21 cards). Crucially these are corpus-general: whole-corpus matcher-full coverage jumped **51 → 128 cards** (2.3% → 5.7%), corpus fully-playable 18.4% → **21.8%**. The deck-driven approach is paying the dividend it's supposed to — one player's deck surfaced primitives that unlock ~77 cards pool-wide. Engine 76, matcher 35, validator 16 — all green; play-cli completes.
+
+**New predicates (engine)**
+
+- **`controller_resource_count?: Range`** — resources the controller has (ready+exhausted). For "While you control N or more resources…" (Seasoned Shoretrooper). Mirrors `controller_unit_count`.
+- **`controller_controls_trait?: string`** — true iff the controller has an in-arena unit with the trait. For "While you control a Vehicle unit, this gains Sentinel" (Bunker Defender). Walks the controller's arenas checking `reg.cards[id].traits`.
+- Both wired into `evalCardPredicate`, the validator's closed-vocab + range check, and covered by engine scenarios (resource-gated +2/+0; trait-gated Sentinel) using new fixtures W7_003/W7_004.
+
+**Per-X scaling modifier (engine)**
+
+- `Modifier.per?: { count: PerCount; power?; health? }` where `PerCount ∈ {controller_resources, controller_units, self_upgrades}`. `effectivePower`/`effectiveHp` add `per.power × liveCount` — so "+1/+1 for each resource you control" (97th Legion) and "+N/+N for each upgrade on this unit" track live as the count changes. Validator gates the `per` shape. Engine scenario verifies it tracks resource count live (4 → 2 resources).
+- This is the keystone for SWU's very common "for each X" pattern — broadly reusable beyond the deck.
+
+**Matcher templates**
+
+- Keyword-grant auras: "Each friendly non-leader unit that costs N or more gains KEYWORD" (Piett, with `card_type`+`card_cost` filter); "Each/Other friendly [Trait] units gain KEYWORD".
+- Conditional self-grants: "While you control N or more resources, this unit gets +N/+N" (→ resource-count gate); "While you control a Trait unit, this unit gains KEYWORD" (→ controls-trait gate).
+- Per-X: "This unit gets +N/+N for each resource you control / for each upgrade on this unit".
+- Self phase-buff: "This unit gets +N/+N for this phase" (Crosshair action body → action self-buff; Crosshair now partial).
+
+**Honest remaining tail (task #58).** The deck's last ~31 cards need genuinely new mechanics, ~1–2 cards each: token creation with conditionals (Spy tokens — Palpatine), control-transfer (Choose Sides, Death Star Plans), play-from-discard (Palpatine's Return), power-based damage ("deals damage equal to its power" — Crosshair/Focus Fire/Maximum Firepower), upgrade-granted-ability host-redirection (Sith Traditions), modal choose-one + Force (Shatterpoint), discard-pile counting (Captain Enoch), and Revan's leader trigger (embedded exhaust cost + trigger-source target). These are real primitive/engine work or Tier-2/hand-author — diminishing returns per card on this deck, but several (power-based damage, token creation) are high-corpus-value.
+
+**Verification:** `npx tsc --noEmit` clean · `npm run scenarios` 76/76 · `npm run translate-scenarios` 35/35 · `npm run validate-scenarios` 16/16 · `npm run play-cli` completes · deck-coverage 40% · coverage-report 21.8%.
+
+**New files (2):** `__fixtures__/cards/W7_003.json`, `W7_004.json`.
+**Modified:** `spec/ast.ts` (predicates + `Modifier.per`), `runtime/predicates.ts`, `runtime/modifiers.ts` (per-X), `spec/validate.ts`, `__fixtures__/index.ts`, `scripts/scenarios.ts`, `engine-v2-data/match.ts` (templates), `engine-v2-data/translate_scenarios.ts`.
+
+---
+
+### 2026-05-29: Close-miss templates + leader-action matching (session 51b)
+
+**Change**
+
+Continued the deck-driven matcher work: added close-miss effect templates and an Action-ability parser that finally gives leaders non-zero coverage. The test deck rose 23% → **33%** (12 → 17 cards fully playable) across this batch. tsc clean; engine 73, matcher 30, validator 16 — all green; play-cli completes.
+
+**Close-miss templates (no new primitives — better matching of existing effects)**
+
+- **Trait-qualified give buff:** `Give a <Trait> unit +N/+N for this phase` (Obedient Vanguard) — generalized the give template to capture an optional trait → `card_trait` filter, friendly default.
+- **Ready a unit:** `Ready a [<qualifier>] unit` → existing `ready` effect on a chosen friendly (Admiral Motti). Qualifier filter dropped (best-effort).
+- **Heal a unit:** `Heal N damage from a unit [or base]` → `heal` a chosen friendly unit (Repair). The "or base" option is dropped — heals the unit; noted.
+- **Indirect damage to a player:** `Deal N indirect damage to the defending player / a player / each opponent` → `damage` to `opponent_base` with `indirect: true` (TIE Bomber). In SWU "damage to a player" = their base; the existing damage effect already supports indirect + base.
+
+**Leader-action matching (leaders 0% → non-zero)**
+
+- New **`parseActionClause`** handles `Action [<cost>]: <effect>`. **`parseActionCost`** interprets the bracket: `exhaust` and `N resource(s)` → an `ActionAbilityCost`; any other cost component (e.g. "deal 1 damage to a friendly unit" as a cost, Doctor Pershing) returns null so the card stays honestly residual rather than mis-matched.
+- Wired into the matcher's clause loop (action → triggered → constant order).
+- **`translateCard` now routes a leader's matched abilities into `leaderAbilities`** (the `text` column is the un-deployed leader-side ability; the deployed unit-side isn't in that column, so `leaderUnitAbilities` stays empty). This unlocks Tarkin's `Action [1 resource, exhaust]: Give an Experience token to an Imperial unit` — combining with the new Experience primitive, his signature ability now fully matches.
+
+**Honest tail.** At 33% the remaining 35 deck cards need genuinely new machinery, not more regex: keyword-grant auras + a resource-count predicate (a few clean wins, task #57), then token creation (Spy tokens), control-transfer (Choose Sides, Death Star Plans), per-X scaling modifiers (97th Legion), play-from-discard (Palpatine's Return), upgrade-granted-ability host-redirection (Sith Traditions), and modal+Force (Shatterpoint). Those are real primitive/engine work or Tier-2/hand-author tail — captured in task #57, ranked.
+
+**Verification:** `npx tsc --noEmit` clean · `npm run scenarios` 73/73 · `npm run translate-scenarios` 30/30 (Tarkin action, leader→leaderAbilities routing, uninterpretable-cost residual, plus the prior Experience matcher tests) · `npm run validate-scenarios` 16/16 · `npm run play-cli` completes · test deck via `deck-coverage` → 33%.
+
+**Modified files:** `engine-v2-data/match.ts` (close-miss templates, `parseActionClause`/`parseActionCost`, defeat-of-other prefixes from 51), `engine-v2-data/translate.ts` (leader→leaderAbilities), `engine-v2-data/translate_scenarios.ts` (matcher scenarios).
+
+---
+
+### 2026-05-29: Experience-token primitive (deck-driven) (session 51)
+
+**Change**
+
+Built the Experience-token primitive — the keystone surfaced by Christian's Experience-themed test deck — plus matcher templates and a defeat-of-another-unit trigger prefix. The test deck's Tier-1 coverage rose 17% → 23% (9 → 12 cards fully playable). Engine scenarios 73, matcher 27, validator 16 — all green.
+
+**The mechanic (§SWU)**
+
+An Experience token sits on a unit and grants **+1/+1**; tokens stack and persist while the unit is in play. Modeled as a counter on the instance, read by the effective-stats layer — same shape as damage/shields, no per-card code.
+
+**Design choices made in code**
+
+- **`CardInstance.experienceTokens?: number`** (optional → 0). `effectivePower`/`effectiveHp` add it after upgrade bonuses. That's the entire stat side — the existing modifier pipeline already aggregates everything else around it.
+- **New `give_experience` effect** (`{ target, count? }`, default 1) in the AST, interpreter (`applyGiveExperience` → bumps the counter, emits `EXPERIENCE_GAINED`), and validator (closed-vocab + required-field check). One more effect kind in the closed set; the validator's fixture cross-check still passes.
+- **Matcher templates** for the real card phrasings: `Give an/N Experience token(s) to <target>` and `Give an Experience token to each of up to N <Trait> units`. A `experienceTargetSelector` helper maps the target phrase to a selector — Experience is always a friendly buff in practice, so unqualified/trait targets default to `controller: 'self'`; only an explicit "enemy" flips it. Trait ("an Imperial unit") and cost ("that costs 3 or less") qualifiers become predicate filters. Because the triggered-prefix wrapper already exists, `When Played:/On Attack:` Experience cards match for free.
+- **Defeat-of-another-unit trigger prefixes** added while here (directly completes Gideon Hask, an Experience card): `When an enemy unit is defeated:` → `event.defeated where {controller:'opponent'}`; `When a[nother] friendly unit is defeated:` → `{controller:'self'}`. Generalized `TRIGGER_PREFIXES` to carry an optional `where` override; the self `When Defeated:` stays the default. Ordered before the self prefix so the specific forms win.
+- **Deck-driven, honestly bounded.** The primitive made 2 cards fully playable immediately and Gideon Hask a 3rd. The remaining 3 Experience cards in the deck *bundle* Experience with mechanics outside this primitive: Tarkin + Revan need **leader-text matching** (leaders are still 0% — their text→leaderAbilities split isn't parsed), and Sith Traditions needs **upgrade-granted-ability parsing** ("Attached unit gains: '…'"). Those are the next chunks, flagged — not Experience-primitive work.
+
+**Verification**
+
+`npx tsc --noEmit` clean · `npm run scenarios` 73/73 (3 new Experience: stacking, end-to-end give via the new W7_002 "Decorated Veteran" fixture, tokens-independent-of-damage) · `npm run translate-scenarios` 27/27 (3 new matcher: trait-filtered give, up-to-N multi-target, Gideon Hask defeat-trigger) · `npm run validate-scenarios` 16/16 · `npm run deck-coverage` on the test deck → 23%.
+
+**New files (1):** `__fixtures__/cards/W7_002.json` (Decorated Veteran — When Played: give 2 experience to self).
+**Modified files:** `state/types.ts`, `state/bus.ts`, `spec/ast.ts`, `runtime/interpret.ts`, `runtime/modifiers.ts`, `spec/validate.ts`, `__fixtures__/index.ts`, `scripts/scenarios.ts`, `engine-v2-data/match.ts`, `engine-v2-data/translate_scenarios.ts`.
+
+**Next (task #56):** close-miss templates + small primitives (trait-qualified give/damage, heal unit-or-base, ready-a-unit, indirect-damage-to-player), then the larger leader-text and upgrade-grant matchers that unlock the rest of the Experience cards.
+
+---
+
+### 2026-05-29: L4 Tier 1 — template matcher + corpus coverage measurement (session 50)
+
+**Change**
+
+Built the deterministic Tier-1 template matcher (`engine-v2-data/match.ts`) and a coverage report over the full 2,360-card DB, wired the matcher into the translator, and wrote the Mac mini / LM Studio handoff runbook for Tier 2. The headline is a *measured* number that corrects my own prior estimate. All suites green.
+
+**The measurement, and the honest correction**
+
+I'd hypothesized the template matcher would cover 60–80% of ability-bearing cards. The data: **18.4% of 2,241 deckable cards are fully playable** (vanilla/keyword 16.1% + matcher-full 2.3%); 81.6% need work. By type: units 25%, events 6%, upgrades 9%, leaders 0%. I built the coverage report *first*, before investing in the model, precisely so this would be a number and not a guess — and the guess was wrong by a lot. Worth stating plainly: regex templating has a low ceiling on SWU because (1) the ability text is genuinely diverse/multi-clause and (2) a large share needs engine primitives that don't exist yet (Force tokens, Experience tokens, return-to-hand, mill, modal choose-one/two, "if you control [X]," indirect-damage-to-player). No matcher *or* LLM can emit working AST for a primitive the engine lacks — so the real levers are **new primitives + the LLM tier**, focused through the "decks I play to 100% first" strategy rather than chasing 2,000 cards corpus-wide.
+
+**Design choices made in code**
+
+- **Ported v1's battle-tested regexes, retargeted to v2 AST.** `parseEffectClause` is `game-engine/abilities.ts:parseEventText` with the output swapped from v1 effect objects to v2 `Effect`. Reusing patterns proven against real card text beats authoring fresh regexes.
+- **"Attach to …" is stripped as a non-ability.** It's an upgrade attach *restriction* (which hosts are legal), not an ability — counting it as unparsed rules text was the single biggest false-negative in the first run (~70 cards). Stripped like keyword-reminder text. (Enforcing the restriction is a separate concern, like uniqueness; noted, not done.)
+- **Coverage classes: vanilla / full / partial / none.** "vanilla" = no text or keyword-only (already fully described by stats + keyword table). The matcher only claims `full` when *every* non-reminder clause parsed — partials are honest about leaving residual.
+- **The report tallies normalized residual clauses (digits→N).** Output isn't just a percentage — it's a ranked to-do list of the most common unmatched shapes, so the next templates/primitives are chosen from data. Top residuals after tuning: modal "choose one/two," "when an enemy unit is defeated…," Force/Experience/bounce text.
+- **Every emitted ability is validated in the report** (wrapped in a probe spec → `validateCardSpec`). 0 invalid across the whole corpus — the matcher and the session-48 validator agree, which is the cross-check that matters before trusting matcher output in real games.
+- **Matcher wired into `translateCard`.** Real decks now receive matched abilities (proven-valid), inert `[]` otherwise. Did *not* add a validation-gate in the translator yet (matcher output is already proven valid; the gate belongs with Tier 2 where untrusted LLM specs flow, and adding it now means an import-hygiene change for no benefit).
+- **Cheap wins banked from the first run's data:** `Draw a card` ("a"/"an" = 1, not just digits), `While this unit is upgraded, it gets/gains …` (uses the real `self_upgraded` predicate). Re-ran to confirm the lift (17.8% → 18.4%) — modest, which is itself the signal that the ceiling is low.
+
+**Tier-2 handoff**
+
+`engine-v2-data/TIER2_LMSTUDIO_HANDOFF.md` — a self-contained runbook for the Mac mini Claude Code instance to install LM Studio, load a capable instruct model (Qwen2.5 7B/14B GGUF), start the OpenAI-compatible server, and — the make-or-break check — confirm **schema-constrained JSON** output via a curl smoke test. Emphasis on structured output over model size, because the validator catches imperfect-but-valid output; what kills the pipeline is malformed JSON. Tailscale-only, no public exposure, no credentials needed. The generation harness that calls the server is built separately.
+
+**Verification:** `npx tsc --noEmit` clean · `npm run scenarios` 70/70 · `npm run translate-scenarios` 24/24 (8 new matcher scenarios) · `npm run validate-scenarios` 16/16 · `npm run coverage-report` runs over 2,360 cards, 0 invalid AST emitted.
+
+**New files (3):** `engine-v2-data/match.ts`, `engine-v2-data/coverage_report.ts`, `engine-v2-data/TIER2_LMSTUDIO_HANDOFF.md`.
+**Modified files (4):** `engine-v2-data/translate.ts` (wire matcher), `engine-v2-data/index.ts` + `engine-v2/index.ts` (exports: matcher + Ability/Effect/Selector/Predicate/Modifier types), `engine-v2-data/translate_scenarios.ts` (8 matcher scenarios), `package.json` (`coverage-report` script).
+
+**Known gaps / next**
+
+- **Primitive vocabulary is the real bottleneck**, not regex. Force tokens, Experience tokens, return-to-hand, mill, modal choice, conditional "if you control X" — the highest-frequency residuals. Build these (deck-focused) and matcher *and* LLM coverage both rise.
+- **Leaders match 0%** — their text needs the leader/leader-unit ability split, not yet templated.
+- **Need the user's decklists** to drive the "decks to 100%" rollout (per-deck coverage + exact primitive/card list).
+- **Tier-2 harness** (prompt + AST JSON-schema + validate loop calling the LM Studio server) — built after the mini reports its server is up with structured output.
+
+---
+
+### 2026-05-28: Leader deploy correction — free + once-per-game, verified vs official rules (session 49b)
+
+**Change**
+
+Christian pushed back on my "Twin Suns house rule" framing of free deploy: it's standard SWU. I web-verified the official rule and he's right — and the verification surfaced a second rule my engine was violating. Net: free deploy stays (correct), plus a new once-per-game guard. 70/70 scenarios. TypeScript: 0 errors.
+
+**The rule, confirmed against the source**
+
+Leader deploy is an **Epic Action**: "If you control N or more resources, deploy this leader." Two facts I had wrong from memory:
+1. Using an Epic Action does **not** cost resources. N is a threshold on resources *controlled* (the whole pool, exhausted included) — not a payment. (Already implemented correctly last session, just mislabeled as a divergence.)
+2. Epic Actions are **once per game**. A leader that deploys and is later defeated flips back to its leader side but **cannot be deployed again that game**. My engine allowed infinite redeploy after every flip-back — a real bug.
+
+**Process note (worth keeping):** I asserted the standard SWU rule confidently from memory, pushed back on the user, and was wrong — twice now on SWU rules (this and an earlier instance). The fix wasn't "always defer to the user" or "trust my memory" — it was *go to the source*. A 30-second web search of the official rules settled it definitively and caught the once-per-game bug I'd never have found otherwise. Added a standing note to CLAUDE.md: verify SWU rules against the official text, don't author from memory. Christian is the rules authority; the published rules are the tiebreak.
+
+**Implementation**
+
+- `state/types.ts`: `LeaderInstance.hasDeployed?: boolean` — optional (back-compat with hand-built test states), set on deploy, never cleared, survives the flip-back spread in `state_based`.
+- `reducer.applyDeployLeader`: throws if `leader.hasDeployed`; sets `hasDeployed: true` on deploy.
+- `legal.ts`: `DEPLOY_LEADER` gated on `!leader.hasDeployed` (in addition to the total-resource threshold).
+- `init.ts`: leaders initialize with `hasDeployed: false`.
+- `CLAUDE.md`: replaced the "Twin Suns diverges" note with a corrected "SWU rules notes — verify against the source" section documenting deploy as standard (free, threshold-on-control, once-per-game).
+
+**Scenarios**
+
+- New: "Leader deploy: Epic Action is once per game — no redeploy after flip-back" (deploy → defeat → flip-back → `DEPLOY_LEADER` not legal + step throws "Epic Action").
+- Existing flip-back scenario now also asserts `hasDeployed` is retained through the flip-back.
+
+**Verification:** `npx tsc --noEmit` clean · `npm run scenarios` 70/70 · `npm run translate-scenarios` 16/16 · `npm run validate-scenarios` 16/16 · `npm run play-cli -- --ai both` completes.
+
+**Modified files (5):** `state/types.ts`, `reducer.ts`, `legal.ts`, `init.ts`, `CLAUDE.md` (+ `scripts/scenarios.ts`).
+
+---
+
+### 2026-05-28: Twin Suns rule — leader deploy is free (session 49, UAT round 2)
+
+**Change**
+
+UAT confirmed sessions 46/47 fixes (setup resources, initiative hang, PLAY AGAIN all working). One rules correction: deploying a leader was exhausting resources; in Twin Suns it shouldn't. Now `applyDeployLeader` gates on *total* resources ≥ deploy cost and spends nothing. 69/69 scenarios (+3 new), other suites unchanged. TypeScript: 0 errors.
+
+**Why I asked before coding**
+
+Christian's report said "deploying a leader does not cost any resources, you just need that many to deploy them." My understanding of *standard* SWU is the opposite — the deploy cost is paid by exhausting resources, exactly like playing a card, and that's the whole "deploy now vs. develop the board" tension. The current behavior (couldn't deploy after spending on a unit) was therefore correct *for standard SWU*. Rather than silently comply (risking a rules regression) or silently refuse (ignoring the format authority), I stated the standard rule plainly, noted the code already implemented it, and asked via AskUserQuestion whether Twin Suns intentionally diverges. Christian confirmed: free deploy, threshold on total. This is the "be the smart one in the room, then defer to the domain authority" path — bring the precise mechanic, don't assume.
+
+**Implementation**
+
+- `reducer.applyDeployLeader`: gate changed from `readyResources.length < cost` to `p.resources.length < cost` (total pool, exhausted resources count toward the threshold); removed the exhaust loop and `RESOURCE_SPENT` events. Everything else (leader-unit instance creation, flip to `isDeployed`, `exhausted: true` on the body, `LEADER_DEPLOYED` event) unchanged.
+- `legal.ts`: `DEPLOY_LEADER` enumeration gates on `p.resources.length` (total) instead of `readyResourceCount`.
+- **Scope held tight:** did NOT change unit-play exhaustion. Whether a freshly-played unit can attack the same turn is a separate SWU rules question that interacts with the Ambush keyword, and it wasn't reported. Bundling it would risk a second unverified rules change. If it's wrong, it'll surface as its own UAT item and it's a one-line change then.
+
+**Recorded as a deliberate divergence**
+
+Added a "Twin Suns diverges from standard SWU" note to `CLAUDE.md` > Principles documenting the free-deploy rule and the general policy: Christian is the rules authority; when a SWU rule seems off, ask rather than assume standard SWU, and log confirmed divergences. This prevents a future session from "correcting" deploy back to charging resources.
+
+**Scenarios**
+
+- Renamed "Leader: deploy pays cost…" → "Leader: deploy is free — lands as 4/5, spends no resources (Twin Suns)"; added asserts that total + ready resource counts are unchanged and no `RESOURCE_SPENT` event fires.
+- "Leader deploy: gated on TOTAL resources (exhausted ones still count)" — 1 ready + 3 exhausted = 4 total ≥ cost 4 → deployable (standard SWU would block).
+- "Leader deploy: playing a unit first does NOT block deploy (UAT #1)" — the exact reported case: deploy legal, play a 3-cost unit, deploy still legal.
+- "Leader deploy: blocked when TOTAL resources < cost" — 3 total < cost 4 → not offered + step throws.
+
+**Verification**
+
+`npx tsc --noEmit` clean · `npm run scenarios` 69/69 · `npm run translate-scenarios` 16/16 · `npm run validate-scenarios` 16/16 · `npm run play-cli -- --ai both` completes.
+
+**Modified files (4):** `reducer.ts`, `legal.ts`, `scripts/scenarios.ts`, `CLAUDE.md`.
+
+---
+
+### 2026-05-26: Spec validator — the gate to the registry (session 48)
+
+**Change**
+
+New `spec/validate.ts` validates CardSpec/BaseSpec ASTs against the engine's closed primitive vocabulary, with path-tracked errors and a warning tier. All 41 shipped fixtures + 2 bases validate clean. New `validate-scenarios` suite: 16/16. No engine behavior changed; this is a tool + safety gate. TypeScript: 0 errors.
+
+**Why this, and why now (instead of the L4 cascade)**
+
+The user asked me to proceed while they test, and the obvious "next" is the L4 rules-text → ability-AST cascade. I deliberately didn't start it. That cascade has a genuine architecture fork — local 8B model on the Jetson/mini, Claude-assisted authoring, or hand-authoring the most-played cards first — with real homelab/token-cost/maintenance implications that are the user's call, and they explicitly flagged wanting to discuss approach first. Starting it unilaterally would either presuppose that decision or produce throwaway work.
+
+So I built the piece that is needed under *every* one of those approaches and commits to none: the validator. Whatever emits an ability AST — an LLM, a deterministic template matcher, or a human — its output must be checked against the closed vocabulary before it enters the registry, because the engine fails *silently* on unknown discriminators (the interpreter's effect switch, the selector resolver, and the predicate evaluator all treat unrecognized shapes as no-ops). A mistranslated card would load and just... do nothing, with no error. The validator converts that into a loud, precisely-located failure. It's strictly on the critical path to L4 and useful the moment any spec source produces real abilities.
+
+**Design choices made in code**
+
+- **Two severities, and the line between them.** `error` = outside the closed vocabulary, or a required field missing/wrong-typed — the spec would misbehave, reject it. `warning` = valid SWU but inert in the current engine, specifically unimplemented keywords (Bounty, Coordinate, Smuggle, Piloting, Hidden, Plot…) which load fine and simply have no effect yet. `ok` is true iff there are no errors; warnings never block. This matters because real decks are full of unimplemented keywords — erroring on them would make the validator useless against the actual card pool.
+- **Imports the `KEYWORDS` registry to decide warn-vs-accept.** A hand-maintained "implemented keywords" list would drift the moment a keyword is added. Importing the registry auto-syncs. The `spec/ → primitives/` dependency is acceptable because the validator is a tool, never on the reducer hot path.
+- **Closed-vocab sets are hardcoded runtime `Set<string>`s.** TS types are erased at runtime, so they can't be reflected. The drift guard is scenario (1): it validates every shipped fixture, so adding an effect kind to `ast.ts` + a fixture that uses it without teaching the validator makes that scenario fail loudly. The validator and the fixtures check each other.
+- **Precise path tracking.** Every issue carries a path like `W2_007.abilities[0].do.steps[1].target.badkey`. For an LLM cascade this is the difference between "card X is broken somewhere" and "card X's second sequence step has a bad selector key" — the latter is actionable as automated feedback to the model or a human reviewer.
+- **`buildRegistry` left untouched.** Validation is opt-in via `validateSpecs`, not forced into the loader. Existing callers and the structural-only build path are unchanged. The forward wiring point (documented, not built): validate each translated/LLM-generated spec before it enters the registry and downgrade invalid abilities to inert `[]`. Not wired now because the translator emits `abilities: []` (trivially valid) — wiring against empty abilities is busywork; it lands with the cascade that actually produces abilities.
+- **Recursion mirrors the interpreter.** The validator walks effects → nested effects (sequence steps, if then/else, choose_one option do-blocks, optional do), selectors → exclude/from recursion and scoped-form field checks, predicates → and/or/not recursion and leaf-field enums, modifiers, trigger predicates, and action costs (including the selectors inside defeat/remove_shield costs). The structure parallels `runtime/interpret.ts` so "what the validator accepts" and "what the engine executes" stay aligned.
+
+**Coverage of the closed vocabulary**
+
+22 effect kinds · 4 ability types · 12 trigger conditions · 10 zones (+ any_arena/any_zone for filters) · 6 aspects · 4 player refs · 5 selector modes · 6 durations · 5 restrictions · 3 replacement-`on` kinds · move/look_at/search sub-enums · 17 predicate-leaf fields · 11 modifier fields · 11 trigger-predicate fields · action-cost fields.
+
+**Verification**
+
+- `npx tsc --noEmit` clean.
+- `npm run validate-scenarios` — 16/16; all 41 fixture cards + 2 bases clean with 0 warnings.
+- `npm run scenarios` 66/66 · `npm run translate-scenarios` 16/16 · `npm run play-cli -- --ai both` completes — confirming the new export + file disturbed nothing.
+
+**New files (2):** `spec/validate.ts`, `scripts/validate_scenarios.ts`.
+**Modified files (2):** `index.ts` (exports), `package.json` (`validate-scenarios` script).
+
+**Known gaps / next**
+
+- **The L4 cascade itself** is still the next major arc and still wants an approach decision (local model / Claude-assisted / hand-authoring-first). The validator is its safety net and its automated-feedback signal.
+- **Validator not yet wired into any build/CI step** — it's a library + script. A pre-deploy "validate all specs" gate is a natural follow-up once specs carry real abilities.
+
+---
+
+### 2026-05-26: Real-card translator + "play your own deck" in /playtest (session 47)
+
+**Change**
+
+New `engine-v2-data` module translates backend-shaped cards into engine-v2 specs (stats + keywords), and the `/playtest` setup screen can now load the user's saved decks instead of only fixtures. 66/66 engine scenarios + 16/16 new translator scenarios. TypeScript: 0 errors. Both playtest routes SSR clean.
+
+**Scope discipline — why only half the problem**
+
+Translating a real deck has two halves: the *structured* half (stats, cost, aspects, traits, arena, keywords — all already columns/relations in the DB) and the *unstructured* half (free-text rules → declarative ability AST). The second half is the L4 cascade from ENGINE_DESIGN.md (deterministic template matcher → local 8B model → Claude → human review) — genuinely multi-week and dependent on the Jetson/mini LLM wiring. Attempting it in one session would produce a fragile half-working parser. So this session does the structured half completely and cleanly, and every translated card gets `abilities: []`. A real deck loads and plays with correct stats and working keywords; text effects are inert. That's an honest, shippable increment and it establishes the exact seam the LLM cascade plugs into later (`translateCard` is where ability AST will eventually be attached).
+
+**Design choices made in code**
+
+- **`engine-v2-data` is a separate sibling module**, not folded into `engine-v2` (keeps the engine's no-dependencies-on-card-DB-shape boundary) nor into `engine-v2-react` (the translator is pure, no React). Its boundary imports from `@/lib/api` and `@/lib/engine-v2` are all `import type` — fully erased at runtime — so the module runs under `tsx` headless tests despite the `@/` alias, with no path-resolution shim.
+- **Keyword values come from a narrow text regex, not ability parsing.** The SWU API exposes keywords by name only (`keyword.attributes.name` → `"Raid"`); the numeric value lives in the rules text (`"Raid 2."`). v2 treats a valueless Raid/Restore as +0 (inert), so without the value those keywords would silently do nothing. `parseKeywords` pulls the N with `/\b<name>\s+(\d+)\b/i` against `card.text`, plus a fallback for a value baked into the keyword string. This is deterministic and bounded — explicitly NOT the slippery slope into general text parsing.
+- **Leader NULL-stat fallback (3/6).** The DB frequently has NULL attack/health for leaders (the unit-side stats aren't always populated — see session 32's `LEADER_DEPLOYED_STATS` note). v2's `applyDeployLeader`/`effectivePower` would render 0/1 for a NULL-stat leader. The translator falls back to 3/6, matching the v1 precedent, so a deployed leader is a sensible body.
+- **`buildGameFromDecks` returns warnings, doesn't throw on soft problems.** Tokens that leaked into `deck.cards`, a leader that didn't translate, a deck that expanded to 0 cards — all warn and continue. The only hard throw is "deck has no base" (unplayable). Warnings are surfaced to the console in the UI; the game still starts. This keeps a slightly-malformed real deck playable rather than dead.
+- **Registry dedupes by card id; deckCardIds expands by quantity.** Mirror matches (same deck for both players) reuse one registry entry; `initGame` already creates a fresh `CardInstance` per id occurrence, so quantity expansion in `deckCardIds` is all that's needed. Leaders/base are excluded from the deck pile via the same `excludedIds` guard v1 used.
+- **The integration test plays a translated game to completion.** Beyond shape assertions, `translate_scenarios.ts` builds two synthetic real-decks, translates them, and runs an AI-vs-AI loop to a winner (p1, round 5). A registry+config that *type-checks* isn't proof it's *playable* — a missing base, a bad arena, an unresolvable leader id would all pass tsc but hang or throw at runtime. Playing to a winner is the real proof.
+
+**Playtest UI**
+
+- DECK SOURCE toggle on the setup screen: FIXTURE DECK (unchanged default) vs MY SAVED DECKS.
+- "My decks" fetches `/api/decks` (slim list) on demand; on START fetches full detail (`/api/decks/{id}`) for the chosen deck(s) — mirror match reuses one fetch — translates, and hands `{config, registry}` to the same `Board`. Board is source-agnostic.
+- Graceful degradation everywhere: not logged in / fetch error / no decks → clear inline message, fixtures still work. The real-deck path is strictly additive.
+
+**Latent bug fixed in passing — PLAY AGAIN never reset the game**
+
+`useGameV2` builds initial state in a lazy `useState` initializer (runs once) and exposes a `restart()` that the UI wasn't calling — the PLAY AGAIN button called an `onRestart` prop that bumped a `seed` which changed the config object but never re-initialized the hook, and `Board` had no `key`, so React reused the same instance and state. Net effect: PLAY AGAIN did nothing. Fixed by keying `Board` on a `gameKey` that bumps on restart → clean remount → fresh `initGame` (Math.random reshuffle). Works for both fixtures and real decks. (This was present since session 45 but the user hadn't hit it — they'd been mid-game, not post-win.)
+
+**Verification**
+
+- `npx tsc --noEmit` clean.
+- `npm run scenarios` 66/66; `npm run translate-scenarios` 16/16; `npm run play-cli -- --ai both` completes.
+- SSR 200 on `/playtest` and `/playtest/smoke`, new setup strings present, no error indicators.
+
+**New files (3)**
+
+- `lib/engine-v2-data/translate.ts` — the translator.
+- `lib/engine-v2-data/index.ts` — exports.
+- `lib/engine-v2-data/translate_scenarios.ts` — 16-scenario suite.
+
+**Modified files (2)**
+
+- `app/playtest/PlaytestClient.tsx` — DECK SOURCE toggle, deck fetch/select, real-deck start path, Board keyed on `gameKey` (restart fix), new styles.
+- `package.json` — `translate-scenarios` script.
+
+**Known gaps deliberately deferred**
+
+- **Card text → ability AST (L4 cascade).** The whole reason real decks play as "vanilla + keywords." This is the next major arc.
+- **Authenticated fetch path** verified only by compile + SSR; live deck load needs the user logged in.
+- **Uniqueness** not exposed by backend / not enforced by engine.
+- **Real card art** in the playtest board (UnitCard renders names).
+
+---
+
 ### 2026-05-26: UAT bug fixes — setup resources, initiative-take, leader attack power (session 46)
 
 **Change**

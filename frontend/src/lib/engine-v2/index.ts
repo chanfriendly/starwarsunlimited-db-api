@@ -8,7 +8,9 @@ export { getLegalActions, describeAction } from './legal';
 export { defaultChooser, declineChooser, scriptedChooser } from './runtime/chooser';
 export { stepAsync, resolveStep } from './runtime/async_step';
 export type { AsyncStepResult, PendingStep } from './runtime/async_step';
-export type { ResolvedTarget } from './spec/ast';
+export type { ResolvedTarget, Ability, Effect, Selector, Predicate, Modifier } from './spec/ast';
+export { validateCardSpec, validateBaseSpec, validateSpecs } from './spec/validate';
+export type { ValidationResult, ValidationIssue, Severity } from './spec/validate';
 
 export type { PlayerAction } from './actions';
 export type {

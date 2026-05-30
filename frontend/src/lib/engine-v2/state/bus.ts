@@ -40,6 +40,7 @@ export type GameEvent =
   | { kind: 'DEFEATED'; iid: string; by?: PlayerId; combat: boolean; lastKnown: CardSnapshot }
   | { kind: 'SHIELD_GAINED'; iid: string }
   | { kind: 'SHIELD_DEFEATED'; iid: string }
+  | { kind: 'EXPERIENCE_GAINED'; iid: string; amount: number }
   | { kind: 'EXHAUSTED'; iid: string }
   | { kind: 'READIED'; iid: string }
   | { kind: 'CONTROL_CHANGED'; iid: string; from: PlayerId; to: PlayerId }

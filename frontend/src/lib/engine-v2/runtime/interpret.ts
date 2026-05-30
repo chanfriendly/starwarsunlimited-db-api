@@ -37,6 +37,7 @@ export function applyEffect(ctx: InterpCtx, effect: Effect): InterpResult {
     case 'heal':         return applyHeal(ctx, effect);
     case 'defeat':       return applyDefeat(ctx, effect);
     case 'give_shield':  return applyGiveShield(ctx, effect);
+    case 'give_experience': return applyGiveExperience(ctx, effect);
     case 'draw':         return applyDraw(ctx, effect);
     case 'discard':      return applyDiscard(ctx, effect);
     case 'exhaust':      return applyExhaustEffect(ctx, effect);
@@ -145,6 +146,19 @@ function applyGiveShield(ctx: InterpCtx, e: Extract<Effect, { effect: 'give_shie
     if (t.kind !== 'unit') continue;
     s = mapInstance(s, t.iid, c => ({ ...c, shieldTokens: c.shieldTokens + n }));
     for (let i = 0; i < n; i++) events.push({ kind: 'SHIELD_GAINED', iid: t.iid });
+  }
+  return { state: s, events };
+}
+
+function applyGiveExperience(ctx: InterpCtx, e: Extract<Effect, { effect: 'give_experience' }>): InterpResult {
+  const targets = resolveSelector(ctx, e.target);
+  const n = e.count ?? 1;
+  let s = ctx.state;
+  const events: GameEvent[] = [];
+  for (const t of targets) {
+    if (t.kind !== 'unit') continue;
+    s = mapInstance(s, t.iid, c => ({ ...c, experienceTokens: (c.experienceTokens ?? 0) + n }));
+    events.push({ kind: 'EXPERIENCE_GAINED', iid: t.iid, amount: n });
   }
   return { state: s, events };
 }

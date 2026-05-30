@@ -8,6 +8,7 @@ import {
   fetchUserCollection, shareUserDeck, revokeUserDeckShare,
 } from '@/lib/api';
 import { fetchWithAuth } from '@/lib/fetch-utils';
+import { copyToClipboard } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { DeckAnalysisPanel } from '@/components/DeckAnalysisPanel';
 import { DeckExportModal } from '@/components/DeckExportModal';
@@ -51,9 +52,14 @@ export function DeckViewClient({ deckId }: { deckId: string }) {
       const token = shareToken ?? (await shareUserDeck(deckId)).share_token;
       if (!shareToken) setShareToken(token);
       const url = `${window.location.origin}/decks/share/${token}`;
-      await navigator.clipboard.writeText(url);
-      setShareCopied(true);
-      setTimeout(() => setShareCopied(false), 3000);
+      const copied = await copyToClipboard(url);
+      // The link is generated regardless; only the auto-copy may fail.
+      if (copied) {
+        setShareCopied(true);
+        setTimeout(() => setShareCopied(false), 3000);
+      } else {
+        setShareError('Share link created — copy it from the address manually (clipboard blocked).');
+      }
     } catch {
       setShareError('Failed to generate share link.');
     } finally {
@@ -200,7 +206,7 @@ export function DeckViewClient({ deckId }: { deckId: string }) {
               <div key={leader.id} style={{ textAlign: 'center', width: 120 }}>
                 <div style={{ width: 120, height: 168, overflow: 'hidden', border: '1px solid var(--ts-line-2)', marginBottom: 6 }}>
                   <img
-                    src={leader.image_uri || leader.image_url || ''}
+                    src={leader.image_uri || leader.image_url || undefined}
                     alt={leader.name}
                     style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: '50% 15%' }}
                     onError={e => { e.currentTarget.style.display = 'none'; }}
@@ -224,7 +230,7 @@ export function DeckViewClient({ deckId }: { deckId: string }) {
             <div style={{ textAlign: 'center', width: 120 }}>
               <div style={{ width: 120, height: 168, overflow: 'hidden', border: '1px solid var(--ts-line-2)', marginBottom: 6 }}>
                 <img
-                  src={deck.base.image_uri || deck.base.image_url || ''}
+                  src={deck.base.image_uri || deck.base.image_url || undefined}
                   alt={deck.base.name}
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   onError={e => { e.currentTarget.style.display = 'none'; }}
@@ -279,7 +285,7 @@ export function DeckViewClient({ deckId }: { deckId: string }) {
                   background: 'var(--ts-panel)',
                 }}>
                   <img
-                    src={item.card.image_uri || item.card.image_url || ''}
+                    src={item.card.image_uri || item.card.image_url || undefined}
                     alt={item.card.name || 'Card'}
                     style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                     loading="lazy"

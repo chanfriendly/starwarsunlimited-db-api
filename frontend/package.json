@@ -10,6 +10,10 @@
     "play-demo": "tsx src/lib/engine-v2/scripts/play_demo.ts",
     "type-check": "tsc --noEmit",
     "scenarios": "tsx src/lib/engine-v2/scripts/scenarios.ts",
+    "translate-scenarios": "tsx src/lib/engine-v2-data/translate_scenarios.ts",
+    "validate-scenarios": "tsx src/lib/engine-v2/scripts/validate_scenarios.ts",
+    "coverage-report": "tsx src/lib/engine-v2-data/coverage_report.ts",
+    "deck-coverage": "tsx src/lib/engine-v2-data/deck_coverage.ts",
     "play-cli": "tsx src/lib/engine-v2/scripts/play_cli.ts"
   },
   "dependencies": {

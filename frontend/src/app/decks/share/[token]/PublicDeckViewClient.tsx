@@ -100,7 +100,7 @@ export function PublicDeckViewClient({ shareToken }: { shareToken: string }) {
               <div key={leader.id} style={{ textAlign: 'center', width: 120 }}>
                 <div style={{ width: 120, height: 168, overflow: 'hidden', border: '1px solid var(--ts-line-2)', marginBottom: 6 }}>
                   <img
-                    src={leader.image_uri || leader.image_url || ''}
+                    src={leader.image_uri || leader.image_url || undefined}
                     alt={leader.name}
                     style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: '50% 15%' }}
                     onError={e => { e.currentTarget.style.display = 'none'; }}
@@ -124,7 +124,7 @@ export function PublicDeckViewClient({ shareToken }: { shareToken: string }) {
             <div style={{ textAlign: 'center', width: 120 }}>
               <div style={{ width: 120, height: 168, overflow: 'hidden', border: '1px solid var(--ts-line-2)', marginBottom: 6 }}>
                 <img
-                  src={deck.base.image_uri || deck.base.image_url || ''}
+                  src={deck.base.image_uri || deck.base.image_url || undefined}
                   alt={deck.base.name}
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   onError={e => { e.currentTarget.style.display = 'none'; }}
@@ -178,7 +178,7 @@ export function PublicDeckViewClient({ shareToken }: { shareToken: string }) {
                   background: 'var(--ts-panel)',
                 }}>
                   <img
-                    src={item.card.image_uri || item.card.image_url || ''}
+                    src={item.card.image_uri || item.card.image_url || undefined}
                     alt={item.card.name || 'Card'}
                     style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                     loading="lazy"

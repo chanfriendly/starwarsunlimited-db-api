@@ -206,6 +206,17 @@ function printedHp(reg: CardRegistry, inst: CardInstance): number {
   return 1;
 }
 
+/** Live count for a per-X scaling modifier. */
+function perCount(count: NonNullable<Modifier['per']>['count'], state: GameState, inst: CardInstance, ownerId: PlayerId): number {
+  const ps = state.players[ownerId];
+  switch (count) {
+    case 'controller_resources': return ps ? ps.resources.length : 0;
+    case 'controller_units':     return ps ? ps.groundArena.length + ps.spaceArena.length : 0;
+    case 'self_upgrades':        return inst.upgrades.length;
+    default:                     return 0;
+  }
+}
+
 export function effectivePower(
   state: GameState,
   reg: CardRegistry,
@@ -217,10 +228,14 @@ export function effectivePower(
   // Modifiers from constants + lasting effects
   for (const m of collectModifiersFor(state, reg, inst.iid, ownerId)) {
     if (m.power) p += m.power;
+    if (m.per?.power) p += m.per.power * perCount(m.per.count, state, inst, ownerId);
   }
 
   // Upgrades contribute their powerModifier directly to the host's stats.
   p += upgradePowerBonus(reg, inst);
+
+  // Experience tokens: +1 power each (§SWU).
+  p += inst.experienceTokens ?? 0;
 
   // Keyword bonuses (Grit; also any future "bonusPower" keyword).
   // Include keywords granted by upgrades (e.g. an upgrade with Grit).
@@ -242,8 +257,12 @@ export function effectiveHp(
   let h = printedHp(reg, inst);
   for (const m of collectModifiersFor(state, reg, inst.iid, ownerId)) {
     if (m.health) h += m.health;
+    if (m.per?.health) h += m.per.health * perCount(m.per.count, state, inst, ownerId);
   }
   h += upgradeHpBonus(reg, inst);
+
+  // Experience tokens: +1 HP each (§SWU).
+  h += inst.experienceTokens ?? 0;
   const allKeywords = [...cardKeywords(reg, inst), ...upgradeKeywords(reg, inst)];
   for (const kw of allKeywords) {
     const def = KEYWORDS[kw.name];

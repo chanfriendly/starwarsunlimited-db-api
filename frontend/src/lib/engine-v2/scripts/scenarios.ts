@@ -2,7 +2,7 @@
 // GameState, exercises a single behavior, asserts the observable outcome,
 // and prints pass/fail. Run: cd frontend && npm run scenarios
 
-import { buildRegistry, step, scriptedChooser, stepAsync, resolveStep } from '../index';
+import { buildRegistry, step, scriptedChooser, stepAsync, resolveStep, getLegalActions } from '../index';
 import type { CardInstance, CardRegistry, GameState, PlayerId, AsyncStepResult } from '../index';
 import { ALL_CARDS, W1_BASES } from '../__fixtures__';
 import { findCard, getZoneArr } from '../state/zones';
@@ -448,10 +448,8 @@ scenario('Smuggle: same card in arena does NOT fire the resource-zone constant',
   assertEq(effectivePower(state, reg, ally, 'p1'), 2, 'no buff when source is in arena');
 });
 
-scenario('Leader: deploy pays cost and lands as a 4/5 in ground', () => {
-  const general = mkInst('W4_001', { iid: 'leadr1' });   // shouldn't really be used directly
-  void general;
-  const state = emptyState({ active: 'p1' });
+scenario('Leader: deploy is free — lands as 4/5, spends no resources (Twin Suns)', () => {
+  const state = emptyState({ active: 'p1' });   // default 10 ready resources
   // Add an un-deployed leader to p1.
   const withLeader: GameState = {
     ...state,
@@ -471,6 +469,83 @@ scenario('Leader: deploy pays cost and lands as a 4/5 in ground', () => {
   // Effective stats: leader spec power=4, hp=5
   assertEq(effectivePower(r.next, reg, inArena, 'p1'), 5, 'leader power: 4 base + 1 from own aura (clone self-include)');
   assertEq(effectiveHp(r.next, reg, inArena, 'p1'),    6, 'leader hp: 5 base + 1 from own aura');
+  // Twin Suns: deploy is free — no resources spent, none exhausted.
+  assertEq(r.next.players.p1.resources.length, 10, 'total resources unchanged');
+  assertEq(r.next.players.p1.resources.filter(rr => !rr.exhausted).length, 10, 'no resources exhausted by deploy');
+  if (r.events.some(e => e.kind === 'RESOURCE_SPENT')) throw new Error('deploy should not emit RESOURCE_SPENT');
+});
+
+scenario('Leader deploy: gated on TOTAL resources (exhausted ones still count)', () => {
+  // p1 has 4 resources but only 1 ready (3 exhausted). Leader cost 4.
+  // Standard SWU would block (needs 4 ready); Twin Suns allows it (4 total).
+  const res: CardInstance[] = [
+    mkInst('W1_001', { iid: 'r0', exhausted: false }),
+    mkInst('W1_001', { iid: 'r1', exhausted: true }),
+    mkInst('W1_001', { iid: 'r2', exhausted: true }),
+    mkInst('W1_001', { iid: 'r3', exhausted: true }),
+  ];
+  let state = emptyState({ active: 'p1' });
+  state = {
+    ...state,
+    players: {
+      ...state.players,
+      p1: {
+        ...state.players.p1,
+        resources: res,
+        leaders: [{ cardId: 'W4_001', side: 'leader', isDeployed: false, exhausted: false }],
+      },
+    },
+  };
+  const { actions } = getLegalActions(state, reg, 'p1');
+  if (!actions.some(a => a.kind === 'DEPLOY_LEADER')) {
+    throw new Error('DEPLOY_LEADER should be legal: 4 total resources ≥ cost 4 (even with 3 exhausted)');
+  }
+  const r = step(state, { kind: 'DEPLOY_LEADER', player: 'p1', leaderIndex: 0 }, reg);
+  if (!r.next.players.p1.leaders[0].isDeployed) throw new Error('leader should have deployed');
+});
+
+scenario('Leader deploy: playing a unit first does NOT block deploy (UAT #1)', () => {
+  // The exact UAT case: leader deployable, play a unit, leader still deployable.
+  const handUnit = mkInst('W1_001', { iid: 'hu' });   // 3-cost unit
+  let state = emptyState({ active: 'p1', handP1: [handUnit], resourcesP1: 5 });
+  state = {
+    ...state,
+    players: {
+      ...state.players,
+      p1: { ...state.players.p1, leaders: [{ cardId: 'W4_001', side: 'leader', isDeployed: false, exhausted: false }] },
+    },
+  };
+  // Deploy is legal up front.
+  if (!getLegalActions(state, reg, 'p1').actions.some(a => a.kind === 'DEPLOY_LEADER')) {
+    throw new Error('deploy should be legal before playing a unit');
+  }
+  // Play the 3-cost unit (exhausts 3 of 5 resources → 2 ready, 5 total).
+  const afterPlay = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'hu' }, reg).next;
+  // It's p2's turn now (play ends the turn); simulate back to p1 by checking
+  // the legal actions from p1's perspective on a hand-rotated state.
+  const p1Turn: GameState = { ...afterPlay, activePlayer: 'p1' };
+  const acts = getLegalActions(p1Turn, reg, 'p1').actions;
+  if (!acts.some(a => a.kind === 'DEPLOY_LEADER')) {
+    throw new Error('deploy should STILL be legal after playing a unit (free deploy, total unchanged)');
+  }
+});
+
+scenario('Leader deploy: blocked when TOTAL resources < cost', () => {
+  let state = emptyState({ active: 'p1', resourcesP1: 3 });   // 3 total
+  state = {
+    ...state,
+    players: {
+      ...state.players,
+      p1: { ...state.players.p1, leaders: [{ cardId: 'W4_001', side: 'leader', isDeployed: false, exhausted: false }] },
+    },
+  };
+  if (getLegalActions(state, reg, 'p1').actions.some(a => a.kind === 'DEPLOY_LEADER')) {
+    throw new Error('deploy should NOT be legal with 3 total resources < cost 4');
+  }
+  expectThrow(
+    () => step(state, { kind: 'DEPLOY_LEADER', player: 'p1', leaderIndex: 0 }, reg),
+    'Insufficient resources',
+  );
 });
 
 scenario('Leader: deployed leader-unit aura buffs other clones', () => {
@@ -529,6 +604,43 @@ scenario('Leader: lethal damage flips leader back, no discard entry', () => {
   if (inDiscard) throw new Error('defeated leader-unit should NOT enter discard');
   const inArena = r.next.players.p1.groundArena.some(c => c.iid === leaderUnitIid);
   if (inArena) throw new Error('leader-unit should be removed from arena');
+  // Epic Action is once per game — flipped-back leader keeps hasDeployed.
+  assertEq(leaderNow.hasDeployed, true, 'hasDeployed retained after flip-back');
+});
+
+scenario('Leader deploy: Epic Action is once per game — no redeploy after flip-back', () => {
+  // Deploy, defeat → flip back, then confirm DEPLOY_LEADER is no longer legal
+  // and a forced redeploy throws.
+  const state = emptyState({ active: 'p1' });
+  const withLeader: GameState = {
+    ...state,
+    players: {
+      ...state.players,
+      p1: { ...state.players.p1, leaders: [{ cardId: 'W4_001', side: 'leader', isDeployed: false, exhausted: false }] },
+    },
+  };
+  const deployed = step(withLeader, { kind: 'DEPLOY_LEADER', player: 'p1', leaderIndex: 0 }, reg).next;
+  const luid = deployed.players.p1.leaders[0].unitIid!;
+  const damaged: GameState = {
+    ...deployed,
+    players: {
+      ...deployed.players,
+      p1: {
+        ...deployed.players.p1,
+        groundArena: deployed.players.p1.groundArena.map(c => c.iid === luid ? { ...c, damage: 99 } : c),
+      },
+    },
+  };
+  const flipped = step(damaged, { kind: 'PASS', player: damaged.activePlayer }, reg).next;
+  // Back on p1's turn, the flipped-back leader must NOT be redeployable.
+  const p1Turn: GameState = { ...flipped, activePlayer: 'p1' };
+  if (getLegalActions(p1Turn, reg, 'p1').actions.some(a => a.kind === 'DEPLOY_LEADER')) {
+    throw new Error('redeploy should NOT be legal — Epic Action already used');
+  }
+  expectThrow(
+    () => step(p1Turn, { kind: 'DEPLOY_LEADER', player: 'p1', leaderIndex: 0 }, reg),
+    'Epic Action',
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -1333,6 +1445,70 @@ scenario('UAT bug #4: describeAction shows real power for leader attacks', () =>
   if (/\?\s*power/.test(desc)) {
     throw new Error(`description still contains "? power": ${desc}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Experience tokens
+// ---------------------------------------------------------------------------
+
+scenario('Experience: each token gives +1/+1, stacks', () => {
+  const u = mkInst('W1_001', { experienceTokens: 2 });   // 3/3 base
+  const state = emptyState({ groundP1: [u] });
+  assertEq(effectivePower(state, reg, u, 'p1'), 5, 'power 3 + 2 exp');
+  assertEq(effectiveHp(state, reg, u, 'p1'),    5, 'hp 3 + 2 exp');
+});
+
+scenario('Experience: give_experience fires end-to-end (Decorated Veteran When Played)', () => {
+  // W7_002 has When Played: give 2 experience to self → enters as a 4/4.
+  const vet = mkInst('W7_002');
+  const state = emptyState({ handP1: [vet], resourcesP1: 3, active: 'p1' });
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: vet.iid }, reg);
+  const inPlay = findCard(r.next, vet.iid);
+  if (!inPlay) throw new Error('veteran should be in play');
+  assertEq(inPlay.inst.experienceTokens, 2, 'gained 2 experience tokens');
+  assertEq(effectivePower(r.next, reg, inPlay.inst, 'p1'), 4, 'power 2 + 2 exp');
+  assertEq(effectiveHp(r.next, reg, inPlay.inst, 'p1'),    4, 'hp 2 + 2 exp');
+});
+
+scenario('Experience: tokens survive damage (Grit-like independence)', () => {
+  const u = mkInst('W1_001', { experienceTokens: 1, damage: 1 });  // 3/3, +1/+1 → 4/4, 1 dmg
+  const state = emptyState({ groundP1: [u] });
+  assertEq(effectiveHp(state, reg, u, 'p1') - u.damage, 3, 'remaining hp = 4 - 1');
+});
+
+// ---------------------------------------------------------------------------
+// New predicates: controller_resource_count, controller_controls_trait
+// ---------------------------------------------------------------------------
+
+scenario('Predicate controller_resource_count: +2/+0 only at 6+ resources', () => {
+  const hauler = mkInst('W7_003');                 // 3/3, +2 power while 6+ resources
+  const at6 = emptyState({ groundP1: [hauler], resourcesP1: 6 });
+  assertEq(effectivePower(at6, reg, hauler, 'p1'), 5, '3 + 2 at 6 resources');
+  const at5 = emptyState({ groundP1: [hauler], resourcesP1: 5 });
+  assertEq(effectivePower(at5, reg, hauler, 'p1'), 3, 'no buff at 5 resources');
+});
+
+scenario('Predicate controller_controls_trait: Sentinel only while you control a Vehicle', () => {
+  const escort = mkInst('W7_004');                 // gains Sentinel while you control a Vehicle
+  const vehicle = mkInst('W7_003');                // has trait "vehicle"
+  const withVeh = emptyState({ groundP1: [escort, vehicle] });
+  if (!hasEffectiveKeyword(withVeh, reg, escort, 'p1', 'sentinel')) throw new Error('should have Sentinel with a Vehicle in play');
+  const noVeh = emptyState({ groundP1: [escort] });
+  if (hasEffectiveKeyword(noVeh, reg, escort, 'p1', 'sentinel')) throw new Error('should NOT have Sentinel with no Vehicle');
+});
+
+scenario('Per-X scaling: +1/+1 for each controlled resource (live)', () => {
+  const u = mkInst('W1_001');   // 3/3
+  let s = emptyState({ groundP1: [u], resourcesP1: 4 });
+  s = { ...s, lastingEffects: [{
+    id: 'lePer', modifier: { per: { count: 'controller_resources', power: 1, health: 1 } },
+    targets: { kind: 'units', iids: [u.iid] }, expiry: 'permanent',
+  }] };
+  assertEq(effectivePower(s, reg, u, 'p1'), 3 + 4, '3 + 4 resources');
+  assertEq(effectiveHp(s, reg, u, 'p1'),    3 + 4, '3 + 4 resources');
+  // Drop a resource → bonus tracks live.
+  const s5 = { ...s, players: { ...s.players, p1: { ...s.players.p1, resources: s.players.p1.resources.slice(0, 2) } } };
+  assertEq(effectivePower(s5, reg, u, 'p1'), 3 + 2, 'tracks resource count live');
 });
 
 // ---------------------------------------------------------------------------

@@ -97,6 +97,23 @@ export function evalCardPredicate(
     if (!inRange(n, leaf.controller_unit_count)) return false;
   }
 
+  if (leaf.controller_resource_count !== undefined) {
+    const ps = ctx.state.players[instController];
+    const n = ps ? ps.resources.length : 0;
+    if (!inRange(n, leaf.controller_resource_count)) return false;
+  }
+
+  if (leaf.controller_controls_trait !== undefined) {
+    const ps = ctx.state.players[instController];
+    const want = leaf.controller_controls_trait.toLowerCase();
+    const hasTrait = (arr: CardInstance[]) => arr.some(c => {
+      const cs = ctx.reg.cards[c.cardId];
+      const ts = cs && 'traits' in cs ? cs.traits ?? [] : [];
+      return ts.some(x => x.toLowerCase() === want);
+    });
+    if (!ps || (!hasTrait(ps.groundArena) && !hasTrait(ps.spaceArena))) return false;
+  }
+
   return true;
 }
 

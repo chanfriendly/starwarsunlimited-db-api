@@ -73,6 +73,9 @@ import w6c008 from './cards/W6_008.json';
 export const W6_CARDS: CardSpec[] = [w6c001, w6c002, w6c003, w6c004, w6c005, w6c006, w6c007, w6c008] as CardSpec[];
 
 import w7c001 from './cards/W7_001.json';
-export const W7_CARDS: CardSpec[] = [w7c001] as CardSpec[];
+import w7c002 from './cards/W7_002.json';
+import w7c003 from './cards/W7_003.json';
+import w7c004 from './cards/W7_004.json';
+export const W7_CARDS: CardSpec[] = [w7c001, w7c002, w7c003, w7c004] as CardSpec[];
 
 export const ALL_CARDS: CardSpec[] = [...W1_CARDS, ...W2_CARDS, ...W3_CARDS, ...W4_CARDS, ...W5_CARDS, ...W6_CARDS, ...W7_CARDS];

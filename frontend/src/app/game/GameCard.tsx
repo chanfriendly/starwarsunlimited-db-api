@@ -58,7 +58,7 @@ export function GameCard({ instance, selected, targeted, faceDown, onClick, size
         <>
           {/* Art */}
           <img
-            src={card.image_uri || card.image_url || ''}
+            src={card.image_uri || card.image_url || undefined}
             alt={card.name}
             style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top', display: 'block' }}
           />

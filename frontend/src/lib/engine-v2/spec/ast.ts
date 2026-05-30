@@ -43,6 +43,12 @@ export interface PredicateLeaf {
    *  Used by Coordinate ("if you control 3 or more units…") via a constant
    *  ability's `while:` clause. Counts both arenas combined. */
   controller_unit_count?: Range;
+  /** Count of resources the controller has (ready + exhausted). For
+   *  "while you control N or more resources…" self-conditional buffs. */
+  controller_resource_count?: Range;
+  /** True iff the controller has at least one in-arena unit with this trait.
+   *  For "while you control a Vehicle unit, this gains Sentinel"-style cards. */
+  controller_controls_trait?: string;
 }
 
 export interface PredicateAnd { and: Predicate[] }
@@ -100,11 +106,19 @@ export interface KeywordGrant {
   value?: number;
 }
 
+/** Count source for per-X scaling modifiers ("+1/+1 for each resource you
+ *  control", "for each upgrade on this unit"). Evaluated live in the modifier
+ *  aggregator against the target's controller / the target instance. */
+export type PerCount = 'controller_resources' | 'controller_units' | 'self_upgrades';
+
 export interface Modifier {
   duration?: Duration;
   until?: Predicate;
   power?: number;
   health?: number;
+  /** Dynamic bonus: `power`/`health` multiplied by a live count. Stacks with
+   *  the flat `power`/`health` above. */
+  per?: { count: PerCount; power?: number; health?: number };
   keyword?: string;
   keyword_value?: number;
   keywords?: KeywordGrant[];
@@ -142,6 +156,14 @@ export interface DefeatEffect {
 
 export interface GiveShieldEffect {
   effect: 'give_shield';
+  target: Selector;
+  count?: number;
+}
+
+/** Give Experience token(s) to the target unit(s). Each token = +1/+1, stacks,
+ *  persists while in play (§SWU). `count` defaults to 1. */
+export interface GiveExperienceEffect {
+  effect: 'give_experience';
   target: Selector;
   count?: number;
 }
@@ -284,6 +306,7 @@ export type Effect =
   | HealEffect
   | DefeatEffect
   | GiveShieldEffect
+  | GiveExperienceEffect
   | DrawEffect
   | DiscardEffect
   | ExhaustEffect

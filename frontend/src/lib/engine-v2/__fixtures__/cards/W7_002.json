@@ -1,0 +1,20 @@
+{
+  "id": "W7_002",
+  "name": "Decorated Veteran",
+  "type": "unit",
+  "cost": 2,
+  "aspects": ["command"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 2,
+  "traits": ["imperial", "trooper"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": { "effect": "give_experience", "target": { "self": true }, "count": 2 }
+    }
+  ]
+}

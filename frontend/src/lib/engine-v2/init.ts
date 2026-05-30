@@ -72,7 +72,7 @@ function newPlayer(
     const spec = reg.cards[lid];
     if (!spec) throw new Error(`Unknown leader ${lid} for ${cfg.playerId}`);
     if (spec.type !== 'leader') throw new Error(`${lid} is not a leader spec (type=${spec.type})`);
-    return { cardId: lid, side: 'leader', isDeployed: false, exhausted: false };
+    return { cardId: lid, side: 'leader', isDeployed: false, exhausted: false, hasDeployed: false };
   });
 
   return {

@@ -289,24 +289,25 @@ function applyDeployLeader(
   const leader = p.leaders[leaderIndex];
   if (!leader) throw new Error(`No leader at index ${leaderIndex}`);
   if (leader.isDeployed) throw new Error(`Leader is already deployed`);
+  // Deploy is an Epic Action — once per game. A leader that already deployed
+  // (even if since defeated + flipped back) cannot redeploy.
+  if (leader.hasDeployed) throw new Error(`Leader already used its deploy Epic Action this game`);
 
   const spec = reg.cards[leader.cardId];
   if (!spec || spec.type !== 'leader') throw new Error(`Invalid leader spec for ${leader.cardId}`);
 
+  // Twin Suns house rule: deploying a leader is FREE — it spends no resources.
+  // You only need a total resource pool that meets the deploy-cost threshold
+  // (ready or exhausted both count). This diverges from standard SWU, where
+  // deploy exhausts resources like playing a card; see CLAUDE.md > Conventions.
   const cost = spec.cost ?? 0;
-  const readyResources = p.resources.filter(r => !r.exhausted);
-  if (readyResources.length < cost) {
-    throw new Error(`Insufficient resources: need ${cost}, have ${readyResources.length}`);
+  if (p.resources.length < cost) {
+    throw new Error(`Insufficient resources to deploy: need ${cost} total, have ${p.resources.length}`);
   }
 
   let s = state;
   const events: GameEvent[] = [];
-  for (let i = 0; i < cost; i++) {
-    const ri = readyResources[i].iid;
-    const r = exhaust(s, ri);
-    s = r.state;
-    events.push({ kind: 'RESOURCE_SPENT', player: pid, iid: ri });
-  }
+  // (no resource exhaust — deploy is free in Twin Suns)
 
   // Create the leader-unit CardInstance. Enters exhausted (deployed leaders
   // can't attack the same turn they deploy, same as normal unit plays).
@@ -331,6 +332,7 @@ function applyDeployLeader(
     ...leader,
     side: 'leader_unit',
     isDeployed: true,
+    hasDeployed: true,   // Epic Action spent — never redeployable, even after flip-back
     unitIid: iid,
   };
   s = withPlayer(s, pid, {

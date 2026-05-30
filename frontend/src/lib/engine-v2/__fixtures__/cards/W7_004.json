@@ -1,0 +1,19 @@
+{
+  "id": "W7_004",
+  "name": "Vehicle Escort",
+  "type": "unit",
+  "cost": 2,
+  "aspects": ["vigilance"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 3,
+  "traits": ["imperial", "trooper"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "constant",
+      "while": { "controller_controls_trait": "vehicle" },
+      "grant": { "target": { "self": true }, "modifier": { "keyword": "sentinel" } }
+    }
+  ]
+}

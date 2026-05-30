@@ -57,13 +57,18 @@ export function getLegalActions(state: GameState, reg: CardRegistry, pid: Player
     }
   }
 
-  // DEPLOY_LEADER — every un-deployed leader whose cost ≤ ready resources.
+  // DEPLOY_LEADER — every un-deployed leader whose deploy cost ≤ TOTAL
+  // resources. Twin Suns house rule: deploying is free (spends nothing); the
+  // cost is a threshold on the total pool, so exhausted resources still count
+  // and spending on a unit first never blocks a deploy. See CLAUDE.md.
+  const totalResourceCount = p.resources.length;
   p.leaders.forEach((leader, idx) => {
     if (leader.isDeployed) return;
+    if (leader.hasDeployed) return; // Epic Action is once per game — no redeploy after flip-back
     const spec = reg.cards[leader.cardId];
     if (!spec || spec.type !== 'leader') return;
     const cost = spec.cost ?? 0;
-    if (cost > readyResourceCount) return;
+    if (cost > totalResourceCount) return;
     actions.push({ kind: 'DEPLOY_LEADER', player: pid, leaderIndex: idx });
   });
 

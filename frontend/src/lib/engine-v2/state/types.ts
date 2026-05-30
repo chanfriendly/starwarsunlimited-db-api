@@ -31,6 +31,9 @@ export interface CardInstance {
   capturedByIid?: string;
   enteredZoneAt: number;
   deployedThisTurn?: boolean;
+  /** Experience tokens on this unit. Each grants +1/+1 (§SWU); they stack and
+   *  persist while the unit is in play. Optional — absent = 0. */
+  experienceTokens?: number;
 }
 
 export interface BaseInstance {
@@ -44,6 +47,11 @@ export interface LeaderInstance {
   isDeployed: boolean;
   unitIid?: string;
   exhausted: boolean;
+  /** Deploy is an Epic Action — once per game (§SWU). Set true on deploy and
+   *  never cleared, so a leader that's been defeated + flipped back cannot be
+   *  redeployed. Optional for back-compat with hand-built test states (absent =
+   *  never deployed). */
+  hasDeployed?: boolean;
 }
 
 export interface CapturedCard {
