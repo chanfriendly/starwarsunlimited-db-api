@@ -11,6 +11,7 @@ import type { PlayerRef, Predicate, PredicateLeaf, Range, TriggerPredicate } fro
 import { isPredicateAnd, isPredicateNot, isPredicateOr } from '../spec/ast';
 import { isUnit } from '../spec/types';
 import { findCard } from '../state/zones';
+import { effectiveHp } from './modifiers';
 
 export interface EvalCtx {
   state: GameState;
@@ -85,6 +86,15 @@ export function evalCardPredicate(
   if (leaf.self_damage !== undefined && !inRange(inst.damage, leaf.self_damage)) return false;
   if (leaf.self_exhausted !== undefined && inst.exhausted !== leaf.self_exhausted) return false;
   if (leaf.self_upgraded !== undefined && (inst.upgrades.length > 0) !== leaf.self_upgraded) return false;
+  if (leaf.has_shield_token !== undefined && (inst.shieldTokens > 0) !== leaf.has_shield_token) return false;
+  if (leaf.remaining_hp !== undefined) {
+    // Effective HP − damage (rules-accurate "remaining HP"). Effective stats
+    // are an explicit exception to the printed-stats convention above; this is
+    // safe from the modifier cycle because remaining_hp is only ever used in
+    // selector filters, not in the `while:` clauses effectiveHp scans.
+    const remaining = effectiveHp(ctx.state, ctx.reg, inst, instController) - inst.damage;
+    if (!inRange(remaining, leaf.remaining_hp)) return false;
+  }
 
   if (leaf.player_has_force_token !== undefined) {
     const has = ctx.state.players[instController]?.forceToken === true;

@@ -4,6 +4,7 @@
 export { step } from './reducer';
 export { initGame } from './init';
 export { buildRegistry } from './spec/loader';
+export { TOKEN_REGISTRY, getTokenSpec } from './state/tokens';
 export { getLegalActions, describeAction } from './legal';
 export { defaultChooser, declineChooser, scriptedChooser } from './runtime/chooser';
 export { stepAsync, resolveStep } from './runtime/async_step';

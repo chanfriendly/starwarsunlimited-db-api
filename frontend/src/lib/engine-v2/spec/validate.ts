@@ -43,7 +43,8 @@ const EFFECT_KINDS = new Set([
   'damage', 'heal', 'defeat', 'give_shield', 'give_experience', 'draw', 'discard',
   'exhaust', 'ready', 'give', 'sequence', 'if', 'noop', 'choose_one', 'optional',
   'create_token', 'capture', 'rescue', 'move', 'look_at', 'disclose',
-  'search', 'divided_damage',
+  'search', 'divided_damage', 'return_to_hand', 'use_force', 'gain_force',
+  'power_damage_from_each',
 ]);
 const ABILITY_TYPES = new Set(['triggered', 'action', 'constant', 'replacement']);
 const TRIGGER_CONDITIONS = new Set([
@@ -69,7 +70,8 @@ const PREDICATE_LEAF_FIELDS = new Set([
   'card_is_unique', 'card_is_token', 'card_is_leader_unit', 'stat_power',
   'stat_hp', 'controller', 'zone', 'self_damage', 'self_exhausted',
   'self_upgraded', 'player_has_force_token', 'controller_unit_count',
-  'controller_resource_count', 'controller_controls_trait',
+  'controller_resource_count', 'controller_controls_trait', 'has_shield_token',
+  'remaining_hp',
 ]);
 const MODIFIER_FIELDS = new Set([
   'duration', 'until', 'power', 'health', 'per', 'keyword', 'keyword_value',
@@ -84,7 +86,7 @@ const TRIGGER_PREDICATE_FIELDS = new Set([
 // Boolean-flag selector forms (e.g. { self: true }). The presence of one of
 // these keys means "this is a named selector, not a scoped one."
 const SELECTOR_FLAG_KEYS = new Set([
-  'self', 'trigger_source', 'self_base', 'opponent_base', 'all_friendly_units',
+  'self', 'trigger_source', 'self_base', 'opponent_base', 'trigger_controller_base', 'all_friendly_units',
   'attached_to_self',
 ]);
 const SCOPED_SELECTOR_KEYS = new Set(['zone', 'controller', 'filter', 'selector', 'count']);
@@ -162,7 +164,7 @@ function validatePredicate(v: V, path: string, p: unknown) {
       case 'controller': checkEnum(v, `${path}.controller`, val, PLAYER_REFS, 'controller'); break;
       case 'zone': checkEnum(v, `${path}.zone`, val, ZONES, 'zone'); break;
       case 'card_cost': case 'stat_power': case 'stat_hp': case 'self_damage':
-      case 'controller_unit_count': case 'controller_resource_count':
+      case 'controller_unit_count': case 'controller_resource_count': case 'remaining_hp':
         checkRange(v, `${path}.${key}`, val as Range); break;
       case 'card_traits_any':
         if (!Array.isArray(val)) v.err(`${path}.card_traits_any`, 'must be an array of strings'); break;
@@ -287,7 +289,10 @@ function validateEffect(v: V, path: string, e: unknown) {
 
   switch (kind) {
     case 'damage':
-      need('amount', isNum(e.amount)); need('target', 'target' in e);
+      // Either a fixed `amount` OR dynamic `amountFromPower` (a selector).
+      need('amount|amountFromPower', isNum(e.amount) || 'amountFromPower' in e);
+      if ('amountFromPower' in e) validateSelector(v, `${path}.amountFromPower`, e.amountFromPower);
+      need('target', 'target' in e);
       if ('target' in e) validateSelector(v, `${path}.target`, e.target); break;
     case 'heal':
       need('amount', isNum(e.amount)); need('target', 'target' in e);
@@ -349,6 +354,18 @@ function validateEffect(v: V, path: string, e: unknown) {
       need('target', 'target' in e); need('to', 'to' in e);
       if ('target' in e) validateSelector(v, `${path}.target`, e.target);
       if ('to' in e) checkEnum(v, `${path}.to`, e.to, MOVE_TO, 'to'); break;
+    case 'return_to_hand':
+      need('target', 'target' in e);
+      if ('target' in e) validateSelector(v, `${path}.target`, e.target); break;
+    case 'use_force':
+      need('do', 'do' in e);
+      if ('do' in e) validateEffect(v, `${path}.do`, e.do); break;
+    case 'gain_force':
+      if ('player' in e) checkEnum(v, `${path}.player`, e.player, PLAYER_REFS, 'player'); break;
+    case 'power_damage_from_each':
+      need('sources', 'sources' in e); need('target', 'target' in e);
+      if ('sources' in e) validateSelector(v, `${path}.sources`, e.sources);
+      if ('target' in e) validateSelector(v, `${path}.target`, e.target); break;
     case 'look_at':
       need('player', 'player' in e); need('source', 'source' in e);
       if ('player' in e) checkEnum(v, `${path}.player`, e.player, PLAYER_REFS, 'player');

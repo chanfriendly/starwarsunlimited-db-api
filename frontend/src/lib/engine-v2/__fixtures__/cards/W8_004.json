@@ -1,0 +1,18 @@
+{
+  "id": "W8_004",
+  "name": "Orbital Bombardment",
+  "type": "event",
+  "cost": 4,
+  "aspects": ["aggression"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "do": {
+        "effect": "damage",
+        "amount": 2,
+        "target": { "zone": "any_arena", "controller": "opponent" }
+      }
+    }
+  ]
+}

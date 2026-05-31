@@ -17,9 +17,10 @@ import { createToken } from '../primitives/tokens';
 import { capture, rescue } from '../primitives/capture';
 import { resolveSelector } from './selectors';
 import { evalCardPredicate, resolvePlayer, type EvalCtx } from './predicates';
-import { findCard, withPlayer, mapInstance } from '../state/zones';
+import { findCard, withPlayer, mapInstance, getZoneArr, withZoneArr } from '../state/zones';
 import { defaultChooser } from './chooser';
 import { dealDamageToBase, dealDamageToUnit } from './damage';
+import { effectivePower } from './modifiers';
 import { shuffleDeterministic } from '../util/rng';
 
 export interface InterpCtx extends EvalCtx {}
@@ -80,7 +81,60 @@ export function applyEffect(ctx: InterpCtx, effect: Effect): InterpResult {
     case 'disclose':         return applyDisclose(ctx, effect);
     case 'search':           return applySearch(ctx, effect);
     case 'divided_damage':   return applyDividedDamage(ctx, effect);
+    case 'return_to_hand':   return applyReturnToHand(ctx, effect);
+    case 'use_force':        return applyUseForce(ctx, effect);
+    case 'gain_force':       return applyGainForce(ctx, effect);
+    case 'power_damage_from_each': return applyPowerDamageFromEach(ctx, effect);
   }
+}
+
+function applyPowerDamageFromEach(ctx: InterpCtx, e: Extract<Effect, { effect: 'power_damage_from_each' }>): InterpResult {
+  const targets = resolveSelector(ctx, e.target);
+  const targetUnit = targets.find(t => t.kind === 'unit');
+  if (!targetUnit || targetUnit.kind !== 'unit') return { state: ctx.state, events: [] };
+
+  let sources = resolveSelector(ctx, e.sources).filter(t => t.kind === 'unit');
+  if (e.sources_same_arena_as_target) {
+    const tf = findCard(ctx.state, targetUnit.iid);
+    const tArena = tf?.loc.zone;
+    sources = sources.filter(t => {
+      const f = findCard(ctx.state, t.iid);
+      return f && f.loc.zone === tArena;
+    });
+  }
+
+  let s = ctx.state;
+  const events: GameEvent[] = [];
+  for (const src of sources) {
+    const f = findCard(s, src.iid);
+    if (!f) continue; // source left play mid-resolution
+    const pow = effectivePower(s, ctx.reg, f.inst, f.loc.controller);
+    if (pow <= 0) continue;
+    const r = applyDamageToTarget(s, ctx.reg, targetUnit, pow, false, false, false, src.iid, ctx.chooser);
+    s = r.state;
+    events.push(...r.events);
+  }
+  return { state: s, events };
+}
+
+function applyUseForce(ctx: InterpCtx, e: Extract<Effect, { effect: 'use_force' }>): InterpResult {
+  // "Use the Force" spends the source controller's Force token (per-player; max
+  // one). No token → can't use it → the `do` doesn't happen.
+  const pid = ctx.sourcePlayer;
+  const p = ctx.state.players[pid];
+  if (!p || !p.forceToken) return { state: ctx.state, events: [] };
+  const s = withPlayer(ctx.state, pid, { ...p, forceToken: false });
+  const r = applyEffect({ ...ctx, state: s }, e.do);
+  return { state: r.state, events: [{ kind: 'FORCE_USED', player: pid }, ...r.events] };
+}
+
+function applyGainForce(ctx: InterpCtx, e: Extract<Effect, { effect: 'gain_force' }>): InterpResult {
+  // "The Force is with you" — gain a Force token (max one; idempotent if held).
+  const pid = e.player ? resolvePlayerStrict(e.player, ctx) : ctx.sourcePlayer;
+  const p = ctx.state.players[pid];
+  if (!p || p.forceToken) return { state: ctx.state, events: [] };
+  const s = withPlayer(ctx.state, pid, { ...p, forceToken: true });
+  return { state: s, events: [{ kind: 'FORCE_TOKEN_CREATED', player: pid }] };
 }
 
 // ---------------------------------------------------------------------------
@@ -88,15 +142,32 @@ export function applyEffect(ctx: InterpCtx, effect: Effect): InterpResult {
 // ---------------------------------------------------------------------------
 
 function applyDamage(ctx: InterpCtx, e: Extract<Effect, { effect: 'damage' }>): InterpResult {
+  // "Deals damage equal to its power": snapshot the source unit's effective
+  // power once, up front, so damage dealt mid-resolution can't change it.
+  const amount = e.amountFromPower !== undefined
+    ? powerFromSelector(ctx, e.amountFromPower)
+    : (e.amount ?? 0);
   const targets = resolveSelector(ctx, e.target);
   let s = ctx.state;
   const events: GameEvent[] = [];
   for (const t of targets) {
-    const r = applyDamageToTarget(s, ctx.reg, t, e.amount, !!e.combat, !!e.unpreventable, !!e.indirect, ctx.sourceIid, ctx.chooser);
+    const r = applyDamageToTarget(s, ctx.reg, t, amount, !!e.combat, !!e.unpreventable, !!e.indirect, ctx.sourceIid, ctx.chooser);
     s = r.state;
     events.push(...r.events);
   }
   return { state: s, events };
+}
+
+/** Effective power of the first unit a selector resolves to (0 if none). Used
+ *  for `amountFromPower` — e.g. `{ self: true }` for "deals damage equal to his
+ *  power". */
+function powerFromSelector(ctx: InterpCtx, sel: import('../spec/ast').Selector): number {
+  const resolved = resolveSelector(ctx, sel);
+  const unit = resolved.find(t => t.kind === 'unit');
+  if (!unit || unit.kind !== 'unit') return 0;
+  const f = findCard(ctx.state, unit.iid);
+  if (!f) return 0;
+  return effectivePower(ctx.state, ctx.reg, f.inst, f.loc.controller);
 }
 
 function applyDamageToTarget(
@@ -252,19 +323,32 @@ function applyChooseOne(ctx: InterpCtx, e: Extract<Effect, { effect: 'choose_one
   if (e.options.length === 0) return { state: ctx.state, events: [] };
   const chooser = ctx.chooser ?? defaultChooser;
   const who = e.chooser ? resolvePlayerStrict(e.chooser, ctx) : ctx.sourcePlayer;
-  const result = chooser({
-    kind: 'choose_one',
-    prompt: e.prompt ?? 'Choose one',
-    options: e.options.map(o => ({ label: o.label, value: o.value })),
-    player: who,
-    canPass: false,
-  });
-  if (result.kind === 'pass' || result.kind === 'no') return { state: ctx.state, events: [] };
-  const picked = result.kind === 'option'
-    ? e.options.find(o => o.value === result.value)
-    : e.options[0];
-  if (!picked) return { state: ctx.state, events: [] };
-  return applyEffect(ctx, picked.do);
+  // count = how many distinct options to pick & resolve ("Choose two, in any
+  // order:" → 2). The player's pick order IS the resolution order. Each pick is
+  // removed from the pool so the same option can't be chosen twice.
+  const count = Math.min(e.count ?? 1, e.options.length);
+  const remaining = e.options.slice();
+  let s = ctx.state;
+  const events: GameEvent[] = [];
+  for (let i = 0; i < count && remaining.length > 0; i++) {
+    const result = chooser({
+      kind: 'choose_one',
+      prompt: e.prompt ?? (count > 1 ? `Choose ${count - i} more` : 'Choose one'),
+      options: remaining.map(o => ({ label: o.label, value: o.value })),
+      player: who,
+      canPass: false,
+    });
+    if (result.kind === 'pass' || result.kind === 'no') break;
+    const picked = result.kind === 'option'
+      ? remaining.find(o => o.value === result.value)
+      : remaining[0];
+    if (!picked) break;
+    const r = applyEffect({ ...ctx, state: s }, picked.do);
+    s = r.state;
+    events.push(...r.events);
+    remaining.splice(remaining.indexOf(picked), 1);
+  }
+  return { state: s, events };
 }
 
 function applyOptional(ctx: InterpCtx, e: Extract<Effect, { effect: 'optional' }>): InterpResult {
@@ -352,6 +436,47 @@ function applyMove(ctx: InterpCtx, e: Extract<Effect, { effect: 'move' }>): Inte
     newP = dest === 'ground_arena' ? { ...newP, groundArena: toArr } : { ...newP, spaceArena: toArr };
     s = withPlayer(s, t.controller, newP);
     events.push({ kind: 'ARENA_MOVED', iid: t.iid, from: fromZone, to: dest });
+  }
+  return { state: s, events };
+}
+
+function applyReturnToHand(ctx: InterpCtx, e: Extract<Effect, { effect: 'return_to_hand' }>): InterpResult {
+  const targets = resolveSelector(ctx, e.target);
+  let s = ctx.state;
+  const events: GameEvent[] = [];
+  for (const t of targets) {
+    if (t.kind !== 'unit') continue;
+    const f = findCard(s, t.iid);
+    if (!f) continue;
+    if (f.loc.zone !== 'ground_arena' && f.loc.zone !== 'space_arena') continue;
+    const ctrl = f.loc.controller;
+    const ps0 = s.players[ctrl];
+    // Leader units don't return to hand — they have their own flip-back rules.
+    if (ps0.leaders.some(l => l.isDeployed && l.unitIid === f.inst.iid)) continue;
+
+    // Remove from its arena.
+    const fromArr = getZoneArr(ps0, f.loc.zone).slice();
+    const idx = fromArr.findIndex(c => c.iid === f.inst.iid);
+    if (idx < 0) continue;
+    fromArr.splice(idx, 1);
+    let ps = withZoneArr(ps0, f.loc.zone, fromArr);
+
+    // Attached upgrades can't go to hand — discard them, cleared of state.
+    const newDiscard = ps.discard.slice();
+    for (const up of f.inst.upgrades) {
+      newDiscard.push({ ...up, damage: 0, exhausted: false, shieldTokens: 0, experienceTokens: 0, upgrades: [] });
+      events.push({ kind: 'UPGRADE_DETACHED', upgradeIid: up.iid, hostIid: f.inst.iid });
+    }
+
+    // The unit returns to its owner's hand as a fresh card (owner = controller
+    // until a control-transfer mechanic introduces a distinct owner).
+    const fresh: typeof f.inst = {
+      ...f.inst, damage: 0, exhausted: false, shieldTokens: 0, experienceTokens: 0,
+      upgrades: [], capturedByIid: undefined, enteredZoneAt: s.step,
+    };
+    ps = { ...ps, hand: [...ps.hand, fresh], discard: newDiscard };
+    s = withPlayer(s, ctrl, ps);
+    events.push({ kind: 'ZONE_CHANGED', iid: f.inst.iid, from: f.loc.zone, to: 'hand' });
   }
   return { state: s, events };
 }

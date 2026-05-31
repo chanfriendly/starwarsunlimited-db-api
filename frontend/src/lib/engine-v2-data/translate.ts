@@ -177,9 +177,17 @@ export function translateCard(card: Card): TranslateResult {
       return { spec };
     }
     case 'leader': {
-      // A leader's `text` is its leader-side (un-deployed) ability — route the
-      // matched abilities to leaderAbilities. The deployed unit-side text isn't
-      // in this column, so leaderUnitAbilities stays empty for now.
+      // A leader has two ability sources in the DB:
+      //   • `text`       — the leader-side (un-deployed) abilities  → leaderAbilities
+      //   • `deploy_box` — the deployed leader-UNIT abilities         → leaderUnitAbilities
+      // The deployed unit side parses like a unit (On Attack / When Played /
+      // constant / action), so run the matcher over deploy_box as a unit.
+      const deployMatch = matchCard({
+        name: card.name,
+        type: 'unit',
+        text: card.deploy_box ?? undefined,
+        keywords: card.keywords,
+      });
       const spec: LeaderSpec = {
         ...common,
         type: 'leader',
@@ -187,7 +195,7 @@ export function translateCard(card: Card): TranslateResult {
         power: card.attack ?? LEADER_FALLBACK_POWER,
         hp: card.health ?? LEADER_FALLBACK_HP,
         leaderAbilities: matched.abilities,
-        leaderUnitAbilities: [],
+        leaderUnitAbilities: deployMatch.abilities,
       };
       return { spec };
     }

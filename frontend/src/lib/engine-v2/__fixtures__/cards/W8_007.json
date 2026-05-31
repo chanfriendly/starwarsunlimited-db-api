@@ -1,0 +1,17 @@
+{
+  "id": "W8_007",
+  "name": "Sorcerous Blast",
+  "type": "event",
+  "cost": 1,
+  "aspects": ["aggression"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "do": {
+        "effect": "use_force",
+        "do": { "effect": "damage", "amount": 3, "target": { "zone": "any_arena", "controller": "any", "selector": "chosen", "count": 1 } }
+      }
+    }
+  ]
+}

@@ -6,6 +6,75 @@
 
 ## Current Status
 
+*(2026-05-31 session 54)* **Coordinate self-buff matcher template (matcher-only, no new engine primitive). Recognizes "Coordinate — This unit gets +N/+N." → constant gated on `controller_unit_count ≥ 3` (the engine already modeled Coordinate this way via W4_004). Closes a known residual. Engine 90 / translate 48 / validate 16, tsc clean.** Fixture W8_012 + 2 engine scenarios (active at 3 units / inactive at 2) + 1 matcher scenario (incl. reminder-stripping). The em-dash body is what reaches `parseConstantClause` after `stripReminders` removes the "(While you control 3 or more units…)" reminder. NOTE: tool-result channel was badly degraded this session, so scope was deliberately held to this one low-risk, high-confidence task.
+
+*(2026-05-31 session 53)* **Six task-#58 primitives across three batches: quick wins (token creation, `remaining_hp`, event-contextual base) + Force tokens + multi-source power damage. Corpus 508 → 571 fully playable (22.7% → 25.5%), +63 cards. Engine 88 / translate 47 / validate 16, tsc clean, play-cli completes.**
+
+**Batch 2 — Force tokens** (per Christian's ruling: per-player resource, max one each, NOT the shared counters): `use_force` ("Use the Force. If you do, X" → spend the controller's token if held, then do X; else no-op) + `gain_force` ("The Force is with you"). Matcher strips the reminder + tolerates the spacing; "You may use the Force" → optional. Added `Ready this unit.` → ready-self. Fixtures W8_007/008. **+27** (events 48→55).
+
+**Batch 3 — multi-source power damage** `power_damage_from_each`: each source deals its OWN power to a shared target (vs `amountFromPower`'s single self-source). `sources_same_arena_as_target` for Focus Fire; Maximum Firepower's 2-sentence form detected at whole-text level (2 chosen sources). Also unlocks the Command modal's power-damage option. Fixtures W8_009/010/011. **+3.**
+
+
+
+- **Token creation:** "Create N <Token> tokens" → `create_token`, mapping the printed name to the engine's `TOKEN_REGISTRY` key (now exported from the engine index) and using the token's arena for the zone. Unknown tokens stay residual. Flipped the "Choose one: Create…" modals to full. **+21 cards** (biggest single win of the batch).
+- **`remaining_hp` predicate** = effective HP − damage (Christian's call: correctness over the printed-stats convention). Documented exception; safe from the modifier cycle (selector-filter use only). Matcher: "Defeat a[n] [enemy] [non-leader] unit with N or less remaining HP". Verified upgrade-buffed units (effective HP > N) are correctly not targetable. **+6.**
+- **`trigger_controller_base` selector** ("its controller's base" on a defeat trigger; resolves `DEFEATED.lastKnown.controller`'s base). Matcher: "When an enemy unit is defeated: deal N to its controller's base". **+6.**
+- Fixtures W8_001–006 now cover the session's primitives; each has matcher + engine scenarios.
+
+**DESIGN DECISIONS RECORDED (Christian, 2026-05-31):**
+1. **The Force = per-player boolean, NO transfer** (the current `forceToken` model is correct for Twin Suns). "Use the Force" should spend the player's own Force token. *Not yet built* — when implementing, still verify against the current Comprehensive Rules and flag if the official rule differs (my cached rules PDF predates the Force mechanic).
+2. **`remaining_hp` uses effective HP** (done this session).
+
+**Top residuals / next candidates (after session 53):** "this event costs N less to play for each friendly leader unit" (cost reduction — needs a dynamic-cost mechanic), "this unit can attack N units instead of 1" (multi-attack), "Coordinate — this unit gets +N/+N" (Coordinate self-buff — Coordinate exists as a predicate but not this self-buff shape), control-transfer ("take control of a non-leader unit" — Liberated by Darkness, needs an `owner`≠`controller` model + start-of-regroup return), discard-pile recursion ("return a unit from your discard pile to your hand"), bounce near-misses ("…to its owner's hand. If you do, …" compound + trailing-space "hand ." variant + the "When this unit is attacked" trigger), "name a card" naming mechanic, "if a friendly unit left play this phase" conditional. Token creation w/ disclose-conditional (Chancellor Palpatine Spy) now mostly works via the disclose + create_token primitives — re-check. Multi-clause "if you do / if you do not" branches (Do or Do Not) need an if/else compound.
+
+---
+
+*(2026-05-30 session 52)* **First browser UAT of "Test for Claude" by Christian. TWO real bugs fixed (deployed leaders entered EXHAUSTED → now READY per §3.4.4c; mandatory single-target picks could be confirmed with 0 selected → effect fizzled while cost was paid — the Tarkin Experience bug). Shoretrooper "+2/+0" was correct (needs 6 resources). Plus 2 approved features: zero-target legality gate + `deploy_box`→`leaderUnitAbilities`. tsc clean · scenarios 78 · translate 36 · validate 16.**
+
+UAT results triaged (all verified against code + the Comprehensive Rules PDF, not memory):
+1. **Real-deck load: PASS.**
+2. **Tarkin leader action — "can't assign the Experience token": REAL bug, FIXED (modal layer).** ⚠ My first triage was wrong (I'd concluded "no Imperial units in play" — Christian corrected me: Seasoned Shoretrooper IS an Imperial unit and WAS in play). Root cause found by elimination: the engine/matcher/translator/`stepAsync` are all correct (proven with a real-card repro — the prompt surfaces with the Shoretrooper as a candidate). The bug was in the **chooser→modal contract**: the matcher emits a *mandatory* single target as `count: 1` (a plain number), and `selectors.ts` derived **`minCount: 0`** from any numeric count. So `ChoicePromptModal`'s `canSubmit = picked.length >= min` was true with **0 selected** — the Confirm button was enabled with nothing picked, the hint read "Pick 0–1 targets," and confirming with 0 returned empty targets → `give_experience` applied to nobody → step settled and the resource was spent for nothing. (Latent for EVERY mandatory single-target effect — damage/exhaust/etc. — not just Tarkin.) **Fix:** `selectors.ts` now treats a numeric `count: N` as mandatory → `minCount = min(N, candidates.length)`, `canPass` only for `{min:0,...}` ranges. The modal now forces selecting the target. Verified: Tarkin's prompt is now `count 1, minCount 1, canPass false`. Headless choosers (`defaultChooser` auto-picks first-N regardless of minCount) are unaffected, so scenarios/AI unchanged. **Christian: please re-test in the browser to confirm** — I fixed the contract but couldn't drive the exact authenticated browser session headlessly. Also note (separate gap): **Tarkin's `deploy_box` "On Attack: …give an Experience token to another Imperial unit" is inert** — `translateCard` only matches the leader's `text` column into `leaderAbilities`; `leaderUnitAbilities` stays `[]`.
+3. **Leader deploy free: PASS. Leader-exhaust-on-deploy: FIXED (real bug).** Christian was right — deployed leaders enter the arena READY (§3.4.4c: "enters the ground arena ready, even if it was exhausted before"), the exception to §3.4.4b (non-leader units enter exhausted). Engine had it backwards (`exhausted: true`, citing "§v7" — wrong). Fixed `reducer.applyDeployLeader` → `exhausted: false`; added scenario "Leader deploy: enters READY and can attack the same round (§3.4.4c)"; updated CLAUDE.md rules note. This is the 3rd SWU-rule-from-memory miss — the PDF (`pdftotext` over the Comprehensive Rules) is the oracle.
+4. **Seasoned Shoretrooper "+2/+0 didn't change stats": NOT a bug.** Repro confirms the conditional fires correctly: 3/5 resources → printed 3/6; **6/7 resources → 5/6 (+2/+0)**. Christian had fewer than 6 resources at the time; threshold is 6. (97th Legion per-resource scaling was not exercised in this UAT.)
+5. **Regressions: all PASS.**
+6. **Choice modal: works except Tarkin** — same root cause as #2 (the mandatory-target `minCount: 0` bug), fixed there.
+
+**Two follow-ups Christian approved + DONE this session:**
+- **Zero-target gate:** `legal.ts` no longer offers a `USE_ACTION_ABILITY` whose effect has a *mandatory* `chosen` target with no candidates (resolves the candidate set with `defaultChooser`, skips if empty). `optional` ("you may") effects and `{min:0}` ranges are never gated. Scenario added: "Action ability: NOT offered when its mandatory target has no candidates."
+- **`deploy_box` → `leaderUnitAbilities`:** `translateCard` now runs the matcher over a leader's `deploy_box` column (as a unit) and routes the result to `leaderUnitAbilities` (was hard-coded `[]`). Unlocks deployed-leader On-Attack/When-Played abilities corpus-wide (e.g. Tarkin's "On Attack: give an Experience token"). Translate-scenario added.
+
+**Verification:** tsc clean · scenarios 78/78 · translate-scenarios 36/36 · validate-scenarios 16/16 · `play-cli --ai both` completes.
+
+---
+
+*(2026-05-30 session 52 cont.)* **Task #58 started — power-based damage primitive ("deals damage equal to its power").**
+
+- **AST:** `DamageEffect.amount` is now optional; added `amountFromPower?: Selector`. When set, the damage amount is the effective power of the FIRST unit the selector resolves to (usually `{ self: true }`), snapshot once before any damage lands so mid-resolution damage can't change it. Provide `amount` OR `amountFromPower`.
+- **Interpreter:** `applyDamage` computes the dynamic amount via `powerFromSelector` (`resolveSelector` → first unit → `effectivePower`). Buffs/auras/experience tokens are included because it reads effective (not printed) power.
+- **Validator:** a damage effect now needs `amount` OR `amountFromPower` (the latter validated as a selector). The all-fixtures regression scenario covers the new `W8_001` fixture.
+- **Matcher template:** "This unit deals damage equal to its/his/her power to an (enemy) (ground|space) unit." → `damage` with `amountFromPower: {self}` and a zone+controller-scoped chosen target. Covers Crosshair's "Following Orders" action line.
+- **Fixture + tests:** `W8_001` Marksman Clone (4 power, `Action [Exhaust]: power-damage to an enemy ground unit`). Scenario verifies 4 damage to a 5-hp Wampa, and that +1 experience (5 power) defeats it. Matcher scenario verifies the AST shape.
+
+**Verification:** tsc clean · scenarios **79** · translate **37** · validate **16** · play-cli completes. Corpus: 490 fully playable (21.9%).
+
+**Power-damage tail still open (multi-source — different shape, ~2 cards):** Focus Fire ("Each friendly Vehicle unit in the same arena deals damage equal to its power to that unit") and Maximum Firepower ("A friendly Imperial unit deals damage equal to its power to a unit. Then, another…") need a *per-source* template where EACH unit in a set deals its OWN power — distinct from the single-self-source case shipped here. Defer until the rest of task #58 (token-creation conditionals, control-transfer, play-from-discard, etc.) is scoped.
+
+**Next:** Christian to re-test Tarkin's Experience action (un-deployed action + now the deployed On-Attack) in the browser. Continue task #58 — next genuinely-new mechanic (multi-source power damage, or token-creation conditionals / control-transfer / play-from-discard).
+
+---
+
+*(2026-05-30 session 52 cont. — more task-#58 primitives)* **Modal choice framework + return-to-hand. Corpus 490 → 497 fully playable (22.2%). Engine 81 / translate 40 / validate 16, tsc clean.**
+
+- **Modal "Choose one/two":** `choose_one` gained `count?` (2 = "Choose two, in any order"); `applyChooseOne` loops, excluding picked options. `parseModalEffect` parses the multi-line modal block → `choose_one`, wired into `matchCard` for events at whole-text level. **Also fixed a latent correctness bug:** modal events were previously clause-split so every mode fired unconditionally; now it's a real choice (or residual if any mode is untemplated). Fixtures W8_002.
+- **Return-to-hand (bounce):** new `return_to_hand` effect — unit → owner's hand as a fresh card (damage/exhaust/shields/Experience reset, upgrades discarded, leaders skipped; owner=controller until control-transfer exists). Matcher handles enemy/friendly/non-leader/cost-filtered + self forms. Power-filtered bounce deferred (no `card_power` predicate). Fixture W8_003.
+- **AOE / multi-target damage (matcher-only):** "Deal N to each of up to M [enemy] units" + "Deal N to each [enemy|friendly] [non-leader] unit" (reuses `applyDamage`'s target loop). "Give a Shield token to a friendly unit and to an enemy unit" → `sequence` of two grants. Fixture W8_004.
+- **`has_shield_token` predicate** (true iff `inst.shieldTokens > 0`): unlocks "Defeat an enemy unit with a Shield token on it". Together with the compound shield, this finishes the Darth Vader-style units.
+- **Running total this session:** corpus 490 → **508 fully playable (21.9% → 22.7%)**; engine scenarios 76 → 82, translate 35 → 42, validate 16. tsc clean, play-cli completes throughout.
+
+**Top residuals remaining (next data-driven picks):** "when an enemy unit is defeated: deal N to its controller's base" (6, needs event-contextual target = defeated unit's controller's base), "you may use the Force; if you do, …" (Force-token spend — several buckets), "defeat a non-leader unit with N or less remaining hp" (needs `remaining_hp` predicate = effectiveHp − damage), "you may return a non-leader unit … to its owner's hand. If you do, …" (bounce + "if you do" compound; also a trailing-space `hand .` variant), "this unit can attack N units instead of N" (multi-attack), token creation (Spy/Clone/Droid — needs verified token-stats data table, still deferred). Each is its own primitive/selector.
+
+---
+
 *(2026-05-29 — SESSION CLOSE)* **Tier-1 matcher matured deck-by-deck. "Test for Claude" (Experience deck) 17% → 40% playable; corpus 18.4% → 21.8% (matched-full 51 → 128 cards). Engine 76 / matcher 35 / validator 16 — all green; tsc clean; play-cli completes. Next session opens with a playtest pass (checklist below), then task #58 (harder primitives, power-based damage first).**
 
 ### ▶ Playtest checklist — DO THIS FIRST next session

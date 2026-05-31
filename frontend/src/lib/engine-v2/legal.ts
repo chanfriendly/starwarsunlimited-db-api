@@ -4,10 +4,12 @@
 
 import type { PlayerAction } from './actions';
 import type { CardRegistry, GameState, PlayerId } from './state/types';
-import type { Ability, ActionAbility, ActionAbilityCost } from './spec/ast';
+import type { Ability, ActionAbility, ActionAbilityCost, Effect, Selector } from './spec/ast';
 import { findCard, getZoneArr } from './state/zones';
 import { effectivePower, hasEffectiveKeyword } from './runtime/modifiers';
 import { isLimitExhausted, makeUndeployedLeaderIid } from './runtime/triggers';
+import { resolveSelector } from './runtime/selectors';
+import { defaultChooser } from './runtime/chooser';
 
 export interface LegalActionsResult {
   actions: PlayerAction[];
@@ -159,6 +161,35 @@ function isCostPayable(state: GameState, pid: PlayerId, cost: ActionAbilityCost 
   return true;
 }
 
+/** A scoped "chosen" selector with a mandatory count (numeric, or a range whose
+ *  min ≥ 1). These force the player to pick a target; if no candidate exists the
+ *  ability would just waste its cost, so we don't offer it. A `{ min: 0 }` range
+ *  ("up to N") is optional and never gated. */
+function mandatoryChosenTarget(sel: Selector | undefined): sel is Extract<Selector, { selector?: unknown }> {
+  if (!sel || !('selector' in sel)) return false;
+  const s = sel.selector;
+  if (s !== 'chosen' && s !== 'self_choose' && s !== 'opponent_choose') return false;
+  const c = sel.count;
+  if (typeof c === 'object' && c !== null) return (c.min ?? 0) >= 1;
+  return true; // numeric or undefined count → mandatory pick
+}
+
+/** True if the action's effect requires choosing a target but none is available.
+ *  Resolves the candidate set with the deterministic chooser (no side effects);
+ *  an empty result for a mandatory chosen target means the ability can't do
+ *  anything, so it shouldn't be offered. `optional` ("you may") effects are
+ *  never gated — declining is the player's call. */
+function actionTargetUnsatisfiable(
+  state: GameState, reg: CardRegistry, pid: PlayerId, sourceIid: string | undefined, ability: ActionAbility,
+): boolean {
+  const eff: Effect = ability.do;
+  if (eff.effect === 'optional') return false;
+  const target = 'target' in eff ? (eff.target as Selector) : undefined;
+  if (!mandatoryChosenTarget(target)) return false;
+  const ctx = { state, reg, sourceIid, sourcePlayer: pid, chooser: defaultChooser };
+  return resolveSelector(ctx, target).length === 0;
+}
+
 function pushActionAbilities(
   state: GameState, reg: CardRegistry, pid: PlayerId,
   abs: Ability[], iidForLimit: string, sourceExhausted: boolean, readyResources: number,
@@ -169,6 +200,9 @@ function pushActionAbilities(
     const aab = ab as ActionAbility;
     if (aab.limit && isLimitExhausted(state, pid, 'act', iidForLimit, idx, aab.limit)) return;
     if (!isCostPayable(state, pid, aab.cost, sourceExhausted, readyResources)) return;
+    const srcIid = ref.sourceIid
+      ?? (ref.leaderIndex !== undefined ? makeUndeployedLeaderIid(pid, ref.leaderIndex) : undefined);
+    if (actionTargetUnsatisfiable(state, reg, pid, srcIid, aab)) return;
     out.push({
       kind: 'USE_ACTION_ABILITY',
       player: pid,

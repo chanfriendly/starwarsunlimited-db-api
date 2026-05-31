@@ -47,6 +47,15 @@ export function resolveSelector(ctx: EvalCtx, sel: Selector): ResolvedTarget[] {
     if (!opp) return [];
     return [{ kind: 'base', controller: opp }];
   }
+  if ('trigger_controller_base' in sel && sel.trigger_controller_base) {
+    // "its controller's base" — the base of the controller of the unit named by
+    // the triggering event (currently DEFEATED, via lastKnown.controller).
+    const e = ctx.triggerEvent;
+    const owner = e && e.kind === 'DEFEATED' ? e.lastKnown.controller : undefined;
+    const controller = owner ?? ctx.state.playerOrder.find(p => p !== ctx.sourcePlayer);
+    if (!controller) return [];
+    return [{ kind: 'base', controller }];
+  }
   if ('all_friendly_units' in sel && sel.all_friendly_units) {
     return collectArena(ctx, [ctx.sourcePlayer], ARENA_ZONES, sel.filter);
   }
@@ -97,14 +106,25 @@ export function resolveSelector(ctx: EvalCtx, sel: Selector): ResolvedTarget[] {
     const who = (scoped.selector === 'opponent_choose')
       ? (ctx.state.playerOrder.find(p => p !== ctx.sourcePlayer) ?? ctx.sourcePlayer)
       : ctx.sourcePlayer;
+    // A numeric `count: N` is a MANDATORY pick ("Give a token to an Imperial
+    // unit" / "Deal 2 damage to an enemy unit") — the player must select N
+    // targets (or all candidates if fewer than N). A range `{ min, max }`
+    // carries its own explicit minimum (min 0 = optional, e.g. "up to N").
+    // Without this, a numeric count produced minCount 0, which let the UI
+    // confirm a mandatory single-target effect with NOTHING selected — the
+    // effect silently fizzled while the cost was still paid (UAT: Tarkin's
+    // Experience action spent a resource but assigned no token).
+    const countRange = (typeof scoped.count === 'object' && scoped.count !== null) ? scoped.count : null;
+    const minCount = countRange ? (countRange.min ?? 0) : Math.min(desiredCount, candidates.length);
+    const canPass = countRange !== null && (countRange.min ?? 0) === 0;
     const result = chooser({
       kind: 'prompt_target',
       prompt: `Choose ${desiredCount} target${desiredCount > 1 ? 's' : ''}`,
       candidates,
       count: desiredCount,
-      minCount: typeof scoped.count === 'object' && scoped.count !== null ? scoped.count.min ?? 0 : 0,
+      minCount,
       player: who,
-      canPass: typeof scoped.count === 'object' && scoped.count !== null && (scoped.count.min ?? 0) === 0,
+      canPass,
     });
     if (result.kind === 'pass' || result.kind === 'no') return [];
     if (result.kind === 'targets') return result.targets.slice(0, desiredCount);

@@ -18,6 +18,19 @@
 // the residual clause, which is exactly the signal for what to build next.
 
 import type { Ability, Effect, Selector, Predicate } from '@/lib/engine-v2';
+import { TOKEN_REGISTRY } from '@/lib/engine-v2';
+
+/** Map a token name as printed on cards ("Clone Trooper", "X-Wing") to its
+ *  registry key ("clone_trooper", "x_wing"). Returns the key only if it's a
+ *  known *unit* token with an arena (Battle Droid / Clone Trooper / TIE Fighter
+ *  / X-Wing / Spy). Experience/Shield are handled by give_experience/give_shield,
+ *  not create_token. */
+function unitTokenKey(name: string): string | null {
+  const key = name.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  const spec = TOKEN_REGISTRY[key];
+  if (spec && spec.tokenType === 'unit' && spec.arena) return key;
+  return null;
+}
 
 // A backend-shaped card is all this needs (subset of the `Card` type). Kept
 // local + structural so the matcher works against DB rows or API objects alike.
@@ -94,6 +107,24 @@ export function parseEffectClause(raw: string): Effect | null {
 
   let m: RegExpMatchArray | null;
 
+  // Use the Force. If you do, <effect>. The reminder "(lose your Force token)"
+  // is stripped to a space, leaving "Use the Force . If you do, …" — hence the
+  // tolerant whitespace/period between "Force" and "If you do".
+  if ((m = t.match(/^Use the Force\s*\.?\s*If you do,?\s*(.+)$/i))) {
+    const inner = parseEffectClause(m[1].trim());
+    return inner ? { effect: 'use_force', do: inner } : null;
+  }
+
+  // The Force is with you. (gain a Force token; reminder already stripped.)
+  if (/^The Force is with you\s*\.?$/i.test(t)) {
+    return { effect: 'gain_force', player: 'self' };
+  }
+
+  // Ready this unit. (self)
+  if (/^Ready this unit\.?$/i.test(t)) {
+    return { effect: 'ready', target: { self: true } };
+  }
+
   // Give an/N Experience token(s) to each of up to N <trait> units.
   if ((m = t.match(/^Give an? Experience token to each of up to (\d+) (.+?)\.?$/i))) {
     const cap = parseInt(m[1], 10);
@@ -108,6 +139,19 @@ export function parseEffectClause(raw: string): Effect | null {
   if ((m = t.match(/^Give (an?|\d+) Experience tokens? to (.+?)\.?$/i))) {
     const count = /^\d+$/.test(m[1]) ? parseInt(m[1], 10) : 1;
     return { effect: 'give_experience', target: experienceTargetSelector(m[2]), count };
+  }
+
+  // Create a/N <TokenName> token(s). (unit tokens only — Battle Droid, Clone
+  // Trooper, TIE Fighter, X-Wing, Spy; the token's arena sets the zone.)
+  if ((m = t.match(/^Create (an?|\d+) (.+?) tokens?\.?$/i))) {
+    const count = /^\d+$/.test(m[1]) ? parseInt(m[1], 10) : 1;
+    const key = unitTokenKey(m[2]);
+    if (key) {
+      const spec = TOKEN_REGISTRY[key];
+      const zone = spec.arena === 'space' ? 'space_arena' : 'ground_arena';
+      return { effect: 'create_token', token_id: key, controller: 'self', zone, count };
+    }
+    return null; // unknown / non-unit token → residual
   }
 
   // Draw N card(s) / Draw a card.  ("a"/"an" = 1)
@@ -128,6 +172,57 @@ export function parseEffectClause(raw: string): Effect | null {
   // Deal N damage to (the opponent's / the enemy / your opponent's) base.
   if ((m = t.match(/^Deal (\d+) damage to (?:your opponent's|the opponent's|the enemy) base\.?$/i))) {
     return { effect: 'damage', amount: parseInt(m[1], 10), target: opponentBase };
+  }
+
+  // Deal N damage to its controller's base. (contextual — the controller of the
+  // unit named by the trigger, e.g. "when an enemy unit is defeated: …".)
+  if ((m = t.match(/^Deal (\d+) damage to its controller['’]?s base\.?$/i))) {
+    return { effect: 'damage', amount: parseInt(m[1], 10), target: { trigger_controller_base: true } };
+  }
+
+  // Deal N damage to each of up to M [enemy] units. (chosen up-to-M, each takes N)
+  if ((m = t.match(/^Deal (\d+) damage to each of up to (\d+) (enemy )?units\.?$/i))) {
+    const controller = m[3] ? 'opponent' : 'any';
+    return { effect: 'damage', amount: parseInt(m[1], 10), target: { zone: 'any_arena', controller, selector: 'chosen', count: { min: 0, max: parseInt(m[2], 10) } } };
+  }
+
+  // Deal N damage to each [enemy|friendly] [non-leader] unit. (AOE — all matching)
+  if ((m = t.match(/^Deal (\d+) damage to each (enemy |friendly )?(non-leader )?unit\.?$/i))) {
+    const controller = m[2] ? (/enemy/i.test(m[2]) ? 'opponent' : 'self') : 'any';
+    const base: Selector = { zone: 'any_arena', controller };
+    const target: Selector = m[3] ? { ...base, filter: { not: { card_type: 'leader' } } } : base;
+    return { effect: 'damage', amount: parseInt(m[1], 10), target };
+  }
+
+  // This unit deals damage equal to its/his/her power to an (enemy) (ground|space) unit.
+  if ((m = t.match(/^This unit deals damage equal to (?:its|his|her|their) power to an? (enemy )?(ground |space )?unit\.?$/i))) {
+    const controller = m[1] ? 'opponent' : 'any';
+    const zone = m[2] ? (/ground/i.test(m[2]) ? 'ground_arena' : 'space_arena') : 'any_arena';
+    return { effect: 'damage', amountFromPower: { self: true }, target: { zone, controller, selector: 'chosen', count: 1 } };
+  }
+
+  // Focus Fire: "Choose a unit. Each friendly <Trait> unit in the same arena
+  // deals damage equal to its power to that unit." (every matching source.)
+  if ((m = t.match(/^Choose a unit\. Each friendly ([A-Za-z]+) unit in the same arena deals damage equal to its power to that unit\.?$/i))) {
+    return {
+      effect: 'power_damage_from_each',
+      target: { zone: 'any_arena', controller: 'any', selector: 'chosen', count: 1 },
+      sources: { zone: 'any_arena', controller: 'self', filter: { card_trait: m[1].toLowerCase() } },
+      sources_same_arena_as_target: true,
+    };
+  }
+
+  // A friendly [<Trait>] unit deals damage equal to its power to a[n] [non-unique] [enemy] unit. (one chosen source)
+  if ((m = t.match(/^A friendly (?:([A-Za-z]+) )?unit deals damage equal to its power to an? (non-unique )?(enemy )?unit\.?$/i))) {
+    const srcTrait = m[1] && m[1].toLowerCase() !== 'friendly' ? m[1].toLowerCase() : undefined;
+    const sources: Selector = srcTrait
+      ? { zone: 'any_arena', controller: 'self', selector: 'chosen', count: 1, filter: { card_trait: srcTrait } }
+      : { zone: 'any_arena', controller: 'self', selector: 'chosen', count: 1 };
+    const tgtController = m[3] ? 'opponent' : 'any';
+    const target: Selector = m[2]
+      ? { zone: 'any_arena', controller: tgtController, selector: 'chosen', count: 1, filter: { card_is_unique: false } }
+      : { zone: 'any_arena', controller: tgtController, selector: 'chosen', count: 1 };
+    return { effect: 'power_damage_from_each', sources, target };
   }
 
   // Heal N damage from your/a base.
@@ -167,6 +262,14 @@ export function parseEffectClause(raw: string): Effect | null {
     return { effect: 'exhaust', target: chosenEnemyUnit };
   }
 
+  // Give a Shield token to a friendly unit and to an enemy unit. (compound)
+  if ((m = t.match(/^Give a Shield token to a friendly unit and to an enemy unit\.?$/i))) {
+    return { effect: 'sequence', steps: [
+      { effect: 'give_shield', target: chosenFriendlyUnit, count: 1 },
+      { effect: 'give_shield', target: chosenEnemyUnit, count: 1 },
+    ] };
+  }
+
   // Give a/N Shield token(s) to a (friendly) unit.
   if ((m = t.match(/^Give (?:\d+|a) Shield tokens? to a (?:friendly )?unit\.?$/i))) {
     return { effect: 'give_shield', target: chosenFriendlyUnit, count: 1 };
@@ -177,12 +280,67 @@ export function parseEffectClause(raw: string): Effect | null {
     return { effect: 'defeat', target: chosenEnemyNonLeader };
   }
 
+  // Defeat an enemy unit with a Shield token on it.
+  if ((m = t.match(/^Defeat an enemy unit with a Shield token on it\.?$/i))) {
+    return { effect: 'defeat', target: { zone: 'any_arena', controller: 'opponent', selector: 'chosen', count: 1, filter: { has_shield_token: true } } };
+  }
+
+  // Defeat a[n] [enemy] [non-leader] unit with N or less remaining HP.
+  if ((m = t.match(/^Defeat an? (enemy )?(non-leader )?unit with (\d+) or less remaining hp\.?$/i))) {
+    const controller = m[1] ? 'opponent' : 'any';
+    const parts: Predicate[] = [{ remaining_hp: { max: parseInt(m[3], 10) } }];
+    if (m[2]) parts.push({ not: { card_type: 'leader' } });
+    const filter: Predicate = parts.length === 1 ? parts[0] : { and: parts };
+    return { effect: 'defeat', target: { zone: 'any_arena', controller, selector: 'chosen', count: 1, filter } };
+  }
+
+  // Return a [enemy|friendly] [non-leader] unit [that costs N or less] to its owner's hand. (arena → hand bounce)
+  if ((m = t.match(/^Return an? (enemy |friendly )?(non-leader )?unit(?: that costs (\d+) or less)? to (?:its|their) owner['’]?s hand\.?$/i))) {
+    const controller = m[1] ? (/enemy/i.test(m[1]) ? 'opponent' : 'self') : 'any';
+    const parts: Predicate[] = [];
+    if (m[2]) parts.push({ not: { card_type: 'leader' } });
+    if (m[3]) parts.push({ card_cost: { max: parseInt(m[3], 10) } });
+    const base: Selector = { zone: 'any_arena', controller, selector: 'chosen', count: 1 };
+    const target: Selector = parts.length === 0 ? base
+      : { ...base, filter: parts.length === 1 ? parts[0] : { and: parts } };
+    return { effect: 'return_to_hand', target };
+  }
+
+  // Return this unit / him / her / them / it to its owner's hand. (self bounce)
+  if ((m = t.match(/^Return (?:this unit|him|her|them|it) to (?:its|his|her|their) owner['’]?s hand\.?$/i))) {
+    return { effect: 'return_to_hand', target: { self: true } };
+  }
+
   // This unit gets +N/+N for this phase. (self phase buff — action bodies)
   if ((m = t.match(/^This unit gets \+(\d+)\/\+(\d+) for this phase\.?$/i))) {
     return { effect: 'give', target: { self: true }, modifier: { power: +m[1], health: +m[2], duration: 'end_of_phase' } };
   }
 
   return null;
+}
+
+/** Parse a modal "Choose one:" / "Choose two, in any order:" block into a
+ *  `choose_one` effect (with `count`). Options are newline-delimited effect
+ *  clauses (the DB sometimes wraps them in `<bullet>…</bullet>`). Returns null
+ *  unless EVERY option parses — a modal with an unsupported option stays
+ *  residual rather than silently dropping a mode. */
+export function parseModalEffect(raw: string): Effect | null {
+  const m = raw.trim().match(/^Choose (one|two)(?:,? in any order)?:\s*([\s\S]+)$/i);
+  if (!m) return null;
+  const count = m[1].toLowerCase() === 'two' ? 2 : 1;
+  const body = m[2].replace(/<\/?bullet>/gi, '\n');
+  const optionTexts = body
+    .split(/\r?\n/)
+    .map(s => s.replace(/^[•\-*\s]+/, '').trim())
+    .filter(Boolean);
+  if (optionTexts.length < 2) return null;
+  const options: Array<{ label: string; value: string; do: Effect }> = [];
+  for (let i = 0; i < optionTexts.length; i++) {
+    const eff = parseEffectClause(optionTexts[i].replace(/^You may /i, ''));
+    if (!eff) return null; // an unparseable mode → leave the whole modal residual
+    options.push({ label: optionTexts[i], value: `opt${i}`, do: eff });
+  }
+  return { effect: 'choose_one', count, options };
 }
 
 // ---------------------------------------------------------------------------
@@ -312,6 +470,28 @@ function parseConstantClause(clause: string): Ability | null {
       grant: { target: { self: true }, modifier: { keyword: m[2].toLowerCase() } },
     };
   }
+  // Coordinate — This unit gets +N/+N.  (Coordinate self-buff; the keyword's
+  // reminder — "While you control 3 or more units, …" — is stripped before this,
+  // leaving the em-dash/en-dash/hyphen-prefixed body. The engine already models
+  // Coordinate as controller_unit_count ≥ 3, e.g. W4_004.) Self-buff stat shape.
+  if ((m = clause.match(/^Coordinate\s*[–—-]\s*(?:This unit|He|She|It|They) gets? \+(\d+)\/\+(\d+)\.?$/i))) {
+    return {
+      type: 'constant',
+      while: { controller_unit_count: { min: 3 } },
+      grant: { target: { self: true }, modifier: { power: +m[1], health: +m[2] } },
+    };
+  }
+  // Coordinate — This unit gets +N/+N.  (Coordinate self-buff; the keyword's
+  // reminder — "While you control 3 or more units, …" — is stripped before this,
+  // leaving the em-dash/en-dash/hyphen-prefixed body. The engine already models
+  // Coordinate as controller_unit_count ≥ 3, e.g. W4_004.) Self-buff shape only.
+  if ((m = clause.match(/^Coordinate\s*[–—-]\s*(?:This unit|He|She|It|They) gets? \+(\d+)\/\+(\d+)\.?$/i))) {
+    return {
+      type: 'constant',
+      while: { controller_unit_count: { min: 3 } },
+      grant: { target: { self: true }, modifier: { power: +m[1], health: +m[2] } },
+    };
+  }
   // Each friendly non-leader unit that costs N or more gains KEYWORD.
   if ((m = clause.match(/^Each friendly non-leader unit that costs (\d+) or more gains ([A-Za-z]+)\.?$/i))) {
     return {
@@ -388,6 +568,42 @@ export function matchCard(card: MatchableCard): MatchResult {
   // No text at all → vanilla (stats + keywords from the table fully describe it).
   if (!rawText) {
     return { abilities: [], coverage: 'vanilla', matchedClauses: 0, totalClauses: 0, residual: [] };
+  }
+
+  // Whole-text modal ("Choose one/two: …"). Multi-line, so it must be handled
+  // before clause-splitting. On events the modal IS the card's effect → wrap as
+  // a when-played triggered ability.
+  if (type === 'event' && /^Choose (?:one|two)/i.test(rawText)) {
+    const modal = parseModalEffect(rawText);
+    if (modal) {
+      return {
+        abilities: [{ type: 'triggered', on: 'event.card_played', where: { card: 'self' }, do: modal }],
+        coverage: 'full', matchedClauses: 1, totalClauses: 1, residual: [],
+      };
+    }
+    return { abilities: [], coverage: 'none', matchedClauses: 0, totalClauses: 1, residual: [rawText] };
+  }
+
+  // Maximum Firepower: two friendly <Trait> units each deal their power to the
+  // SAME chosen target ("…to a unit. Then, another… to the same unit."). Two
+  // sentences, so handle the whole text → one chosen source-selector of count 2.
+  if (type === 'event') {
+    const mf = rawText.match(/^A friendly (?:([A-Za-z]+) )?unit deals damage equal to its power to a unit\.\s*Then,? another friendly (?:[A-Za-z]+ )?unit deals damage equal to its power to the same unit\.?$/i);
+    if (mf) {
+      const trait = mf[1] && mf[1].toLowerCase() !== 'friendly' ? mf[1].toLowerCase() : undefined;
+      const sources: Selector = trait
+        ? { zone: 'any_arena', controller: 'self', selector: 'chosen', count: 2, filter: { card_trait: trait } }
+        : { zone: 'any_arena', controller: 'self', selector: 'chosen', count: 2 };
+      const effect: Effect = {
+        effect: 'power_damage_from_each',
+        sources,
+        target: { zone: 'any_arena', controller: 'any', selector: 'chosen', count: 1 },
+      };
+      return {
+        abilities: [{ type: 'triggered', on: 'event.card_played', where: { card: 'self' }, do: effect }],
+        coverage: 'full', matchedClauses: 1, totalClauses: 1, residual: [],
+      };
+    }
   }
 
   const clauses = clausesOf(rawText);

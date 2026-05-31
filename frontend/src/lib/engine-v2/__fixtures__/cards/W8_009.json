@@ -1,0 +1,19 @@
+{
+  "id": "W8_009",
+  "name": "Focus Fire",
+  "type": "event",
+  "cost": 1,
+  "aspects": ["command"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "do": {
+        "effect": "power_damage_from_each",
+        "target": { "zone": "any_arena", "controller": "any", "selector": "chosen", "count": 1 },
+        "sources": { "zone": "any_arena", "controller": "self", "filter": { "card_trait": "vehicle" } },
+        "sources_same_arena_as_target": true
+      }
+    }
+  ]
+}

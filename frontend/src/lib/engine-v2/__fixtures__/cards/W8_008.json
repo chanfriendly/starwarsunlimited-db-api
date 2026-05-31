@@ -1,0 +1,14 @@
+{
+  "id": "W8_008",
+  "name": "Channel the Force",
+  "type": "event",
+  "cost": 1,
+  "aspects": ["vigilance"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "do": { "effect": "gain_force", "player": "self" }
+    }
+  ]
+}

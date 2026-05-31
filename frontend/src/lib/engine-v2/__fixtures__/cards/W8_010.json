@@ -1,0 +1,18 @@
+{
+  "id": "W8_010",
+  "name": "Maximum Firepower",
+  "type": "event",
+  "cost": 2,
+  "aspects": ["aggression"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "do": {
+        "effect": "power_damage_from_each",
+        "sources": { "zone": "any_arena", "controller": "self", "selector": "chosen", "count": 2, "filter": { "card_trait": "imperial" } },
+        "target": { "zone": "any_arena", "controller": "any", "selector": "chosen", "count": 1 }
+      }
+    }
+  ]
+}

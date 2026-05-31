@@ -1,0 +1,23 @@
+{
+  "id": "W8_001",
+  "name": "Marksman Clone",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["aggression"],
+  "arena": "ground",
+  "power": 4,
+  "hp": 5,
+  "traits": ["republic", "clone"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "action",
+      "cost": { "exhaust": true },
+      "do": {
+        "effect": "damage",
+        "amountFromPower": { "self": true },
+        "target": { "zone": "ground_arena", "controller": "opponent", "selector": "chosen", "count": 1 }
+      }
+    }
+  ]
+}

@@ -120,6 +120,24 @@ scenario('Leader with real stats keeps them', () => {
   assertEq(r.spec.hp, 7, 'hp');
 });
 
+scenario('Leader: text → leaderAbilities, deploy_box → leaderUnitAbilities', () => {
+  // Tarkin-shaped: leader-side action in `text`, deployed-unit On-Attack in
+  // `deploy_box`. Both columns must translate into their respective ability lists.
+  const r = translateCard(mkCard({
+    id: 'l3', name: 'Grand Moff Tarkin', subtitle: 'Oversector Governor', type: 'Leader',
+    energy_cost: 5, arenas: ['Ground'], traits: ['Imperial'],
+    text: 'Action [1 resource, exhaust]: Give an Experience token to an Imperial unit.',
+    deploy_box: 'On Attack: You may give an Experience token to another Imperial unit.',
+  }));
+  if (!r.spec || r.spec.type !== 'leader') throw new Error('not leader');
+  const la = r.spec.leaderAbilities ?? [];
+  const lua = r.spec.leaderUnitAbilities ?? [];
+  assertEq(la.length, 1, 'leader-side action from text');
+  assertEq(la[0].type, 'action', 'text is an action ability');
+  assertEq(lua.length, 1, 'deployed-unit ability from deploy_box');
+  assertEq(lua[0].type, 'triggered', 'deploy_box On Attack is triggered');
+});
+
 scenario('Base: health → BaseSpec.hp, fallback 30', () => {
   const withHp = translateCard(mkCard({ id: 'b1', name: 'Echo Base', type: 'Base', health: 30 }));
   if (!withHp.base) throw new Error('not base');
@@ -263,6 +281,128 @@ scenario('Matcher: event "Deal 3 damage to an enemy unit." → when-played trigg
   assertEq((a.do as { amount: number }).amount, 3, 'damage amount');
 });
 
+scenario('Matcher: "deals damage equal to his power to an enemy ground unit" → amountFromPower', () => {
+  const r = matchCard({ name: 'Crosshair', type: 'Unit', text: 'Action [Exhaust]: This unit deals damage equal to his power to an enemy ground unit.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'action') throw new Error('expected action ability');
+  if (a.do.effect !== 'damage') throw new Error('expected damage effect');
+  const dmg = a.do as { amount?: number; amountFromPower?: { self?: boolean }; target: { zone?: string; controller?: string } };
+  if (dmg.amount !== undefined) throw new Error('should NOT have a fixed amount');
+  if (!dmg.amountFromPower?.self) throw new Error('expected amountFromPower: { self: true }');
+  assertEq(dmg.target.zone, 'ground_arena', 'targets ground arena');
+  assertEq(dmg.target.controller, 'opponent', 'targets enemy');
+});
+
+scenario('Matcher: modal "Choose two, in any order:" → choose_one count 2', () => {
+  const r = matchCard({ name: 'Z', type: 'Event', text: 'Choose two, in any order:\n\nDraw a card.\nDeal 2 damage to an enemy unit.\nGive an enemy unit -1/-1 for this phase.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'triggered' || a.do.effect !== 'choose_one') throw new Error('expected when-played choose_one');
+  const m = a.do as { count?: number; options: unknown[] };
+  assertEq(m.count, 2, 'count 2');
+  assertEq(m.options.length, 3, 'three modes');
+});
+
+scenario('Matcher: modal with an unparseable mode stays residual (no partial misfire)', () => {
+  // "Defeat up to 2 upgrades" isn't templated → the whole modal must NOT match
+  // (otherwise the card would wrongly fire the parseable modes unconditionally).
+  const r = matchCard({ name: 'W', type: 'Event', text: 'Choose one:\nDraw a card.\nDefeat up to 2 upgrades.' });
+  assertEq(r.coverage, 'none', 'coverage none');
+  assertEq(r.abilities.length, 0, 'no abilities emitted');
+});
+
+scenario('Matcher: "Return a non-leader unit that costs N or less to its owner\'s hand" → return_to_hand', () => {
+  const r = matchCard({ name: 'X', type: 'Event', text: "Return a non-leader unit that costs 3 or less to its owner's hand." });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'triggered' || a.do.effect !== 'return_to_hand') throw new Error('expected when-played return_to_hand');
+  const tgt = (a.do as { target: { controller?: string; filter?: unknown } }).target;
+  assertEq(tgt.controller, 'any', 'any controller (you choose)');
+  if (!tgt.filter) throw new Error('expected a non-leader + cost filter');
+});
+
+scenario('Matcher: "Deal N damage to each of up to M units" → up-to-M chosen', () => {
+  const r = matchCard({ name: 'X', type: 'Event', text: 'Deal 2 damage to each of up to 3 units.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const d = (r.abilities[0] as { do: { effect: string; amount?: number; target: { count?: unknown } } }).do;
+  assertEq(d.effect, 'damage', 'damage');
+  assertEq(d.amount, 2, 'amount 2');
+  assertEq(JSON.stringify(d.target.count), JSON.stringify({ min: 0, max: 3 }), 'up to 3');
+});
+
+scenario('Matcher: "Give a Shield token to a friendly unit and to an enemy unit" → sequence of two', () => {
+  const r = matchCard({ name: 'X', type: 'Event', text: 'Give a Shield token to a friendly unit and to an enemy unit.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const d = (r.abilities[0] as { do: { effect: string; steps?: Array<{ effect: string; target: { controller?: string } }> } }).do;
+  assertEq(d.effect, 'sequence', 'sequence');
+  assertEq(d.steps?.length, 2, 'two shield grants');
+  assertEq(d.steps?.[0].target.controller, 'self', 'first → friendly');
+  assertEq(d.steps?.[1].target.controller, 'opponent', 'second → enemy');
+});
+
+scenario('Matcher: "Create N <Token> tokens" → create_token (unit tokens only)', () => {
+  const r = matchCard({ name: 'X', type: 'Event', text: 'Create 2 Clone Trooper tokens.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const d = (r.abilities[0] as { do: { effect: string; token_id?: string; zone?: string; count?: number } }).do;
+  assertEq(d.effect, 'create_token', 'create_token');
+  assertEq(d.token_id, 'clone_trooper', 'token key');
+  assertEq(d.zone, 'ground_arena', 'ground arena from token spec');
+  assertEq(d.count, 2, 'count 2');
+  // Space token routes to space arena.
+  const x = matchCard({ name: 'Y', type: 'Event', text: 'Create an X-Wing token.' });
+  assertEq((x.abilities[0] as { do: { zone?: string } }).do.zone, 'space_arena', 'X-Wing → space');
+  // Unknown token → residual, not a broken create_token.
+  const unk = matchCard({ name: 'Z', type: 'Event', text: 'Create 2 Stormtrooper tokens.' });
+  assertEq(unk.coverage, 'none', 'unknown token stays residual');
+});
+
+scenario('Matcher: "Defeat a unit with N or less remaining HP" → remaining_hp filter', () => {
+  const r = matchCard({ name: 'X', type: 'Event', text: 'Defeat a unit with 3 or less remaining HP.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const d = (r.abilities[0] as { do: { effect: string; target: { filter?: { remaining_hp?: { max?: number } } } } }).do;
+  assertEq(d.effect, 'defeat', 'defeat');
+  assertEq(d.target.filter?.remaining_hp?.max, 3, 'remaining_hp max 3');
+});
+
+scenario('Matcher: "When an enemy unit is defeated: deal N to its controller\'s base" → defeat trigger + contextual base', () => {
+  const r = matchCard({ name: 'X', type: 'Unit', text: "When an enemy unit is defeated: Deal 2 damage to its controller's base." });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0] as { type: string; on?: string; where?: { controller?: string }; do: { effect: string; amount?: number; target: Record<string, unknown> } };
+  assertEq(a.type, 'triggered', 'triggered');
+  assertEq(a.on, 'event.defeated', 'on defeated');
+  assertEq(a.where?.controller, 'opponent', 'enemy-defeat filter');
+  assertEq(a.do.effect, 'damage', 'damage');
+  assertEq(JSON.stringify(a.do.target), JSON.stringify({ trigger_controller_base: true }), 'contextual base target');
+});
+
+scenario('Matcher: "Use the Force … If you do, X" → use_force(X); "The Force is with you" → gain_force', () => {
+  const use = matchCard({ name: 'X', type: 'Event', text: 'Use the Force (lose your Force token). If you do, deal 3 damage to a unit.' });
+  assertEq(use.coverage, 'full', 'use coverage');
+  const ud = (use.abilities[0] as { do: { effect: string; do?: { effect: string } } }).do;
+  assertEq(ud.effect, 'use_force', 'use_force');
+  assertEq(ud.do?.effect, 'damage', 'inner effect parsed');
+  const gain = matchCard({ name: 'Y', type: 'Event', text: 'The Force is with you (create your Force token).' });
+  assertEq(gain.coverage, 'full', 'gain coverage');
+  assertEq((gain.abilities[0] as { do: { effect: string } }).do.effect, 'gain_force', 'gain_force');
+});
+
+scenario('Matcher: Focus Fire + Maximum Firepower → power_damage_from_each', () => {
+  const ff = matchCard({ name: 'Focus Fire', type: 'Event', text: 'Choose a unit. Each friendly Vehicle unit in the same arena deals damage equal to its power to that unit.' });
+  assertEq(ff.coverage, 'full', 'focus fire coverage');
+  const fd = (ff.abilities[0] as { do: { effect: string; sources_same_arena_as_target?: boolean; sources: { filter?: { card_trait?: string } } } }).do;
+  assertEq(fd.effect, 'power_damage_from_each', 'effect');
+  assertEq(fd.sources_same_arena_as_target, true, 'same-arena flag');
+  assertEq(fd.sources.filter?.card_trait, 'vehicle', 'vehicle sources');
+
+  const mf = matchCard({ name: 'Maximum Firepower', type: 'Event', text: 'A friendly Imperial unit deals damage equal to its power to a unit.\n\nThen, another friendly Imperial unit deals damage equal to its power to the same unit.' });
+  assertEq(mf.coverage, 'full', 'max firepower coverage');
+  const md = (mf.abilities[0] as { do: { effect: string; sources: { count?: number; filter?: { card_trait?: string } } } }).do;
+  assertEq(md.effect, 'power_damage_from_each', 'effect');
+  assertEq(md.sources.count, 2, 'two chosen sources');
+  assertEq(md.sources.filter?.card_trait, 'imperial', 'imperial sources');
+});
+
 scenario('Matcher: "When Played: Draw a card." → draw 1 ("a" = 1)', () => {
   const r = matchCard({ name: 'X', type: 'Unit', text: 'When Played: Draw a card.' });
   assertEq(r.coverage, 'full', 'coverage');
@@ -394,6 +534,19 @@ scenario('Matcher: Crosshair "Action [2 resources]: This unit gets +1/+0 for thi
   const a = r.abilities[0];
   if (a.type !== 'action' || a.do.effect !== 'give') throw new Error('expected action give self-buff');
   assertEq((a.cost as { resources?: number }).resources, 2, 'cost 2 resources');
+});
+
+scenario('Matcher: Coordinate "Coordinate — This unit gets +2/+2." → controller_unit_count gate', () => {
+  const r = matchCard({ name: 'X', type: 'Unit', text: 'Coordinate — This unit gets +2/+2. (While you control 3 or more units, this is active.)' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'constant') throw new Error('expected constant');
+  if (!a.while || (a.while as { controller_unit_count?: { min?: number } }).controller_unit_count?.min !== 3) {
+    throw new Error('expected controller_unit_count >= 3 gate');
+  }
+  assertEq(a.grant.modifier.power, 2, '+2 power');
+  assertEq(a.grant.modifier.health, 2, '+2 health');
+  if (!('self' in a.grant.target)) throw new Error('expected self target');
 });
 
 scenario('Matcher: every emitted ability validates clean (spot set)', () => {

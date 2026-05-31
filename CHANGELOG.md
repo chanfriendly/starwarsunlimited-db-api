@@ -4,6 +4,82 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-05-31: Coordinate self-buff matcher template (task #58, session 54)
+
+**Matcher-only — no new engine primitive.** Added a Tier-1 template for the Coordinate keyword's self-buff text shape `"Coordinate — This unit gets +N/+N."` (em-dash / en-dash / hyphen tolerated; "This unit/He/She/It/They gets" variants). It emits the constant-ability shape the engine already supports: `while: { controller_unit_count: { min: 3 } }`, `grant.target: { self: true }`, `modifier: { power, health }`. The reminder text "(While you control 3 or more units…)" is stripped by `stripReminders` before the clause reaches `parseConstantClause`, so only the em-dash body is matched. This was a known residual ("Coordinate exists as a predicate but not this self-buff shape") — Coordinate's semantics (controller_unit_count ≥ 3) were already modeled by W4_004's aura and `effectivePower`/`effectiveHp`; the only gap was recognizing this text shape.
+
+Fixture W8_012 (Coordinated Trooper, 2/2, +2/+2 at 3 units) mirrors the emitted AST; engine scenarios verify the self-buff activates at 3 controlled units and is inactive at 2 (proving the matcher's output works end-to-end at the table). A matcher scenario verifies the AST shape including the reminder-stripping path.
+
+Engine **90** / translate **48** / validate 16, tsc clean.
+
+### 2026-05-31: Force tokens + multi-source power damage (task #58, session 53)
+
+**Force tokens (per-player, no transfer — Christian's ruling: a Force token is a per-player resource, max one each, distinct from the shared initiative/blast/plan counters).** New `use_force` effect ("Use the Force. If you do, X" — spends the source controller's `forceToken` if held, then resolves `do`; no token → no-op) and `gain_force` effect ("The Force is with you" — gain a token, max one). The bus already had `FORCE_USED`/`FORCE_TOKEN_CREATED`; `forceToken` was read-only until now. Matcher strips the "(lose/create your Force token)" reminder and tolerates the resulting "Use the Force . If you do" spacing; "You may use the Force…" wraps in `optional` via the existing trigger/event path. Added `Ready this unit.` → ready-self (a common Force follow-up). Fixtures W8_007 (use), W8_008 (gain). **+27 cards** (events full 48→55).
+
+**Multi-source power damage (`power_damage_from_each`).** Each unit in `sources` deals its OWN effective power to a shared `target` (distinct from `damage.amountFromPower`'s single self-source). Powers read per-source from current state; sources that have left play are skipped. `sources_same_arena_as_target` filters sources to the target's arena. Covers Focus Fire ("each friendly Vehicle in the same arena…", all matching sources) and Maximum Firepower ("a friendly Imperial unit… then another… the same unit" — two chosen sources; detected at whole-text level since it spans two sentences). Also unlocks the Command "Choose two" modal option "A friendly unit deals damage equal to its power to a non-unique enemy unit." Fixtures W8_009 (Focus Fire), W8_010 (Maximum Firepower), W8_011 (same-arena mechanic test). **+3 cards.**
+
+Engine 88 / translate 47 / validate 16, tsc clean, play-cli completes. Corpus 541 → 571 fully playable (24.1% → 25.5%). **Session 53 total: 508 → 571 (+63 cards).**
+
+### 2026-05-31: Token creation, remaining_hp, event-contextual targets (task #58 "quick wins" batch, session 53)
+
+Three approved primitives (decisions: Force = per-player no-transfer [deferred, not built]; remaining_hp = effective HP; batch = quick wins first).
+
+- **Token creation (matcher-only).** "Create N <Token> tokens" → `create_token`. `unitTokenKey()` maps the printed name → the engine's hand-coded `TOKEN_REGISTRY` key (Battle Droid / Clone Trooper / TIE Fighter / X-Wing / Spy), pulling the token's arena for the `zone`; unknown/non-unit tokens stay residual. Exported `TOKEN_REGISTRY` from the engine index so the matcher shares one source of truth. Also flips the previously-residual "Choose one: Create…" modals to full. **+21 cards.**
+- **`remaining_hp` predicate (effective HP − damage).** Rules-accurate current HP incl. upgrade/aura/Experience buffs — a deliberate, documented exception to the printed-stats predicate convention (safe from the modifier cycle: only used in selector filters, never in a `while:`). Matcher: "Defeat a[n] [enemy] [non-leader] unit with N or less remaining HP". Verified an upgrade-buffed unit (effective HP > N) is correctly NOT targetable. **+6 cards.**
+- **Event-contextual target `trigger_controller_base`.** "its controller's base" on a defeat trigger — resolves the base of the defeated unit's controller via `DEFEATED.lastKnown.controller`. Matcher: "When an enemy unit is defeated: deal N to its controller's base". **+6 cards.**
+
+Fixtures W8_001–006 now cover power-damage, modal, bounce, AOE, remaining_hp, and the defeat trigger. Corpus **508 → 541 fully playable (22.7% → 24.1%)**; units full 97 → 123, events 42 → 48. Engine 84 / translate 45 / validate 16, tsc clean, play-cli completes.
+
+### 2026-05-30: AOE / multi-target damage, compound shields, shield-token targeting (task #58, session 52 cont.)
+
+**Matcher-only (reused existing multi-target machinery):** "Deal N damage to each of up to M [enemy] units" (chosen up-to-M) and "Deal N damage to each [enemy|friendly] [non-leader] unit" (AOE / all-selector). Engine `applyDamage` already loops over resolved targets. "Give a Shield token to a friendly unit and to an enemy unit" → a `sequence` of two `give_shield`s.
+
+**New `has_shield_token` predicate:** boolean leaf, true iff the evaluated unit has ≥1 Shield token (`inst.shieldTokens > 0` — no effective-stat math). Wired into the AST, the predicate evaluator, and the validator's leaf allow-list. Matcher: "Defeat an enemy unit with a Shield token on it" → defeat with `filter: { has_shield_token: true }`. Together with the compound-shield template this completes the Darth Vader-style "shield a friendly + enemy, then defeat a shielded enemy" units.
+
+**Impact:** corpus 502 → 508 fully playable (22.4% → 22.7%); units full 86 → 97. Engine 82 / translate 42 / validate 16, tsc clean, play-cli completes. Fixtures W8_004 (AOE) + scenarios.
+
+### 2026-05-30: Modal "Choose one/two" framework + return-to-hand (bounce) (task #58, session 52 cont.)
+
+**Modal choice ("Choose one:" / "Choose two, in any order:").** Added `count?` to the `choose_one` effect (default 1; `count: 2` = pick two distinct options, resolved in pick order). `applyChooseOne` now loops `count` times, removing each pick from the pool and threading state. New matcher `parseModalEffect` parses the multi-line modal block (newline/`<bullet>`-delimited option clauses, each via `parseEffectClause`) into a `choose_one`; wired into `matchCard` at the whole-text level for events (modals are multi-line, so they're caught before clause-splitting). **Correctness fix:** previously a modal event was clause-split and each mode became a *separate unconditional* when-played ability — the card did ALL modes instead of a choice. Now it's a real choice, or stays residual if any mode is untemplated (so it never silently misfires). Fixture `W8_002` + engine/matcher scenarios.
+
+**Return-to-hand / bounce (`return_to_hand` effect).** A unit leaves play to its owner's hand as a fresh card — damage/exhaust/shields/Experience reset, attached upgrades discarded (can't go to hand), leader-units skipped (own flip-back rules). Owner = controller until a control-transfer mechanic adds a distinct owner. Matcher templates: "Return a[n] [enemy|friendly] [non-leader] unit [that costs N or less] to its owner's hand" and self forms ("Return him/this unit/… to its owner's hand"). Power-filtered bounce ("with N or less power") stays residual — no `card_power` predicate yet. Fixture `W8_003` + scenarios.
+
+**Impact:** corpus 490 → 497 fully playable (21.9% → 22.2%). Engine 81 / translate 40 / validate 16, tsc clean, play-cli completes.
+
+### 2026-05-30: Power-based damage primitive — "deals damage equal to its power" (task #58, session 52 cont.)
+
+**Change**
+
+`DamageEffect` gained `amountFromPower?: Selector` (and `amount` became optional). When present, the damage amount is the effective power of the first unit the selector resolves to — snapshot once before any damage lands. Wired through the interpreter (`powerFromSelector` via `effectivePower`, so buffs/experience tokens count), the validator (damage needs `amount` OR `amountFromPower`), and a matcher template ("This unit deals damage equal to its/his/her power to an (enemy) (ground|space) unit" → `amountFromPower: {self}` + zone/controller-scoped target).
+
+**Why**
+
+First primitive of task #58, highest corpus value of the remaining tail. Covers Crosshair's "Following Orders" action and any single-self-source "damage equal to its power" line. Fixture `W8_001` (Marksman Clone) + scenarios verify the amount equals source power and scales with buffs (a 5-power buffed clone defeats a 5-hp Wampa). Engine 79 / translate 37 / validate 16, tsc clean, play-cli completes; corpus 490 fully playable (21.9%).
+
+**Not covered yet (different shape):** multi-source power damage where EACH unit in a set deals its own power — Focus Fire, Maximum Firepower. Tracked in PROGRESS.md.
+
+### 2026-05-30: Deployed leaders enter READY, not exhausted (§3.4.4c) — UAT bug fix (session 52)
+
+**Change**
+
+`reducer.applyDeployLeader` now creates the leader-unit `CardInstance` with `exhausted: false` (was `true`). A deployed leader can attack / use its leader-unit abilities the same round it deploys.
+
+**Why**
+
+Christian's first browser UAT of the "Test for Claude" deck flagged that deployed leaders couldn't act the turn they deployed. The engine had assumed deployed leaders enter exhausted "same as normal unit plays" (citing "§v7"). That's backwards. The Comprehensive Rules (extracted via `pdftotext`, the authoritative oracle per CLAUDE.md):
+- **§3.4.4b:** "Each *non-leader unit* and resource enters play exhausted."
+- **§3.4.4c:** "When a *Leader Unit is deployed*, it enters the ground arena **ready**, even if it was exhausted before."
+
+Leaders are the explicit exception. This is the 3rd time an SWU rule was authored wrong from memory — verified at the source this time. Regression scenario added ("Leader deploy: enters READY and can attack the same round (§3.4.4c)"); CLAUDE.md rules note amended so a future session doesn't revert it. Engine 77/77, tsc clean.
+
+**Second bug fixed — mandatory single-target picks could be confirmed with 0 selected.** `selectors.ts` derived `minCount: 0` from a numeric `count: N`, so the playtest `ChoicePromptModal` enabled Confirm with nothing picked; confirming returned empty targets and the effect fizzled while the cost was still paid. This is what made Tarkin's "Action [1 resource, exhaust]: Give an Experience token to an Imperial unit" spend a resource without assigning a token (my first triage wrongly blamed "no Imperial units in play"; Christian corrected it — Seasoned Shoretrooper IS Imperial and was in play). Fix: a numeric `count: N` is mandatory → `minCount = min(N, candidates.length)`; `canPass` only for explicit `{min:0}` ranges. Latent for all mandatory single-target effects, not just Tarkin. Headless `defaultChooser` auto-picks first-N regardless of minCount, so scenarios/AI are unaffected.
+
+**Also triaged, NOT a bug:** Seasoned Shoretrooper's +2/+0 (conditional fires correctly at the 6-resource threshold; Christian had <6). Documented in PROGRESS.md session 52.
+
+**Two approved follow-ups, same session:**
+1. **Zero-target legality gate.** `legal.ts` no longer offers a `USE_ACTION_ABILITY` whose effect has a *mandatory* `chosen` target with no available candidates — it resolves the candidate set with `defaultChooser` (side-effect-free) and skips the action if empty. Prevents paying a cost for a no-op. `optional`/`{min:0}` effects are never gated. This is a deliberate narrowing of the session-39 "no target-prechecks in legal" stance, scoped to mandatory chosen targets only.
+2. **`deploy_box` → `leaderUnitAbilities`.** `translateCard` now matches a leader's `deploy_box` column (the deployed leader-unit side) as a unit and routes the abilities to `leaderUnitAbilities` (previously hard-coded `[]`). Combined with leaders now deploying ready, deployed-leader On-Attack/When-Played abilities (e.g. Tarkin's "On Attack: give an Experience token to another Imperial unit") now fire. Engine 78 / translate 36 / validate 16, tsc clean, play-cli completes.
+
 ### 2026-05-29: Production UI bug fixes — empty img src + unguarded clipboard (session 50b)
 
 **Change**

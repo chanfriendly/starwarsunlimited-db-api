@@ -38,6 +38,15 @@ export interface PredicateLeaf {
   self_damage?: Range;
   self_exhausted?: boolean;
   self_upgraded?: boolean;
+  /** True iff the unit being evaluated has at least one Shield token. For
+   *  "defeat an enemy unit with a Shield token on it"-style targeting. */
+  has_shield_token?: boolean;
+  /** Remaining HP = effective HP − damage. For "defeat a unit with N or less
+   *  remaining HP"-style targeting. Unlike stat_hp (printed), this is the
+   *  rules-accurate current HP including upgrade/aura/Experience buffs. Safe
+   *  from the modifier cycle because it's only used in selector FILTERS, never
+   *  in a constant ability's `while:` (which is what effectiveHp scans). */
+  remaining_hp?: Range;
   player_has_force_token?: boolean;
   /** Count of units the *controller of the card under evaluation* has in any arena.
    *  Used by Coordinate ("if you control 3 or more units…") via a constant
@@ -76,6 +85,10 @@ export type Selector =
   | { trigger_source: true }
   | { self_base: true }
   | { opponent_base: true }
+  /** The base of the controller of the unit in the triggering event — i.e. "its
+   *  controller's base" on a defeat trigger. Resolved from DEFEATED.lastKnown.
+   *  controller. Falls back to opponent's base if there's no usable trigger. */
+  | { trigger_controller_base: true }
   | { all_friendly_units: true; filter?: Predicate }
   | { attached_to_self: true }
   | { exclude: Selector; from: Selector }
@@ -134,7 +147,13 @@ export interface Modifier {
 
 export interface DamageEffect {
   effect: 'damage';
-  amount: number;
+  /** Fixed damage amount. Provide this OR `amountFromPower` (exactly one). */
+  amount?: number;
+  /** Dynamic damage: "deals damage equal to its power". The amount is the
+   *  effective power of the FIRST unit this selector resolves to (usually
+   *  `{ self: true }` — "this unit deals damage equal to his power"), snapshot
+   *  once before any damage is dealt. Non-unit / empty resolution → 0. */
+  amountFromPower?: Selector;
   target: Selector;
   combat?: boolean;
   unpreventable?: boolean;
@@ -213,11 +232,15 @@ export interface NoopEffect {
   effect: 'noop';
 }
 
-// Player chooses one option to resolve. `controller` indicates who picks.
+// Player chooses option(s) to resolve. `chooser` indicates who picks.
+// `count` (default 1) is how many DISTINCT options to pick and resolve in pick
+// order — `count: 2` models "Choose two, in any order:". Picking fewer than
+// `count` only happens when there aren't enough options.
 export interface ChooseOneEffect {
   effect: 'choose_one';
   prompt?: string;
   chooser?: PlayerRef;
+  count?: number;
   options: Array<{ label: string; value: string; do: Effect }>;
 }
 
@@ -254,6 +277,48 @@ export interface MoveEffect {
   effect: 'move';
   target: Selector;
   to: 'ground_arena' | 'space_arena' | 'other_arena';
+}
+
+/** Multi-source power damage: each unit resolved by `sources` deals damage
+ *  equal to ITS OWN effective power to the unit resolved by `target`.
+ *   • Focus Fire: "Each friendly Vehicle unit in the same arena deals damage
+ *     equal to its power to that unit" — `sources` = all friendly Vehicles,
+ *     `sources_same_arena_as_target` filters them to the target's arena.
+ *   • Maximum Firepower: two chosen friendly Imperial units, same target —
+ *     `sources` is a chosen selector (count 2).
+ *  Distinct from `damage.amountFromPower` (single self-source). Powers are read
+ *  per source from current state; a source that has left play is skipped. */
+export interface PowerDamageFromEachEffect {
+  effect: 'power_damage_from_each';
+  sources: Selector;
+  target: Selector;
+  sources_same_arena_as_target?: boolean;
+}
+
+/** "Use the Force (lose your Force token). If you do, X." A Force token is a
+ *  per-player resource — each player may have at most one. Using it spends the
+ *  source controller's token (sets `forceToken` false) and resolves `do`. If the
+ *  controller has no Force token, this is a no-op (the `do` doesn't happen). */
+export interface UseForceEffect {
+  effect: 'use_force';
+  do: Effect;
+}
+
+/** "The Force is with you (create your Force token)." Gain a Force token (max
+ *  one per player — gaining when you already have it is a no-op). */
+export interface GainForceEffect {
+  effect: 'gain_force';
+  player?: PlayerRef;
+}
+
+/** "Return a unit to its owner's hand" (bounce). The unit leaves play and goes
+ *  to its owner's hand as a fresh card: damage, exhaust, shields and Experience
+ *  reset; attached upgrades are discarded (upgrades can't go to hand). Leader
+ *  units are skipped (they have their own flip-back rules, not hand-return).
+ *  Owner = controller until a control-transfer mechanic adds a separate owner. */
+export interface ReturnToHandEffect {
+  effect: 'return_to_hand';
+  target: Selector;
 }
 
 /** Peek at a hidden zone without changing state. The runtime emits a
@@ -324,7 +389,11 @@ export type Effect =
   | LookAtEffect
   | DiscloseEffect
   | SearchEffect
-  | DividedDamageEffect;
+  | DividedDamageEffect
+  | ReturnToHandEffect
+  | UseForceEffect
+  | GainForceEffect
+  | PowerDamageFromEachEffect;
 
 // ---------------------------------------------------------------------------
 // Abilities

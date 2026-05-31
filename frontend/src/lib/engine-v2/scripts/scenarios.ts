@@ -426,6 +426,23 @@ scenario('Coordinate: aura inactive at 2 controlled units', () => {
   assertEq(effectivePower(state, reg, cloneA, 'p1'), 2, 'clone has printed power only');
 });
 
+scenario('Coordinate self-buff: +2/+2 active at 3 controlled units', () => {
+  const trooper = mkInst('W8_012');                       // 2/2 w/ Coordinate — gets +2/+2
+  const allyA = mkInst('W2_009');
+  const allyB = mkInst('W2_009');                          // 3 units total → Coordinate active
+  const state = emptyState({ groundP1: [trooper, allyA, allyB], active: 'p1' });
+  assertEq(effectivePower(state, reg, trooper, 'p1'), 4, 'self +2 power');
+  assertEq(effectiveHp(state, reg, trooper, 'p1'), 4, 'self +2 hp');
+});
+
+scenario('Coordinate self-buff: inactive at 2 controlled units', () => {
+  const trooper = mkInst('W8_012');
+  const allyA = mkInst('W2_009');                          // 2 units total → Coordinate inactive
+  const state = emptyState({ groundP1: [trooper, allyA], active: 'p1' });
+  assertEq(effectivePower(state, reg, trooper, 'p1'), 2, 'printed power only');
+  assertEq(effectiveHp(state, reg, trooper, 'p1'), 2, 'printed hp only');
+});
+
 scenario('Smuggle: resource_zone constant buffs friendlies', () => {
   const cache = mkInst('W4_005');                         // active_in_zone='resource_zone'; +1 power
   const ally = mkInst('W2_009');                          // 2/2 clone
@@ -473,6 +490,30 @@ scenario('Leader: deploy is free — lands as 4/5, spends no resources (Twin Sun
   assertEq(r.next.players.p1.resources.length, 10, 'total resources unchanged');
   assertEq(r.next.players.p1.resources.filter(rr => !rr.exhausted).length, 10, 'no resources exhausted by deploy');
   if (r.events.some(e => e.kind === 'RESOURCE_SPENT')) throw new Error('deploy should not emit RESOURCE_SPENT');
+});
+
+scenario('Leader deploy: enters READY and can attack the same round (§3.4.4c)', () => {
+  // §3.4.4c: "When a Leader Unit is deployed, it enters the ground arena ready,
+  // even if it was exhausted before." This is the EXCEPTION to §3.4.4b (non-leader
+  // units enter exhausted). A freshly-deployed leader can attack the same round.
+  const state = emptyState({ active: 'p1' });
+  const withLeader: GameState = {
+    ...state,
+    players: {
+      ...state.players,
+      p1: { ...state.players.p1, leaders: [{ cardId: 'W4_001', side: 'leader', isDeployed: false, exhausted: false }] },
+    },
+  };
+  const r = step(withLeader, { kind: 'DEPLOY_LEADER', player: 'p1', leaderIndex: 0 }, reg);
+  const lead = r.next.players.p1.leaders[0];
+  const inArena = r.next.players.p1.groundArena.find(c => c.iid === lead.unitIid)!;
+  assertEq(inArena.exhausted, false, 'deployed leader-unit enters READY (not exhausted)');
+  // Deploy passes the turn to p2; on p1's next action in the SAME round the
+  // ready leader can attack. Simulate p1's turn to confirm attack legality.
+  const p1Turn: GameState = { ...r.next, activePlayer: 'p1' };
+  const legal = getLegalActions(p1Turn, reg, 'p1').actions;
+  const canAttack = legal.some(a => a.kind === 'ATTACK' && (a as { attackerIid?: string }).attackerIid === lead.unitIid);
+  if (!canAttack) throw new Error('freshly-deployed leader should be able to ATTACK the same round');
 });
 
 scenario('Leader deploy: gated on TOTAL resources (exhausted ones still count)', () => {
@@ -690,6 +731,202 @@ scenario('Action ability: in-arena unit deals 1 damage and exhausts', () => {
   const targetNow = r.next.players.p2.groundArena.find(c => c.iid === target.iid);
   if (!targetNow) throw new Error('target missing');
   assertEq(targetNow.damage, 1, 'target took 1 damage');
+});
+
+scenario('Action ability: NOT offered when its mandatory target has no candidates', () => {
+  // Sentry's "Action [Exhaust]: deal 1 to a chosen enemy unit" requires an enemy
+  // unit. With none in play the ability would just waste its cost, so it must not
+  // appear in legal actions. (Guards against the UAT footgun where an ability with
+  // no valid target was offered and silently spent its cost.)
+  const sentry = mkInst('W5_002');
+  const noEnemy = emptyState({ groundP1: [sentry], groundP2: [], active: 'p1' });
+  const offeredEmpty = getLegalActions(noEnemy, reg, 'p1').actions
+    .some(a => a.kind === 'USE_ACTION_ABILITY' && (a as { sourceIid?: string }).sourceIid === sentry.iid);
+  if (offeredEmpty) throw new Error('sentry action should NOT be offered with no enemy target');
+  // With an enemy present, it IS offered.
+  const withEnemy = emptyState({ groundP1: [sentry], groundP2: [mkInst('W1_001')], active: 'p1' });
+  const offeredFull = getLegalActions(withEnemy, reg, 'p1').actions
+    .some(a => a.kind === 'USE_ACTION_ABILITY' && (a as { sourceIid?: string }).sourceIid === sentry.iid);
+  if (!offeredFull) throw new Error('sentry action SHOULD be offered when an enemy target exists');
+});
+
+scenario('Power-based damage: deals damage equal to source power, scales with buffs', () => {
+  // Marksman Clone (W8_001, 4 power): "Action [Exhaust]: deals damage equal to
+  // his power to an enemy ground unit." Wampa (W2_001) has 5 hp → survives 4.
+  const clone = mkInst('W8_001');
+  const wampa = mkInst('W2_001');
+  const s1 = emptyState({ groundP1: [clone], groundP2: [wampa], active: 'p1' });
+  const r1 = step(s1, { kind: 'USE_ACTION_ABILITY', player: 'p1', sourceIid: clone.iid, abilityIndex: 0 }, reg);
+  const wampaNow = r1.next.players.p2.groundArena.find(c => c.iid === wampa.iid);
+  if (!wampaNow) throw new Error('Wampa should survive 4 damage (5 hp)');
+  assertEq(wampaNow.damage, 4, 'enemy took damage = clone power (4)');
+
+  // With one Experience token the clone is 5/5 → 5 damage → Wampa (5 hp) defeated.
+  const clone2 = mkInst('W8_001', { experienceTokens: 1 });
+  const wampa2 = mkInst('W2_001');
+  const s2 = emptyState({ groundP1: [clone2], groundP2: [wampa2], active: 'p1' });
+  const r2 = step(s2, { kind: 'USE_ACTION_ABILITY', player: 'p1', sourceIid: clone2.iid, abilityIndex: 0 }, reg);
+  const wampaGone = r2.next.players.p2.groundArena.find(c => c.iid === wampa2.iid);
+  if (wampaGone) throw new Error('buffed clone (5 power) should defeat the 5-hp Wampa');
+});
+
+scenario('Modal: "Choose two" resolves TWO distinct modes in pick order', () => {
+  // Tactical Options (W8_002): choose_one count 2. Pick opt0 (draw) then opt1
+  // (deal 2 to enemy). Both must apply, and the same option can't repeat.
+  const event = mkInst('W8_002');
+  const enemy = mkInst('W2_001'); // Wampa 5 hp — survives 2
+  const state = emptyState({ handP1: [event], groundP2: [enemy], active: 'p1',
+    deckP1: [mkInst('W1_001'), mkInst('W1_001')] });
+  const chooser = scriptedChooser([
+    { kind: 'option', value: 'opt0' },                                   // draw
+    { kind: 'option', value: 'opt1' },                                   // deal 2 to enemy
+    { kind: 'targets', targets: [{ kind: 'unit', iid: enemy.iid, controller: 'p2' }] },
+  ]);
+  const before = state.players.p1.hand.length; // includes the event
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: event.iid }, reg, chooser);
+  // Played the event (−1) then drew 1 (+1) → net same hand size.
+  assertEq(r.next.players.p1.hand.length, before, 'drew 1 after playing the event (net hand unchanged)');
+  const enemyNow = r.next.players.p2.groundArena.find(c => c.iid === enemy.iid);
+  assertEq(enemyNow?.damage, 2, 'second mode dealt 2 damage to the enemy');
+});
+
+scenario('Return to hand: bounces a unit, resets state, discards its upgrades', () => {
+  // Tactical Retreat (W8_003): return a chosen enemy unit to its owner's hand.
+  const event = mkInst('W8_003');
+  // Battle Plates (W4_002) is an upgrade fixture; attach it to the enemy and
+  // give the enemy damage/shield/experience to confirm all of that is cleared.
+  const upgrade = mkInst('W4_002');
+  const enemy = mkInst('W1_001', { damage: 2, exhausted: true, shieldTokens: 1, experienceTokens: 1, upgrades: [upgrade] });
+  const state = emptyState({ handP1: [event], groundP2: [enemy], active: 'p1' });
+  const chooser = scriptedChooser([{ kind: 'targets', targets: [{ kind: 'unit', iid: enemy.iid, controller: 'p2' }] }]);
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: event.iid }, reg, chooser);
+  const p2 = r.next.players.p2;
+  if (p2.groundArena.some(c => c.iid === enemy.iid)) throw new Error('enemy should leave the arena');
+  const inHand = p2.hand.find(c => c.iid === enemy.iid);
+  if (!inHand) throw new Error('enemy should be in its owner\'s hand');
+  assertEq(inHand.damage, 0, 'damage reset');
+  assertEq(inHand.exhausted, false, 'exhaust reset');
+  assertEq(inHand.shieldTokens, 0, 'shields reset');
+  assertEq(inHand.experienceTokens ?? 0, 0, 'experience reset');
+  assertEq(inHand.upgrades.length, 0, 'upgrades detached');
+  if (!p2.discard.some(c => c.iid === upgrade.iid)) throw new Error('upgrade should go to owner\'s discard');
+});
+
+scenario('AOE damage: "each enemy unit" hits all enemy units, not friendlies', () => {
+  // Orbital Bombardment (W8_004): deal 2 to each enemy unit (all-selector, no chooser).
+  const event = mkInst('W8_004');
+  const e1 = mkInst('W2_001'); // Wampa 5 hp
+  const e2 = mkInst('W2_001');
+  const friendly = mkInst('W2_001');
+  const state = emptyState({ handP1: [event], groundP1: [friendly], groundP2: [e1, e2], active: 'p1' });
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: event.iid }, reg);
+  const e1n = r.next.players.p2.groundArena.find(c => c.iid === e1.iid);
+  const e2n = r.next.players.p2.groundArena.find(c => c.iid === e2.iid);
+  const fn = r.next.players.p1.groundArena.find(c => c.iid === friendly.iid);
+  assertEq(e1n?.damage, 2, 'enemy 1 took 2');
+  assertEq(e2n?.damage, 2, 'enemy 2 took 2');
+  assertEq(fn?.damage, 0, 'friendly untouched');
+});
+
+scenario('remaining_hp: uses EFFECTIVE hp − damage (upgrade-buffed unit is safe)', () => {
+  // Precision Strike (W8_005): defeat an enemy with ≤3 remaining HP.
+  // Battle Plates (W4_002, +2/+2) on a 3-hp Wampa? No — use a small unit:
+  // Rookie Pilot (W1_002) is 1/2. Undamaged → remaining 2 ≤ 3 → defeated.
+  const event = mkInst('W8_005');
+  const small = mkInst('W1_002'); // 1/2
+  const s1 = emptyState({ handP1: [event], groundP2: [small], active: 'p1' });
+  const r1 = step(s1, { kind: 'PLAY_CARD', player: 'p1', iid: event.iid }, reg,
+    scriptedChooser([{ kind: 'targets', targets: [{ kind: 'unit', iid: small.iid, controller: 'p2' }] }]));
+  if (r1.next.players.p2.groundArena.some(c => c.iid === small.iid)) throw new Error('2-hp unit should be defeated (remaining 2 ≤ 3)');
+
+  // Same 2-hp unit but with Battle Plates (+2/+2 → effective 4 hp): remaining 4 > 3,
+  // so it is NOT a legal target — the defeat finds no candidate and nothing dies.
+  const event2 = mkInst('W8_005');
+  const buffed = mkInst('W1_002', { upgrades: [mkInst('W4_002')] });
+  const s2 = emptyState({ handP1: [event2], groundP2: [buffed], active: 'p1' });
+  const r2 = step(s2, { kind: 'PLAY_CARD', player: 'p1', iid: event2.iid }, reg,
+    scriptedChooser([{ kind: 'targets', targets: [{ kind: 'unit', iid: buffed.iid, controller: 'p2' }] }]));
+  if (!r2.next.players.p2.groundArena.some(c => c.iid === buffed.iid)) throw new Error('upgrade-buffed unit (4 effective hp) must NOT be defeatable by remaining≤3');
+});
+
+scenario('Defeat trigger: "deal N to its controller\'s base" hits the defeated unit\'s owner', () => {
+  // Vindictive Avenger (W8_006): when an enemy unit is defeated, deal 2 to its
+  // controller's base. Ion Burst (W6_002, 2 indirect to a chosen enemy) defeats
+  // a 2-hp Rookie Pilot → the trigger should hit p2's base, not p1's.
+  const avenger = mkInst('W8_006');
+  const ion = mkInst('W6_002');
+  const victim = mkInst('W1_002'); // Rookie Pilot 1/2
+  const state = emptyState({ handP1: [ion], groundP1: [avenger], groundP2: [victim], active: 'p1' });
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: ion.iid }, reg,
+    scriptedChooser([{ kind: 'targets', targets: [{ kind: 'unit', iid: victim.iid, controller: 'p2' }] }]));
+  if (r.next.players.p2.groundArena.some(c => c.iid === victim.iid)) throw new Error('victim should be defeated by Ion Burst');
+  assertEq(r.next.players.p2.base.damage, 2, "p2 base took 2 (defeated unit's controller)");
+  assertEq(r.next.players.p1.base.damage, 0, 'p1 base untouched');
+});
+
+scenario('Force: "use the Force" spends the token and resolves the follow-up; no token → no-op', () => {
+  // Sorcerous Blast (W8_007): use the Force, if you do deal 3 to a chosen unit.
+  const enemyHp = () => mkInst('W2_001'); // Wampa 5 hp survives 3
+  const pick = (iid: string) => scriptedChooser([{ kind: 'targets', targets: [{ kind: 'unit', iid, controller: 'p2' }] }]);
+
+  // With a Force token: deals 3, token spent.
+  const e1 = enemyHp();
+  let s = emptyState({ handP1: [mkInst('W8_007')], groundP2: [e1], active: 'p1' });
+  s = { ...s, players: { ...s.players, p1: { ...s.players.p1, forceToken: true } } };
+  const r1 = step(s, { kind: 'PLAY_CARD', player: 'p1', iid: s.players.p1.hand[0].iid }, reg, pick(e1.iid));
+  assertEq(r1.next.players.p2.groundArena.find(c => c.iid === e1.iid)?.damage, 3, 'dealt 3 when Force used');
+  assertEq(r1.next.players.p1.forceToken, false, 'Force token spent');
+
+  // Without a Force token: no damage, nothing spent.
+  const e2 = enemyHp();
+  const s2 = emptyState({ handP1: [mkInst('W8_007')], groundP2: [e2], active: 'p1' });
+  const r2 = step(s2, { kind: 'PLAY_CARD', player: 'p1', iid: s2.players.p1.hand[0].iid }, reg, pick(e2.iid));
+  assertEq(r2.next.players.p2.groundArena.find(c => c.iid === e2.iid)?.damage, 0, 'no damage without a Force token');
+  assertEq(r2.next.players.p1.forceToken, false, 'still no token');
+});
+
+scenario('Force: "the Force is with you" gains a token (max one, idempotent)', () => {
+  const s = emptyState({ handP1: [mkInst('W8_008')], active: 'p1' });
+  const r = step(s, { kind: 'PLAY_CARD', player: 'p1', iid: s.players.p1.hand[0].iid }, reg);
+  assertEq(r.next.players.p1.forceToken, true, 'gained a Force token');
+  // Already holding one → still exactly one (boolean stays true, no crash).
+  const s2 = { ...s, players: { ...s.players, p1: { ...s.players.p1, forceToken: true } } };
+  const r2 = step(s2, { kind: 'PLAY_CARD', player: 'p1', iid: s2.players.p1.hand[0].iid }, reg);
+  assertEq(r2.next.players.p1.forceToken, true, 'still holds one (idempotent)');
+});
+
+scenario('Multi-source power damage: only sources in the TARGET\'s arena contribute (Focus Fire mechanic)', () => {
+  // Concentrated Volley (W8_011): each friendly unit in the target's arena deals
+  // its own power to the target. Two ground Battlefield Marines (W1_001, 3 power)
+  // → 6; a friendly unit placed in SPACE must NOT contribute.
+  const target = mkInst('W2_001');        // Wampa 5/… place in ground; needs to survive 6? Wampa 5 hp → defeated.
+  // Use a high-hp target so we can read accumulated damage: give it Experience.
+  const tank = mkInst('W2_001', { experienceTokens: 4 }); // 5 + 4 = 9 hp
+  const g1 = mkInst('W1_001'); // 3 power, ground
+  const g2 = mkInst('W1_001'); // 3 power, ground
+  const spaceUnit = mkInst('W1_001'); // 3 power, but placed in SPACE → excluded
+  void target;
+  const state = emptyState({ handP1: [mkInst('W8_011')], groundP1: [g1, g2], spaceP1: [spaceUnit], groundP2: [tank], active: 'p1' });
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: state.players.p1.hand[0].iid }, reg,
+    scriptedChooser([{ kind: 'targets', targets: [{ kind: 'unit', iid: tank.iid, controller: 'p2' }] }]));
+  assertEq(r.next.players.p2.groundArena.find(c => c.iid === tank.iid)?.damage, 6, 'two ground sources (3+3); space source excluded');
+});
+
+scenario('Multi-source power damage: Maximum Firepower — two chosen sources hit one target', () => {
+  // Maximum Firepower (W8_010): two chosen friendly Imperial units each deal
+  // their power to the same target. Use Battlefield Marine (W1_001, 3 power,
+  // trait set?) — need 'imperial' trait. Decorated Veteran (W7_002) is 2/2
+  // imperial. Use two of them (2 power each) → 4 to a 6-hp target.
+  const v1 = mkInst('W7_002'); // imperial 2/2
+  const v2 = mkInst('W7_002');
+  const target = mkInst('W2_001'); // Wampa 5 hp → 4 dmg survives
+  const state = emptyState({ handP1: [mkInst('W8_010')], groundP1: [v1, v2], groundP2: [target], active: 'p1' });
+  const chooser = scriptedChooser([
+    { kind: 'targets', targets: [{ kind: 'unit', iid: target.iid, controller: 'p2' }] }, // the shared target
+    { kind: 'targets', targets: [ { kind: 'unit', iid: v1.iid, controller: 'p1' }, { kind: 'unit', iid: v2.iid, controller: 'p1' } ] }, // two sources
+  ]);
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: state.players.p1.hand[0].iid }, reg, chooser);
+  assertEq(r.next.players.p2.groundArena.find(c => c.iid === target.iid)?.damage, 4, 'target took 2+2 = 4 from two Imperial sources');
 });
 
 scenario('Action ability: once_per_round limit blocks a second fire', () => {

@@ -1,0 +1,24 @@
+{
+  "id": "W8_006",
+  "name": "Vindictive Avenger",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["aggression"],
+  "arena": "ground",
+  "power": 3,
+  "hp": 3,
+  "traits": ["imperial"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.defeated",
+      "where": { "controller": "opponent" },
+      "do": {
+        "effect": "damage",
+        "amount": 2,
+        "target": { "trigger_controller_base": true }
+      }
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "id": "W8_002",
+  "name": "Tactical Options",
+  "type": "event",
+  "cost": 2,
+  "aspects": ["command"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "do": {
+        "effect": "choose_one",
+        "count": 2,
+        "options": [
+          { "label": "Draw a card.", "value": "opt0", "do": { "effect": "draw", "player": "self", "count": 1 } },
+          { "label": "Deal 2 damage to an enemy unit.", "value": "opt1", "do": { "effect": "damage", "amount": 2, "target": { "zone": "any_arena", "controller": "opponent", "selector": "chosen", "count": 1 } } },
+          { "label": "Give an enemy unit -1/-1 for this phase.", "value": "opt2", "do": { "effect": "give", "target": { "zone": "any_arena", "controller": "opponent", "selector": "chosen", "count": 1 }, "modifier": { "power": -1, "health": -1, "duration": "end_of_phase" } } }
+        ]
+      }
+    }
+  ]
+}

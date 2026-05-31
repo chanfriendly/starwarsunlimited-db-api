@@ -309,15 +309,18 @@ function applyDeployLeader(
   const events: GameEvent[] = [];
   // (no resource exhaust — deploy is free in Twin Suns)
 
-  // Create the leader-unit CardInstance. Enters exhausted (deployed leaders
-  // can't attack the same turn they deploy, same as normal unit plays).
+  // Create the leader-unit CardInstance. Enters READY per §3.4.4c: "When a
+  // Leader Unit is deployed, it enters the ground arena ready, even if it was
+  // exhausted before." A deployed leader can attack/use its leader-unit
+  // abilities the same round it deploys. (This is the exception to §3.4.4b,
+  // where *non-leader* units enter play exhausted.)
   const iid = `i${s._nextIid}`;
   s = { ...s, _nextIid: s._nextIid + 1 };
   const leaderUnit: CardInstance = {
     iid,
     cardId: leader.cardId,
     damage: 0,
-    exhausted: true,
+    exhausted: false,
     upgrades: [],
     shieldTokens: 0,
     isToken: false,

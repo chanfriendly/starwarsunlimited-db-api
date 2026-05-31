@@ -1,0 +1,19 @@
+{
+  "id": "W8_011",
+  "name": "Concentrated Volley",
+  "type": "event",
+  "cost": 2,
+  "aspects": ["aggression"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "do": {
+        "effect": "power_damage_from_each",
+        "target": { "zone": "any_arena", "controller": "any", "selector": "chosen", "count": 1 },
+        "sources": { "zone": "any_arena", "controller": "self" },
+        "sources_same_arena_as_target": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "id": "W8_012",
+  "name": "Coordinated Trooper",
+  "type": "unit",
+  "cost": 2,
+  "aspects": ["command"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 2,
+  "traits": ["republic", "clone"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "constant",
+      "while": { "controller_unit_count": { "min": 3 } },
+      "grant": { "target": { "self": true }, "modifier": { "power": 2, "health": 2 } }
+    }
+  ]
+}
