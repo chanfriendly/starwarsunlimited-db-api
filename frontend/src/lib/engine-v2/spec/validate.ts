@@ -43,8 +43,8 @@ const EFFECT_KINDS = new Set([
   'damage', 'heal', 'defeat', 'give_shield', 'give_experience', 'draw', 'discard',
   'exhaust', 'ready', 'give', 'sequence', 'if', 'noop', 'choose_one', 'optional',
   'create_token', 'capture', 'rescue', 'move', 'look_at', 'disclose',
-  'search', 'divided_damage', 'return_to_hand', 'use_force', 'gain_force',
-  'power_damage_from_each',
+  'search', 'divided_damage', 'return_to_hand', 'return_from_discard',
+  'use_force', 'gain_force', 'power_damage_from_each',
 ]);
 const ABILITY_TYPES = new Set(['triggered', 'action', 'constant', 'replacement']);
 const TRIGGER_CONDITIONS = new Set([
@@ -357,6 +357,11 @@ function validateEffect(v: V, path: string, e: unknown) {
     case 'return_to_hand':
       need('target', 'target' in e);
       if ('target' in e) validateSelector(v, `${path}.target`, e.target); break;
+    case 'return_from_discard':
+      need('player', 'player' in e);
+      if ('player' in e) checkEnum(v, `${path}.player`, e.player, PLAYER_REFS, 'player');
+      if ('filter' in e) validatePredicate(v, `${path}.filter`, e.filter);
+      if ('count' in e && !isNum(e.count)) v.err(`${path}.count`, 'count must be a number'); break;
     case 'use_force':
       need('do', 'do' in e);
       if ('do' in e) validateEffect(v, `${path}.do`, e.do); break;

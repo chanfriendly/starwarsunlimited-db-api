@@ -82,6 +82,7 @@ export function applyEffect(ctx: InterpCtx, effect: Effect): InterpResult {
     case 'search':           return applySearch(ctx, effect);
     case 'divided_damage':   return applyDividedDamage(ctx, effect);
     case 'return_to_hand':   return applyReturnToHand(ctx, effect);
+    case 'return_from_discard': return applyReturnFromDiscard(ctx, effect);
     case 'use_force':        return applyUseForce(ctx, effect);
     case 'gain_force':       return applyGainForce(ctx, effect);
     case 'power_damage_from_each': return applyPowerDamageFromEach(ctx, effect);
@@ -479,6 +480,46 @@ function applyReturnToHand(ctx: InterpCtx, e: Extract<Effect, { effect: 'return_
     events.push({ kind: 'ZONE_CHANGED', iid: f.inst.iid, from: f.loc.zone, to: 'hand' });
   }
   return { state: s, events };
+}
+
+function applyReturnFromDiscard(ctx: InterpCtx, e: Extract<Effect, { effect: 'return_from_discard' }>): InterpResult {
+  const pid = resolvePlayerStrict(e.player, ctx);
+  const ps = ctx.state.players[pid];
+  if (!ps || ps.discard.length === 0) return { state: ctx.state, events: [] };
+  const candidates = ps.discard.filter(c => evalCardPredicate(e.filter, ctx, c, pid, 'discard'));
+  if (candidates.length === 0) return { state: ctx.state, events: [] };
+
+  const n = Math.min(e.count ?? 1, candidates.length);
+  const chooser = ctx.chooser ?? defaultChooser;
+  // Pick n distinct cards, one prompt each (mirrors applySearch / applyDisclose).
+  const picked: typeof candidates = [];
+  let remaining = candidates.slice();
+  for (let i = 0; i < n && remaining.length > 0; i++) {
+    const result = chooser({
+      kind: 'choose_one',
+      prompt: `Return a card from your discard pile to your hand${n > 1 ? ` (${n - i} left)` : ''}`,
+      options: remaining.map(c => ({ label: ctx.reg.cards[c.cardId]?.name ?? c.iid, value: c.iid })),
+      player: pid,
+      canPass: false,
+    });
+    const pick = result.kind === 'option' ? remaining.find(c => c.iid === result.value) : remaining[0];
+    if (!pick) break;
+    picked.push(pick);
+    remaining = remaining.filter(c => c.iid !== pick.iid);
+  }
+  if (picked.length === 0) return { state: ctx.state, events: [] };
+
+  // Move the picked cards discard → hand as fresh cards (a card in hand carries
+  // no in-play state — reset damage/exhaust/shields/Experience/upgrades).
+  const pickedIids = new Set(picked.map(c => c.iid));
+  const newDiscard = ps.discard.filter(c => !pickedIids.has(c.iid));
+  const fresh = picked.map(c => ({
+    ...c, damage: 0, exhausted: false, shieldTokens: 0, experienceTokens: 0,
+    upgrades: [], capturedByIid: undefined, enteredZoneAt: ctx.state.step,
+  }));
+  const newPs = { ...ps, discard: newDiscard, hand: [...ps.hand, ...fresh] };
+  const events: GameEvent[] = fresh.map(c => ({ kind: 'ZONE_CHANGED', iid: c.iid, from: 'discard' as const, to: 'hand' as const }));
+  return { state: withPlayer(ctx.state, pid, newPs), events };
 }
 
 function applyLookAt(ctx: InterpCtx, e: Extract<Effect, { effect: 'look_at' }>): InterpResult {

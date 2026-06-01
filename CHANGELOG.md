@@ -4,6 +4,16 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-05-31: Discard-pile recursion — `return_from_discard` effect (task #58, session 55)
+
+**New engine primitive (one, scoped).** `return_from_discard` moves cards from a player's discard pile to their hand — SWU recursion ("Return a unit from your discard pile to your hand"). Shape: `{ player, filter?, count? }`. The interpreter collects discard cards matching `filter`, prompts the chooser once per pick (mirrors `search`/`disclose` — default chooser takes leftmost), and moves the picks to hand as **fresh** cards (damage / exhaust / shields / Experience / upgrades reset, since a card in hand carries no in-play state — same reset convention as `return_to_hand`). No-op when the discard has no match.
+
+This is distinct from `return_to_hand` (bounce), which moves an *in-play* unit to its owner's hand; `return_from_discard` pulls from the discard zone. Wired through the AST (`ast.ts`), interpreter (`interpret.ts`), validator (`validate.ts` closed vocab + case), and a matcher template in `match.ts` ("Return a [Trait] unit [that costs N or less] from your discard pile to your hand." → `player: 'self'`, `card_type: 'unit'` + optional trait/cost compound filter).
+
+Fixture W8_013 (Salvage Specialist — When Played: return a unit) mirrors the AST and is covered by the all-fixtures validate regression. Two engine scenarios prove (a) a stale-state discard unit returns to hand reset clean, and (b) a non-matching filter is a no-op (card stays in discard). One matcher scenario covers the plain + trait+cost forms. Closes the "discard-pile recursion" residual tracked since session 52.
+
+Engine **92** / translate **49** / validate 16, tsc clean.
+
 ### 2026-05-31: Coordinate self-buff matcher template (task #58, session 54)
 
 **Matcher-only — no new engine primitive.** Added a Tier-1 template for the Coordinate keyword's self-buff text shape `"Coordinate — This unit gets +N/+N."` (em-dash / en-dash / hyphen tolerated; "This unit/He/She/It/They gets" variants). It emits the constant-ability shape the engine already supports: `while: { controller_unit_count: { min: 3 } }`, `grant.target: { self: true }`, `modifier: { power, health }`. The reminder text "(While you control 3 or more units…)" is stripped by `stripReminders` before the clause reaches `parseConstantClause`, so only the em-dash body is matched. This was a known residual ("Coordinate exists as a predicate but not this self-buff shape") — Coordinate's semantics (controller_unit_count ≥ 3) were already modeled by W4_004's aura and `effectivePower`/`effectiveHp`; the only gap was recognizing this text shape.

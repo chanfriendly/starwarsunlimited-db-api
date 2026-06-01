@@ -311,6 +311,17 @@ export function parseEffectClause(raw: string): Effect | null {
     return { effect: 'return_to_hand', target: { self: true } };
   }
 
+  // Return a [Trait] unit [that costs N or less] from your discard pile to your
+  // hand. (discard-pile recursion — distinct from bounce, which moves an
+  // in-play unit. "your discard pile" → player: 'self'; restrict to units.)
+  if ((m = t.match(/^Return an? (?:([A-Za-z]+) )?unit(?: that costs (\d+) or less)? from your discard pile to your hand\.?$/i))) {
+    const trait = m[1] && m[1].toLowerCase() !== 'friendly' ? m[1].toLowerCase() : undefined;
+    const parts: Predicate[] = [{ card_type: 'unit' }];
+    if (trait) parts.push({ card_trait: trait });
+    if (m[2]) parts.push({ card_cost: { max: parseInt(m[2], 10) } });
+    return { effect: 'return_from_discard', player: 'self', filter: parts.length === 1 ? parts[0] : { and: parts }, count: 1 };
+  }
+
   // This unit gets +N/+N for this phase. (self phase buff — action bodies)
   if ((m = t.match(/^This unit gets \+(\d+)\/\+(\d+) for this phase\.?$/i))) {
     return { effect: 'give', target: { self: true }, modifier: { power: +m[1], health: +m[2], duration: 'end_of_phase' } };

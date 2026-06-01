@@ -549,6 +549,21 @@ scenario('Matcher: Coordinate "Coordinate — This unit gets +2/+2." → control
   if (!('self' in a.grant.target)) throw new Error('expected self target');
 });
 
+scenario('Matcher: "Return a unit from your discard pile to your hand." → return_from_discard', () => {
+  const r = matchCard({ name: 'X', type: 'Event', text: 'Return a unit from your discard pile to your hand.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'triggered' || a.do.effect !== 'return_from_discard') throw new Error('expected when-played return_from_discard');
+  const d = a.do as { player?: string; filter?: { card_type?: string } };
+  assertEq(d.player, 'self', 'your discard pile → self');
+  assertEq(d.filter?.card_type, 'unit', 'unit filter');
+  // Trait + cost variant → compound filter.
+  const tv = matchCard({ name: 'Y', type: 'Event', text: 'Return a Rebel unit that costs 4 or less from your discard pile to your hand.' });
+  assertEq(tv.coverage, 'full', 'trait+cost coverage');
+  const td = (tv.abilities[0] as { do: { filter?: { and?: Array<Record<string, unknown>> } } }).do;
+  if (!td.filter?.and || td.filter.and.length !== 3) throw new Error('expected card_type+trait+cost compound filter');
+});
+
 scenario('Matcher: every emitted ability validates clean (spot set)', () => {
   const samples = [
     { type: 'Event', text: 'Deal 2 damage to a unit or base.' },

@@ -1,0 +1,25 @@
+{
+  "id": "W8_013",
+  "name": "Salvage Specialist",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["command"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 3,
+  "traits": ["rebel"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": {
+        "effect": "return_from_discard",
+        "player": "self",
+        "filter": { "card_type": "unit" },
+        "count": 1
+      }
+    }
+  ]
+}

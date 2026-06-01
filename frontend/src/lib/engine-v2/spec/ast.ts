@@ -321,6 +321,18 @@ export interface ReturnToHandEffect {
   target: Selector;
 }
 
+/** "Return a [unit] from your discard pile to your hand" (recursion). The
+ *  chooser picks `count` (default 1) cards from `player`'s discard pile matching
+ *  `filter` and moves them to that player's hand as fresh cards (damage / exhaust
+ *  / shields / Experience reset — a card in hand carries no in-play state). The
+ *  card can then be replayed normally. No-op if the discard has no match. */
+export interface ReturnFromDiscardEffect {
+  effect: 'return_from_discard';
+  player: PlayerRef;
+  filter?: Predicate;
+  count?: number;
+}
+
 /** Peek at a hidden zone without changing state. The runtime emits a
  *  CARD_REVEALED event per peeked card so the chooser/UI can display them. */
 export interface LookAtEffect {
@@ -391,6 +403,7 @@ export type Effect =
   | SearchEffect
   | DividedDamageEffect
   | ReturnToHandEffect
+  | ReturnFromDiscardEffect
   | UseForceEffect
   | GainForceEffect
   | PowerDamageFromEachEffect;

@@ -443,6 +443,43 @@ scenario('Coordinate self-buff: inactive at 2 controlled units', () => {
   assertEq(effectiveHp(state, reg, trooper, 'p1'), 2, 'printed hp only');
 });
 
+scenario('return_from_discard: When Played pulls a unit from discard to hand, reset clean', () => {
+  // W8_013 (Salvage Specialist) — When Played: return a unit from your discard
+  // pile to your hand. A defeated unit in discard carries stale in-play state;
+  // returning it to hand must reset damage/exhaust/shields/Experience.
+  const dead: CardInstance = { ...mkInst('W1_001'), damage: 5, exhausted: true, shieldTokens: 1, experienceTokens: 2 };
+  const salvager = mkInst('W8_013');
+  // Pre-seed p1's discard with the dead unit; play the salvager from hand.
+  const base = emptyState({ handP1: [salvager], resourcesP1: 5, active: 'p1' });
+  const state: GameState = {
+    ...base,
+    players: { ...base.players, p1: { ...base.players.p1, discard: [dead] } },
+  };
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: salvager.iid }, reg);
+  const inHand = r.next.players.p1.hand.find(c => c.iid === dead.iid);
+  if (!inHand) throw new Error('returned unit should be in p1 hand');
+  if (r.next.players.p1.discard.some(c => c.iid === dead.iid)) throw new Error('unit should have left discard');
+  assertEq(inHand.damage, 0, 'damage reset');
+  assertEq(inHand.exhausted, false, 'exhaust reset');
+  assertEq(inHand.shieldTokens, 0, 'shields reset');
+  assertEq(inHand.experienceTokens, 0, 'experience reset');
+});
+
+scenario('return_from_discard: filter (card_type: unit) gates out a non-unit (no-op)', () => {
+  // Only an EVENT (W6_001) sits in discard — the unit filter excludes it, so the
+  // When Played finds no candidate and nothing returns to hand.
+  const ev = mkInst('W6_001');
+  const salvager = mkInst('W8_013');
+  const base = emptyState({ handP1: [salvager], resourcesP1: 5, active: 'p1' });
+  const state: GameState = {
+    ...base,
+    players: { ...base.players, p1: { ...base.players.p1, discard: [ev] } },
+  };
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: salvager.iid }, reg);
+  if (!r.next.players.p1.discard.some(c => c.iid === ev.iid)) throw new Error('event should stay in discard');
+  if (r.next.players.p1.hand.some(c => c.iid === ev.iid)) throw new Error('event must not be returned (unit filter)');
+});
+
 scenario('Smuggle: resource_zone constant buffs friendlies', () => {
   const cache = mkInst('W4_005');                         // active_in_zone='resource_zone'; +1 power
   const ally = mkInst('W2_009');                          // 2/2 clone
