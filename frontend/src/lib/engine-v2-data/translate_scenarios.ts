@@ -655,6 +655,19 @@ scenario('Matcher: flat "This unit costs 2 less to play." → cost ability (no p
   if (costAb.per !== undefined) throw new Error('flat reduction has no per');
 });
 
+scenario('Matcher: multi-attack "This unit attacks twice." → attack effect count 2', () => {
+  const r = matchCard({ name: 'X', type: 'Unit', text: 'On Attack: This unit attacks twice.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'triggered' || a.do.effect !== 'attack') throw new Error('expected attack effect');
+  assertEq((a.do as { count?: number }).count, 2, 'count 2');
+  // "again" = 1 more; "N times" = N.
+  const again = matchCard({ name: 'Y', type: 'Unit', text: 'On Attack: This unit attacks again.' });
+  assertEq(((again.abilities[0] as { do: { count?: number } }).do).count, 1, 'again → 1');
+  const ntimes = matchCard({ name: 'Z', type: 'Unit', text: 'On Attack: This unit attacks 3 times.' });
+  assertEq(((ntimes.abilities[0] as { do: { count?: number } }).do).count, 3, '3 times → 3');
+});
+
 scenario('Matcher: every emitted ability validates clean (spot set)', () => {
   const samples = [
     { type: 'Event', text: 'Deal 2 damage to a unit or base.' },

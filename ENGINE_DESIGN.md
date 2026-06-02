@@ -248,6 +248,8 @@ This list is **closed**. Any new primitive that needs to fire a trigger must eit
 
 This is **the contract**. Every card spec composes from these. Adding a new primitive is the one engine-level change that "novel mechanic" cards require.
 
+> **Implementation status (2026-06-01):** this section is the original *design* vocabulary. The **authoritative implemented vocabulary** is the closed set enforced in [`frontend/src/lib/engine-v2/spec/validate.ts`](frontend/src/lib/engine-v2/spec/validate.ts) (`EFFECT_KINDS`, `ABILITY_TYPES`, etc.), and the AST shapes in [`spec/ast.ts`](frontend/src/lib/engine-v2/spec/ast.ts). Some implemented names differ from the design draft (e.g. design `if_you_do` shipped as the `if_did` effect with an optional `else_`; cost reduction shipped as a `cost`-type **ability**, not an effect). Effects implemented as of this writing: `damage`, `heal`, `defeat`, `give_shield`, `give_experience`, `draw`, `discard`, `exhaust`, `ready`, `give`, `sequence`, `if`, `if_did`, `noop`, `choose_one`, `optional`, `create_token`, `capture`, `rescue`, `move`, `look_at`, `disclose`, `search`, `divided_damage`, `return_to_hand`, `return_from_discard`, `take_control`, `use_force`, `gain_force`, `attack`, `power_damage_from_each`. Ability types: `triggered`, `action`, `constant`, `replacement`, `cost`. See PROGRESS.md / CHANGELOG.md for per-primitive history.
+
 ### `card_flow.*`
 | Primitive | Params | Notes |
 |---|---|---|

@@ -44,7 +44,7 @@ const EFFECT_KINDS = new Set([
   'exhaust', 'ready', 'give', 'sequence', 'if', 'if_did', 'noop', 'choose_one', 'optional',
   'create_token', 'capture', 'rescue', 'move', 'look_at', 'disclose',
   'search', 'divided_damage', 'return_to_hand', 'return_from_discard',
-  'take_control', 'use_force', 'gain_force', 'power_damage_from_each',
+  'take_control', 'use_force', 'gain_force', 'attack', 'power_damage_from_each',
 ]);
 const ABILITY_TYPES = new Set(['triggered', 'action', 'constant', 'replacement', 'cost']);
 const COST_COUNTS = new Set(['friendly_leader_units', 'friendly_units', 'friendly_resources']);
@@ -375,6 +375,9 @@ function validateEffect(v: V, path: string, e: unknown) {
       if ('do' in e) validateEffect(v, `${path}.do`, e.do); break;
     case 'gain_force':
       if ('player' in e) checkEnum(v, `${path}.player`, e.player, PLAYER_REFS, 'player'); break;
+    case 'attack':
+      if ('attacker' in e) validateSelector(v, `${path}.attacker`, e.attacker);
+      if ('count' in e && !isNum(e.count)) v.err(`${path}.count`, 'count must be a number'); break;
     case 'power_damage_from_each':
       need('sources', 'sources' in e); need('target', 'target' in e);
       if ('sources' in e) validateSelector(v, `${path}.sources`, e.sources);

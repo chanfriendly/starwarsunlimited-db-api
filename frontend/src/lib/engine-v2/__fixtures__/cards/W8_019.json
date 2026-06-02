@@ -1,0 +1,20 @@
+{
+  "id": "W8_019",
+  "name": "Relentless Vanguard",
+  "type": "unit",
+  "cost": 4,
+  "aspects": ["aggression"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 5,
+  "traits": ["rebel"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": { "effect": "attack", "attacker": { "self": true }, "count": 2 }
+    }
+  ]
+}

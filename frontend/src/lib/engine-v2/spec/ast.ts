@@ -326,6 +326,21 @@ export interface GainForceEffect {
   player?: PlayerRef;
 }
 
+/** "This unit attacks." / "This unit may attack." / "Attack with a unit." — a
+ *  nested attack from an ability (§7.6.12). `attacker` defaults to `{ self: true }`
+ *  (the source unit). `count` (default 1) makes that many sequential attacks
+ *  (§ "if an ability triggers multiple attacks, resolve them sequentially") —
+ *  this is the "attacks twice"/"makes an additional attack" multi-attack shape.
+ *  The defender is chosen each attack from eligible enemy units/base in the
+ *  attacker's arena (via the chooser); an attack with no legal target is skipped.
+ *  A nested attack may be made even by an exhausted attacker (the ability is the
+ *  "unless otherwise specified" exception to the ready requirement). */
+export interface AttackEffect {
+  effect: 'attack';
+  attacker?: Selector;
+  count?: number;
+}
+
 /** "Return a unit to its owner's hand" (bounce). The unit leaves play and goes
  *  to its owner's hand as a fresh card: damage, exhaust, shields and Experience
  *  reset; attached upgrades are discarded (upgrades can't go to hand). Leader
@@ -434,6 +449,7 @@ export type Effect =
   | TakeControlEffect
   | UseForceEffect
   | GainForceEffect
+  | AttackEffect
   | PowerDamageFromEachEffect;
 
 // ---------------------------------------------------------------------------

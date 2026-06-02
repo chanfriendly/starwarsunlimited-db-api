@@ -1,0 +1,165 @@
+// Combat core — the "Attack With a Unit" resolution (§ Attack steps: Declare,
+// Deal combat damage, Complete). Extracted so BOTH callers share one code path:
+//   • reducer.applyAttack — the player's ATTACK action (validates active-player /
+//     phase / ready, then advances the turn around this core).
+//   • interpret `attack` effect — a NESTED attack from an ability (§7.6.12);
+//     resolves sequentially and does NOT advance the turn. Per § "If an ability
+//     triggers multiple attacks, resolve them sequentially" and "only ready units
+//     may perform an attack, unless otherwise specified" — a nested attack may be
+//     made by an already-exhausted attacker (the ability is the "otherwise").
+//
+// This core does NOT run state-based actions or settle triggers itself; the
+// surrounding step()/settle() (reducer) or the enclosing effect resolution
+// (interpreter, whose events bubble up to settle()) handles that. It returns the
+// raw ATTACK_DECLARED / combat / ATTACK_ENDED events.
+
+import type { CardRegistry, GameState, PlayerId } from '../state/types';
+import type { GameEvent } from '../state/bus';
+import type { LastingEffectRec } from '../state/effects';
+import type { CardSpec } from '../spec/types';
+import { findCard, getZoneArr } from '../state/zones';
+import { exhaust } from '../primitives/state';
+import { dealDamageToBase, dealDamageToUnit } from './damage';
+import { effectivePower, effectiveHp, hasEffectiveKeyword, effectiveKeywordValue } from './modifiers';
+import { KEYWORDS, defeatDefenderShields } from '../primitives/keywords';
+import type { Chooser } from './chooser';
+
+function log(state: GameState, message: string, player?: PlayerId, kind: 'info' | 'critical' = 'info'): GameState {
+  return { ...state, log: [...state.log, { round: state.round, player, message, kind }] };
+}
+
+function specKeywords(spec: CardSpec | undefined): { name: string; value?: number }[] {
+  if (!spec) return [];
+  if (spec.type === 'unit' || spec.type === 'upgrade' || spec.type === 'token') {
+    return (spec.keywords ?? []).map(k => ({ name: k.name.toLowerCase(), value: k.value }));
+  }
+  return [];
+}
+
+function expireLastingEffects(state: GameState, kind: LastingEffectRec['expiry']): GameState {
+  const before = state.lastingEffects as LastingEffectRec[];
+  const after = before.filter(le => le.expiry !== kind);
+  if (after.length === before.length) return state;
+  return { ...state, lastingEffects: after };
+}
+
+/** Is this attack legal to even declare? (Sentinel restriction.) Returns an
+ *  error string, or null if legal. Used by callers that want to skip rather than
+ *  throw (the nested-attack effect). */
+export function attackIllegalReason(
+  state: GameState, pid: PlayerId, reg: CardRegistry,
+  attackerIid: string, defenderIid: string | 'base',
+): string | null {
+  const attackerFound = findCard(state, attackerIid);
+  if (!attackerFound) return `Attacker ${attackerIid} not found`;
+  if (attackerFound.loc.controller !== pid) return `${pid} does not control attacker`;
+  const attackerZone = attackerFound.loc.zone;
+  if (attackerZone !== 'ground_arena' && attackerZone !== 'space_arena') return `Attacker must be in an arena`;
+  const oppId = state.playerOrder.find(p => p !== pid);
+  if (!oppId) return `No opponent`;
+
+  const attackerHasSaboteur = hasEffectiveKeyword(state, reg, attackerFound.inst, pid, 'saboteur');
+  if (!attackerHasSaboteur) {
+    const oppArena = getZoneArr(state.players[oppId], attackerZone);
+    const sentinels = oppArena.filter(c => hasEffectiveKeyword(state, reg, c, oppId, 'sentinel'));
+    if (sentinels.length > 0) {
+      const sentinelIids = new Set(sentinels.map(c => c.iid));
+      if (defenderIid === 'base' || !sentinelIids.has(defenderIid)) {
+        return `Sentinel forces attack at a Sentinel unit`;
+      }
+    }
+  }
+  if (defenderIid !== 'base') {
+    const defenderFound = findCard(state, defenderIid);
+    if (!defenderFound) return `Defender ${defenderIid} not found`;
+    if (defenderFound.loc.controller === pid) return `Cannot attack friendly unit`;
+    if (defenderFound.loc.zone !== attackerZone) return `Defender must share attacker's arena`;
+  }
+  return null;
+}
+
+/** Resolve one attack (combat core). Assumes the caller has validated turn /
+ *  phase. Exhausts the attacker (no-op if already exhausted — the nested case).
+ *  Does NOT advance the turn or run state-based / triggers. */
+export function resolveAttack(
+  state: GameState, pid: PlayerId,
+  attackerIid: string, defenderIid: string | 'base',
+  reg: CardRegistry,
+  chooser?: Chooser,
+): { state: GameState; events: GameEvent[] } {
+  const attackerFound = findCard(state, attackerIid);
+  if (!attackerFound) throw new Error(`Attacker ${attackerIid} not found`);
+  const attackerZone = attackerFound.loc.zone;
+  if (attackerZone !== 'ground_arena' && attackerZone !== 'space_arena') {
+    throw new Error(`Attacker must be in an arena`);
+  }
+  const oppId = state.playerOrder.find(p => p !== pid)!;
+
+  let s = state;
+  const events: GameEvent[] = [];
+
+  s = exhaust(s, attackerIid).state;
+
+  // Raid: extra power while attacking.
+  const raidVal = effectiveKeywordValue(s, reg, attackerFound.inst, pid, 'raid') ?? 0;
+  const basePower = effectivePower(s, reg, attackerFound.inst, pid);
+  const attackerPower = basePower + raidVal;
+
+  events.push({ kind: 'ATTACK_DECLARED', attackerIid, defenderIid, defendingPlayer: oppId });
+
+  // Keyword onAttack hooks fire BEFORE combat damage per §v7 7.6.15.A.
+  for (const kw of specKeywords(reg.cards[attackerFound.inst.cardId])) {
+    const def = KEYWORDS[kw.name];
+    if (def?.onAttack) {
+      const here = findCard(s, attackerIid);
+      if (!here) continue;
+      const r = def.onAttack({ state: s, reg, inst: here.inst, owner: pid, value: kw.value });
+      s = r.state;
+      events.push(...r.events);
+    }
+  }
+  const attackerHasSaboteur = hasEffectiveKeyword(s, reg, attackerFound.inst, pid, 'saboteur');
+  if (attackerHasSaboteur && defenderIid !== 'base') {
+    const r = defeatDefenderShields(s, defenderIid);
+    s = r.state;
+    events.push(...r.events);
+  }
+
+  if (defenderIid === 'base') {
+    const dmg = dealDamageToBase(s, reg, oppId, attackerPower, { combat: true }, attackerIid, chooser);
+    s = dmg.state;
+    events.push(...dmg.events);
+    events.push({ kind: 'ATTACK_ENDED', attackerIid, defenderIid: 'base', damageDealt: attackerPower });
+    s = log(s, `${pid} attacks base for ${attackerPower}${raidVal ? ` (Raid ${raidVal})` : ''}.`, pid, attackerPower >= 5 ? 'critical' : 'info');
+  } else {
+    const defenderFound = findCard(s, defenderIid);
+    if (!defenderFound) throw new Error(`Defender ${defenderIid} not found`);
+    const defenderPower = effectivePower(s, reg, defenderFound.inst, oppId);
+    const defenderHpBefore = effectiveHp(s, reg, defenderFound.inst, oppId) - defenderFound.inst.damage;
+
+    const d1 = dealDamageToUnit(s, reg, defenderIid, attackerPower, { combat: true }, attackerIid, chooser);
+    s = d1.state;
+    events.push(...d1.events);
+    const d2 = dealDamageToUnit(s, reg, attackerIid, defenderPower, { combat: true }, defenderIid, chooser);
+    s = d2.state;
+    events.push(...d2.events);
+
+    const attackerHasOverwhelm = hasEffectiveKeyword(s, reg, attackerFound.inst, pid, 'overwhelm');
+    if (attackerHasOverwhelm) {
+      const shieldBlocked = d1.events.some(e => e.kind === 'DAMAGE_PREVENTED');
+      const excess = attackerPower - Math.max(0, defenderHpBefore);
+      if (!shieldBlocked && excess > 0 && defenderHpBefore <= attackerPower) {
+        const ow = dealDamageToBase(s, reg, oppId, excess, { combat: true }, attackerIid, chooser);
+        s = ow.state;
+        events.push(...ow.events);
+        s = log(s, `Overwhelm: ${excess} excess damage to base.`, pid);
+      }
+    }
+
+    events.push({ kind: 'ATTACK_ENDED', attackerIid, defenderIid, damageDealt: attackerPower });
+    s = log(s, `${pid} attacks ${defenderIid} (${attackerPower} vs ${defenderPower}).`, pid);
+  }
+
+  s = expireLastingEffects(s, 'end_of_attack');
+  return { state: s, events };
+}

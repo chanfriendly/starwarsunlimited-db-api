@@ -125,6 +125,19 @@ export function parseEffectClause(raw: string): Effect | null {
     return { effect: 'ready', target: { self: true } };
   }
 
+  // Multi-attack (§ sequential attacks). "This unit attacks again." (1 more),
+  // "This unit attacks twice." (2 total), "This unit attacks N times."
+  // All map to the source unit making sequential nested attacks.
+  if (/^This unit attacks again\.?$/i.test(t)) {
+    return { effect: 'attack', attacker: { self: true }, count: 1 };
+  }
+  if (/^This unit attacks twice\.?$/i.test(t)) {
+    return { effect: 'attack', attacker: { self: true }, count: 2 };
+  }
+  if ((m = t.match(/^This unit attacks (\d+) times\.?$/i))) {
+    return { effect: 'attack', attacker: { self: true }, count: parseInt(m[1], 10) };
+  }
+
   // if_did conditional compounds (NOT the Force form, matched above). The `do`
   // half is often "You may …" → optional. ALL referenced halves must template,
   // else the clause falls through and stays residual (no half-match misfire).

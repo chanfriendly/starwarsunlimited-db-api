@@ -47,6 +47,11 @@ Not affiliated with Fantasy Flight Games, Asmodee, or Lucasfilm.
 - Draws a random 6-card opening hand from any saved deck
 - Mulligan mode with editable opponent leader field for note-taking
 
+### Rules Engine (`/playtest`)
+- A from-scratch **Twin Suns rules engine** that actually plays the game — deploy leaders, play units/events/upgrades, attack, resolve abilities, win
+- Two engines coexist: **v1** (`src/lib/game-engine/`, powers the older `/game` UI) and **v2** (`src/lib/engine-v2/`, the active rewrite) — see [Rules engine](#rules-engine-engine-v2) below
+- Load a real saved deck or a fixture deck, play Human-vs-AI / AI-vs-AI / Human-vs-Human in the browser at `/playtest`
+
 ---
 
 ## Design
@@ -73,6 +78,42 @@ No component libraries. All UI is hand-rolled with `var(--ts-*)` tokens, with ze
 | Card data | Official SWU API, rebuilt weekly via GitHub Actions |
 
 **Key architecture pattern:** Next.js API routes (`src/app/api/**/route.ts`) are thin server-side proxies. The browser never calls the FastAPI backend directly — all requests go through Next.js first, which forwards them with the auth token. Two API URL env vars exist for this reason: `NEXT_PUBLIC_API_URL` (browser → Next.js) and `INTERNAL_API_URL` (Next.js server → FastAPI).
+
+---
+
+## Rules engine (engine-v2)
+
+`frontend/src/lib/engine-v2/` is a pure-functional Twin Suns rules engine — no React imports, deterministic, fully unit-testable. It's the active rewrite of the v1 engine (`src/lib/game-engine/`, still powering the legacy `/game` route). Design rationale and the full AST spec live in [ENGINE_DESIGN.md](ENGINE_DESIGN.md); current state and history are in [PROGRESS.md](PROGRESS.md) / [CHANGELOG.md](CHANGELOG.md).
+
+**The core idea: cards are data, not code.** Each card's rules text compiles to a small declarative **AST** of ~30 effect primitives (damage, heal, draw, give, create_token, capture, move, search, return_to_hand, return_from_discard, take_control, attack, use_force, if_did, choose_one, …) walked by one interpreter. New cards are JSON, not TypeScript — the path to "zero code per set."
+
+```
+Card rules text
+  └─ engine-v2-data/match.ts   — Tier-1 deterministic template matcher (text → AST)
+       └─ spec/validate.ts     — gate: AST checked against the closed primitive vocab
+            └─ engine-v2/      — the engine proper:
+                 ├─ spec/ast.ts        — the card-spec AST (effects, selectors, predicates, modifiers, abilities)
+                 ├─ runtime/interpret.ts — the ~one interpreter that walks Effect ASTs
+                 ├─ runtime/{attack,damage,cost,modifiers,triggers,selectors,predicates,…}.ts
+                 ├─ runtime/state_based.ts — state-based actions (defeats, win check) to fixpoint
+                 ├─ runtime/async_step.ts  — replay-based pause/resume for browser player input
+                 └─ reducer.ts  — step(state, action) → next state (the public entry point)
+```
+
+**Two engines, don't mix them.** v1 (`game-engine/`) is frozen-but-live; v2 (`engine-v2/`) is the target. v2 has a clean boundary (no React), drives a headless CLI (`npm run play-cli`) and the browser UAT route `/playtest`. Real card data flows in via `engine-v2-data/translate.ts` (DB card → v2 spec) + the matcher.
+
+**Verification (there are no meaningful backend tests — the engine is where the test discipline lives):**
+
+```bash
+cd frontend
+npm run scenarios            # engine unit scenarios (105+), the primary correctness net
+npm run translate-scenarios  # matcher + real-card translation scenarios
+npm run validate-scenarios   # spec-validator scenarios (every fixture validates clean)
+npm run play-cli -- --ai both  # full AI-vs-AI game to completion (integration smoke)
+npx tsc --noEmit             # type safety = the secondary correctness check
+```
+
+**Correctness oracle:** the official SWU Comprehensive Rules (public PDF). Rules are verified against the source, never authored from memory — see the standing note in [CLAUDE.md](CLAUDE.md).
 
 ---
 

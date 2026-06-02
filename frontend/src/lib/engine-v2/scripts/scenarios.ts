@@ -658,6 +658,36 @@ scenario('cost reduction: PLAY_CARD charges the reduced cost (end-to-end)', () =
   if (!r.next.players.p1.discard.some(c => c.iid === ev.iid)) throw new Error('event should resolve to discard');
 });
 
+scenario('attack effect: two sequential attacks each run combat (damage accumulates both ways)', () => {
+  // Both units are 1/6 (W8_017), so two 1-power exchanges leave each at 2 damage
+  // and both survive (6 hp). Direct applyEffect = no state-based pass mid-loop,
+  // so we read raw accumulated damage from the two sequential combats.
+  const attacker: CardInstance = { ...mkInst('W8_017'), iid: 'atk' };   // 1/6
+  const wall: CardInstance = { ...mkInst('W8_017'), iid: 'wall' };       // 1/6
+  const state = emptyState({ groundP1: [attacker], groundP2: [wall], deckP2: [mkInst('W2_009'), mkInst('W2_009')], active: 'p1' });
+  const chooser = scriptedChooser([
+    { kind: 'option', value: 'wall' },
+    { kind: 'option', value: 'wall' },
+  ]);
+  const r = applyEffect({ state, reg, sourceIid: 'atk', sourcePlayer: 'p1', chooser },
+    { effect: 'attack', attacker: { self: true }, count: 2 });
+  const defAfter = r.state.players.p2.groundArena.find(c => c.iid === 'wall');
+  const atkAfter = r.state.players.p1.groundArena.find(c => c.iid === 'atk');
+  if (!defAfter || !atkAfter) throw new Error('both 6-hp units should survive 2 damage');
+  assertEq(defAfter.damage, 2, 'defender took 1+1 = 2 over two attacks');
+  assertEq(atkAfter.damage, 2, 'attacker took 1 back per attack = 2');
+});
+
+scenario('attack effect: stops early when no legal target remains', () => {
+  // count 3 but only the base is attackable (no enemy units). Each attack hits
+  // the base for 3 → 9 total; it should make all 3 (base is always legal).
+  const attacker = mkInst('W1_001');                          // 3 power
+  const state = emptyState({ groundP1: [attacker], groundP2: [], active: 'p1' });
+  const r = applyEffect({ state, reg, sourceIid: attacker.iid, sourcePlayer: 'p1', chooser: scriptedChooser([]) },
+    { effect: 'attack', attacker: { self: true }, count: 3 });
+  assertEq(r.state.players.p2.base.damage, 9, 'three base attacks = 9 (default chooser picks base)');
+});
+
 scenario('Smuggle: resource_zone constant buffs friendlies', () => {
   const cache = mkInst('W4_005');                         // active_in_zone='resource_zone'; +1 power
   const ally = mkInst('W2_009');                          // 2/2 clone

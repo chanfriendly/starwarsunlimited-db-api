@@ -4,6 +4,22 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-06-01: Multi-attack — `attack` effect + combat-core extraction (task #58, session 60)
+
+**The last of the meatier residuals, and the most invasive change.** Cards like "This unit attacks twice" / "attacks again" now make the source unit perform additional **sequential** attacks. Verified against the Comprehensive Rules: §"Only one unit may attack at a time… If an ability triggers multiple attacks, resolve them sequentially" and §"only ready units may perform an attack, unless otherwise specified" — so multi-attack is N separate one-target attacks, and a nested ability-attack may be made by an already-exhausted attacker.
+
+**Combat-core extraction (the structural part).** The combat resolution (Declare → deal combat damage → Complete, with Raid/Saboteur/Overwhelm/Sentinel handling) was embedded in `reducer.applyAttack` with turn-advancement baked in. Extracted it into a new `runtime/attack.ts`:
+- `resolveAttack(state, pid, attackerIid, defenderIid, reg, chooser)` — the pure combat core; exhausts the attacker (no-op if already exhausted), runs combat, expires `end_of_attack` effects. Does NOT advance the turn or run state-based/triggers (the caller's `settle()` does).
+- `attackIllegalReason(...)` — Sentinel / arena / control legality as a string-or-null, so the nested effect can *skip* illegal targets rather than throw.
+
+`reducer.applyAttack` is now: validate (active-player, phase, ready, legality) → `resolveAttack` → `advanceToNextTurn`. The new `attack` effect calls `resolveAttack` directly. No reducer↔interpret import cycle: both import `attack.ts`, which imports neither.
+
+**The effect.** `AttackEffect { effect:'attack', attacker?: Selector, count?: number }` — `attacker` defaults to `{ self: true }`; `count` (default 1) is how many sequential attacks. Each attack picks a defender via the chooser from eligible enemy units in the attacker's arena (Sentinel-honored) plus the opponent's base; stops early if no legal target or the attacker has left play. Wired through AST + `isAttack`-free union, interpreter (`applyAttackEffect`), validator (`attack` in `EFFECT_KINDS` + case), and matcher (`parseEffectClause`: "attacks again" → 1, "attacks twice" → 2, "attacks N times" → N).
+
+Fixture W8_019 (Relentless Vanguard — When Played: attacks twice). Two engine scenarios: two sequential 1-power exchanges accumulate 2 damage on each unit (both survive — proves each attack is its own combat with retaliation); count-3 vs an empty board makes 3 base attacks = 9 (default chooser picks base, confirms early-stop logic isn't over-eager). One matcher scenario (again/twice/N times). **Regression-critical:** the extraction touched the path every attack in the game uses — verified `npm run play-cli -- --ai both` still plays to a winner and all suites pass.
+
+Engine **105** / translate **59** / validate 16, tsc clean, play-cli completes.
+
 ### 2026-06-01: Cost reduction — `cost` ability + `effectiveCost` (task #58, session 59)
 
 **First dynamic-cost mechanic.** Cards like "This event costs 1 less to play for each friendly leader unit you control" now reduce their play cost. Modeled as a new `cost`-type ability (`{ type:'cost', amount, per?, while? }`) — not a firing ability but a static self-modifier the cost computation scans for. `amount` is a flat delta (negative = cheaper); `per` (a `CostCount`: `friendly_leader_units` | `friendly_units` | `friendly_resources`) multiplies it by a live board count.

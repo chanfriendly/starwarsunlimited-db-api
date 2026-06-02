@@ -27,6 +27,7 @@ import { isTriggered, type ActionAbility, type Ability, type TriggeredAbility } 
 import { resolveSelector } from './runtime/selectors';
 import { resolvePlayer } from './runtime/predicates';
 import { effectiveCost } from './runtime/cost';
+import { resolveAttack, attackIllegalReason } from './runtime/attack';
 
 function settle(state: GameState, reg: CardRegistry, eventsIn: GameEvent[], chooser?: Chooser): StepResult {
   const stepped: GameState = { ...state, step: state.step + 1 };
@@ -538,106 +539,16 @@ function applyAttack(
   const attackerFound = findCard(state, attackerIid);
   if (!attackerFound) throw new Error(`Attacker ${attackerIid} not found`);
   if (attackerFound.loc.controller !== pid) throw new Error(`${pid} does not control attacker`);
+  // The player ATTACK action requires a ready attacker (a nested ability-attack
+  // is the "unless otherwise specified" exception and goes through resolveAttack
+  // directly without this gate).
   if (attackerFound.inst.exhausted) throw new Error(`Attacker is exhausted`);
 
-  const attackerZone = attackerFound.loc.zone;
-  if (attackerZone !== 'ground_arena' && attackerZone !== 'space_arena') {
-    throw new Error(`Attacker must be in an arena`);
-  }
+  const reason = attackIllegalReason(state, pid, reg, attackerIid, defenderIid);
+  if (reason) throw new Error(reason);
 
-  const oppId = opponentOf(state, pid);
-
-  // Sentinel validation (§v7 7.5.11). If any enemy unit in this arena has
-  // Sentinel and the attacker lacks Saboteur, attacker must target a Sentinel.
-  const attackerHasSaboteur = hasEffectiveKeyword(state, reg, attackerFound.inst, pid, 'saboteur');
-  if (!attackerHasSaboteur) {
-    const oppArena = getZoneArr(state.players[oppId], attackerZone);
-    const sentinels = oppArena.filter(c => hasEffectiveKeyword(state, reg, c, oppId, 'sentinel'));
-    if (sentinels.length > 0) {
-      const sentinelIids = new Set(sentinels.map(c => c.iid));
-      if (defenderIid === 'base' || !sentinelIids.has(defenderIid)) {
-        throw new Error(`Sentinel forces attack at a Sentinel unit`);
-      }
-    }
-  }
-
-  let s = state;
-  const events: GameEvent[] = [];
-
-  s = exhaust(s, attackerIid).state;
-
-  // Raid: extra power while attacking.
-  const raidVal = effectiveKeywordValue(s, reg, attackerFound.inst, pid, 'raid') ?? 0;
-  const basePower = effectivePower(s, reg, attackerFound.inst, pid);
-  const attackerPower = basePower + raidVal;
-
-  events.push({ kind: 'ATTACK_DECLARED', attackerIid, defenderIid, defendingPlayer: oppId });
-
-  // Keyword onAttack hooks fire BEFORE combat damage per §v7 7.6.15.A.
-  // Restore heals base; Saboteur defeats defender shields (if defender is a unit).
-  for (const kw of specKeywords(reg.cards[attackerFound.inst.cardId])) {
-    const def = KEYWORDS[kw.name];
-    if (def?.onAttack) {
-      const here = findCard(s, attackerIid);
-      if (!here) continue;
-      const r = def.onAttack({ state: s, reg, inst: here.inst, owner: pid, value: kw.value });
-      s = r.state;
-      events.push(...r.events);
-    }
-  }
-  if (attackerHasSaboteur && defenderIid !== 'base') {
-    const r = defeatDefenderShields(s, defenderIid);
-    s = r.state;
-    events.push(...r.events);
-  }
-
-  // Combat damage.
-  if (defenderIid === 'base') {
-    const dmg = dealDamageToBase(s, reg, oppId, attackerPower, { combat: true }, attackerIid, chooser);
-    s = dmg.state;
-    events.push(...dmg.events);
-    events.push({ kind: 'ATTACK_ENDED', attackerIid, defenderIid: 'base', damageDealt: attackerPower });
-    s = log(s, `${pid} attacks base for ${attackerPower}${raidVal ? ` (Raid ${raidVal})` : ''}.`, pid, attackerPower >= 5 ? 'critical' : 'info');
-  } else {
-    const defenderFound = findCard(s, defenderIid);
-    if (!defenderFound) throw new Error(`Defender ${defenderIid} not found`);
-    if (defenderFound.loc.controller === pid) throw new Error(`Cannot attack friendly unit`);
-    if (defenderFound.loc.zone !== attackerZone) throw new Error(`Defender must share attacker's arena`);
-    const defenderPower = effectivePower(s, reg, defenderFound.inst, oppId);
-
-    // Overwhelm: compute defender's remaining HP before damage so excess
-    // can route to base if defender is defeated by combat damage.
-    const defenderHpBefore = effectiveHp(s, reg, defenderFound.inst, oppId) - defenderFound.inst.damage;
-
-    const d1 = dealDamageToUnit(s, reg, defenderIid, attackerPower, { combat: true }, attackerIid, chooser);
-    s = d1.state;
-    events.push(...d1.events);
-    const d2 = dealDamageToUnit(s, reg, attackerIid, defenderPower, { combat: true }, defenderIid, chooser);
-    s = d2.state;
-    events.push(...d2.events);
-
-    // Overwhelm excess to base — only if attack damage actually landed (no shield-block)
-    // and the defender will be defeated by it.
-    const attackerHasOverwhelm = hasEffectiveKeyword(s, reg, attackerFound.inst, pid, 'overwhelm');
-    if (attackerHasOverwhelm) {
-      const shieldBlocked = d1.events.some(e => e.kind === 'DAMAGE_PREVENTED');
-      const excess = attackerPower - Math.max(0, defenderHpBefore);
-      if (!shieldBlocked && excess > 0 && defenderHpBefore <= attackerPower) {
-        const ow = dealDamageToBase(s, reg, oppId, excess, { combat: true }, attackerIid, chooser);
-        s = ow.state;
-        events.push(...ow.events);
-        s = log(s, `Overwhelm: ${excess} excess damage to base.`, pid);
-      }
-    }
-
-    events.push({ kind: 'ATTACK_ENDED', attackerIid, defenderIid, damageDealt: attackerPower });
-    s = log(s, `${pid} attacks ${defenderIid} (${attackerPower} vs ${defenderPower}).`, pid);
-  }
-
-  // Expire end_of_attack lasting effects.
-  s = expireLastingEffects(s, 'end_of_attack');
-
-  return advanceToNextTurn(s, pid, reg, events, undefined, chooser);
+  const r = resolveAttack(state, pid, attackerIid, defenderIid, reg, chooser);
+  return advanceToNextTurn(r.state, pid, reg, r.events, undefined, chooser);
 }
 
 function applyTakeCounter(

@@ -22,6 +22,7 @@ import { defaultChooser } from './chooser';
 import { dealDamageToBase, dealDamageToUnit } from './damage';
 import { effectivePower } from './modifiers';
 import { shuffleDeterministic } from '../util/rng';
+import { resolveAttack, attackIllegalReason } from './attack';
 
 export interface InterpCtx extends EvalCtx {}
 
@@ -98,6 +99,7 @@ export function applyEffect(ctx: InterpCtx, effect: Effect): InterpResult {
     case 'take_control':     return applyTakeControl(ctx, effect);
     case 'use_force':        return applyUseForce(ctx, effect);
     case 'gain_force':       return applyGainForce(ctx, effect);
+    case 'attack':           return applyAttackEffect(ctx, effect);
     case 'power_damage_from_each': return applyPowerDamageFromEach(ctx, effect);
   }
 }
@@ -125,6 +127,52 @@ function applyPowerDamageFromEach(ctx: InterpCtx, e: Extract<Effect, { effect: '
     const pow = effectivePower(s, ctx.reg, f.inst, f.loc.controller);
     if (pow <= 0) continue;
     const r = applyDamageToTarget(s, ctx.reg, targetUnit, pow, false, false, false, src.iid, ctx.chooser);
+    s = r.state;
+    events.push(...r.events);
+  }
+  return { state: s, events };
+}
+
+function applyAttackEffect(ctx: InterpCtx, e: Extract<Effect, { effect: 'attack' }>): InterpResult {
+  // Nested attack(s) from an ability (§7.6.12). `count` sequential attacks by the
+  // resolved attacker; each picks a legal defender (enemy unit in the attacker's
+  // arena, or the opponent's base) via the chooser. Skips an attack with no legal
+  // target. A nested attack ignores the ready requirement (§ "unless otherwise
+  // specified") — resolveAttack exhausts but doesn't gate on exhausted.
+  const attackerSel = e.attacker ?? { self: true };
+  const resolved = resolveSelector(ctx, attackerSel).find(t => t.kind === 'unit');
+  if (!resolved || resolved.kind !== 'unit') return { state: ctx.state, events: [] };
+  const attackerIid = resolved.iid;
+  const pid = resolved.controller;
+  const count = e.count ?? 1;
+  const chooser = ctx.chooser ?? defaultChooser;
+
+  let s = ctx.state;
+  const events: GameEvent[] = [];
+  for (let i = 0; i < count; i++) {
+    const af = findCard(s, attackerIid);
+    if (!af) break; // attacker left play (e.g. defeated by a previous attack's combat)
+    const oppId = s.playerOrder.find(p => p !== pid);
+    if (!oppId) break;
+    const arena = af.loc.zone;
+    if (arena !== 'ground_arena' && arena !== 'space_arena') break;
+
+    // Eligible defenders: enemy units in the attacker's arena that the attack is
+    // legal against (honors Sentinel via attackIllegalReason), plus the base.
+    const enemyUnits = getZoneArr(s.players[oppId], arena)
+      .filter(c => attackIllegalReason(s, pid, ctx.reg, attackerIid, c.iid) === null)
+      .map(c => c.iid);
+    const baseLegal = attackIllegalReason(s, pid, ctx.reg, attackerIid, 'base') === null;
+    const options: Array<{ label: string; value: string }> = [
+      ...enemyUnits.map(iid => ({ label: ctx.reg.cards[findCard(s, iid)!.inst.cardId]?.name ?? iid, value: iid })),
+      ...(baseLegal ? [{ label: 'base', value: 'base' }] : []),
+    ];
+    if (options.length === 0) break; // no legal target → stop
+
+    const result = chooser({ kind: 'choose_one', prompt: 'Choose what to attack', options, player: pid, canPass: false });
+    const defenderIid: string = result.kind === 'option' ? result.value : options[0].value;
+
+    const r = resolveAttack(s, pid, attackerIid, defenderIid, ctx.reg, chooser);
     s = r.state;
     events.push(...r.events);
   }
