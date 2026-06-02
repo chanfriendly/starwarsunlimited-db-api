@@ -18,7 +18,7 @@
     "fuzz": "tsx src/lib/engine-v2/scripts/fuzz.ts"
   },
   "dependencies": {
-    "@radix-ui/react-avatar": "^1.1.3",
+    "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-checkbox": "^1.3.2",
     "@radix-ui/react-dialog": "^1.1.14",
     "@radix-ui/react-icons": "^1.3.2",
