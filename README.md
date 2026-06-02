@@ -106,10 +106,11 @@ Card rules text
 
 ```bash
 cd frontend
-npm run scenarios            # engine unit scenarios (105+), the primary correctness net
+npm run scenarios            # engine unit scenarios (115+), the primary correctness net
 npm run translate-scenarios  # matcher + real-card translation scenarios
 npm run validate-scenarios   # spec-validator scenarios (every fixture validates clean)
 npm run play-cli -- --ai both  # full AI-vs-AI game to completion (integration smoke)
+npm run fuzz                 # property test: 200 seeded-random games, no throws/hangs, all terminate
 npx tsc --noEmit             # type safety = the secondary correctness check
 ```
 

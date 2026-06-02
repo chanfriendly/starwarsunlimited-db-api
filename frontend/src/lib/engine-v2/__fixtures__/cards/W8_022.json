@@ -1,0 +1,12 @@
+{
+  "id": "W8_022",
+  "name": "Gritty Defender",
+  "type": "unit",
+  "cost": 2,
+  "aspects": ["aggression"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 2,
+  "traits": ["creature"],
+  "keywords": [{ "name": "grit" }]
+}

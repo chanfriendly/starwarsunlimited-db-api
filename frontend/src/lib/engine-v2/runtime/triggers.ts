@@ -20,6 +20,14 @@ import { isTriggered } from '../spec/ast';
 import { getZoneArr } from '../state/zones';
 import { evalTriggerPredicate, type EvalCtx } from './predicates';
 import { applyEffect } from './interpret';
+import { defaultChooser } from './chooser';
+
+/** Human-readable label for a pending trigger, for the ordering prompt. */
+function triggerLabel(state: GameState, reg: CardRegistry, t: TriggerInstance): string {
+  const found = locateSource(state, t.sourceIid);
+  const name = found ? (reg.cards[found.inst.cardId]?.name ?? t.sourceIid) : t.sourceIid;
+  return `${name}'s triggered ability`;
+}
 
 const EVENT_KIND_TO_TRIGGER: Record<string, TriggerCondition> = {
   CARD_PLAYED:     'event.card_played',
@@ -229,15 +237,39 @@ export function drainTriggers(state: GameState, reg: CardRegistry, chooser?: imp
   for (let guard = 0; guard < 256; guard++) {
     if (s.pendingTriggers.length === 0) break;
 
-    // Active-player-first ordering: pull the first trigger controlled by the
-    // active player, else the first trigger.
+    // Trigger ordering (§3016 / §3018):
+    //   • A player resolving multiple of their OWN simultaneous triggers chooses
+    //     the order among them (§3016).
+    //   • When both players have triggers, the active player's batch resolves
+    //     first (§3018 — we take active-first as the default; the rare option for
+    //     the active player to let the opponent go first is not surfaced).
+    // The ELIGIBLE set is the active player's pending triggers if any, else the
+    // opponent's. The owning player picks which of their eligible triggers goes
+    // next. defaultChooser picks leftmost (= insertion order), so this is a
+    // behavior-preserving generalization: only a scripted/human chooser reorders,
+    // and only when a player actually has ≥2 simultaneous triggers.
     const ti = s.pendingTriggers as TriggerInstance[];
-    let idx = ti.findIndex(t => t.sourceController === s.activePlayer);
-    if (idx === -1) idx = 0;
-    const trigger = ti[idx];
+    const activeOwn = ti.filter(t => t.sourceController === s.activePlayer);
+    const eligible = activeOwn.length > 0 ? activeOwn : ti;
+    const orderingPlayer = eligible[0].sourceController;
+
+    let trigger: TriggerInstance;
+    if (eligible.length === 1) {
+      trigger = eligible[0];
+    } else {
+      const pick = (chooser ?? defaultChooser)({
+        kind: 'choose_one',
+        prompt: 'Choose which triggered ability to resolve next',
+        options: eligible.map(t => ({ label: triggerLabel(s, reg, t), value: t.id })),
+        player: orderingPlayer,
+        canPass: false,
+      });
+      trigger = (pick.kind === 'option' ? eligible.find(t => t.id === pick.value) : undefined) ?? eligible[0];
+    }
 
     // Remove it from the queue before resolving (so a nested trigger of the
     // same kind isn't re-resolved infinitely).
+    const idx = ti.indexOf(trigger);
     const remaining = [...ti.slice(0, idx), ...ti.slice(idx + 1)];
     s = { ...s, pendingTriggers: remaining };
 

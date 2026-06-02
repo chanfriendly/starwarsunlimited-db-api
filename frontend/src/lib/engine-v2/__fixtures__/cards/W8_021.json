@@ -1,0 +1,13 @@
+{
+  "id": "W8_021",
+  "name": "Singular Hero",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["heroism"],
+  "arena": "ground",
+  "power": 3,
+  "hp": 4,
+  "traits": ["rebel"],
+  "unique": true,
+  "keywords": []
+}

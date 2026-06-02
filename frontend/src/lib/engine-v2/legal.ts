@@ -134,15 +134,17 @@ export function getLegalActions(state: GameState, reg: CardRegistry, pid: Player
     pushActionAbilities(state, reg, pid, abs, iid, leader.exhausted, readyResourceCount, actions, { leaderIndex: idx });
   });
 
-  // TAKE_COUNTER (initiative) — once per round game-wide. Per §v7 7.4 there
-  // is a single initiative counter passed between players; once any player
-  // takes it this round, no one else can. Previously the check only looked
-  // at this player's own `countersHeld`, which let the second player also
-  // take initiative and produced a soft-hang when both seats had
-  // hasTakenCounterThisRound=true (bug #2 from session-45 UAT).
-  const anyoneTookCounterThisRound = state.playerOrder.some(o => state.players[o].hasTakenCounterThisRound);
-  if (!anyoneTookCounterThisRound && !p.countersHeld.includes('initiative')) {
-    actions.push({ kind: 'TAKE_COUNTER', player: pid, counter: 'initiative' });
+  // TAKE_COUNTER (Twin Suns "Take an Available Counter"). Three counters —
+  // initiative, blast, plan — each takeable once per round game-wide. A player
+  // takes at most one per round (and is then done for the round). Offer every
+  // counter not yet taken this round, provided this player hasn't taken one.
+  if (!p.hasTakenCounterThisRound) {
+    const taken = state.countersTakenThisRound ?? [];
+    for (const counter of ['initiative', 'blast', 'plan'] as const) {
+      if (!taken.includes(counter)) {
+        actions.push({ kind: 'TAKE_COUNTER', player: pid, counter });
+      }
+    }
   }
 
   // PASS — always legal

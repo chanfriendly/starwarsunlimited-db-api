@@ -142,6 +142,10 @@ export function translateCard(card: Card): TranslateResult {
     cost: costOf(card),
     aspects: normalizeAspects(card),
     traits: normalizeTraits(card),
+    // Uniqueness (rule-of-one). The DB column `is_unique` flows through to the
+    // frontend Card; map it onto the spec so state_based.ts enforces it for real
+    // translated decks. Absent/false → not unique.
+    unique: Boolean(card.is_unique),
   };
 
   // Tier-1 template matcher: rules text → ability AST. Returns [] for cards the

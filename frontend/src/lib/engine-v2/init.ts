@@ -120,6 +120,7 @@ export function initGame(cfg: GameConfig, reg: CardRegistry): GameState {
     lastingEffects: [],
     delayedEffects: [],
     pendingTriggers: [],
+    countersTakenThisRound: [],
     log: [{ round: 0, message: `Game started. ${first} has initiative.`, kind: 'critical' }],
     consecutivePasses: 0,
     _nextIid: counter.iid,

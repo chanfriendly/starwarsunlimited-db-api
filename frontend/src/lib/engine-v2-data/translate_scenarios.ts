@@ -66,6 +66,20 @@ scenario('Unit: stats, arena, aspects, traits map correctly', () => {
   assertEq(r.spec.abilities, [], 'abilities empty (L4 deferred)');
 });
 
+scenario('Unit: is_unique → spec.unique (rule-of-one wiring)', () => {
+  const u = translateCard(mkCard({ id: 'uq', name: 'Han Solo', type: 'Unit', attack: 5, health: 6, arenas: ['Ground'], is_unique: true }));
+  if (!u.spec || u.spec.type !== 'unit') throw new Error('not a unit');
+  assertEq(u.spec.unique, true, 'unique mapped from is_unique');
+  // Non-unique (flag absent) → false, not undefined.
+  const n = translateCard(mkCard({ id: 'nq', name: 'Trooper', type: 'Unit', attack: 2, health: 1, arenas: ['Ground'] }));
+  if (!n.spec || n.spec.type !== 'unit') throw new Error('not a unit');
+  assertEq(n.spec.unique, false, 'absent is_unique → false');
+  // Leaders can be unique too.
+  const l = translateCard(mkCard({ id: 'lq', name: 'Leia', type: 'Leader', arenas: ['Ground'], attack: 3, health: 6, is_unique: true }));
+  if (!l.spec || l.spec.type !== 'leader') throw new Error('not a leader');
+  assertEq(l.spec.unique, true, 'leader unique mapped');
+});
+
 scenario('Keyword without value: Grit/Sentinel translate name-only', () => {
   const kws = parseKeywords(mkCard({ name: 'X', keywords: ['Grit', 'Sentinel'], text: 'Grit. Sentinel.' }));
   assertEq(kws, [{ name: 'grit' }, { name: 'sentinel' }], 'keywords');

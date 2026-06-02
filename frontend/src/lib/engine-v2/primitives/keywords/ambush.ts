@@ -1,26 +1,18 @@
-// Ambush — §v7 7.5.5. "When Played/When Deployed/When Created: if there is
-// an enemy unit this unit can attack, you may ready it and attack."
+// Ambush — §v7 7.5.5. "When Played/Deployed/Created: if there is an enemy unit
+// this unit can attack, you may ready it and attack that enemy unit."
 //
-// Week 2 simplification: we ready the unit on play and rely on the demo's
-// turn loop to use the readied unit (no interrupt attack inline). Same gap v1
-// flagged; doesn't break the loop, costs the player initiative they wouldn't
-// have spent.
+// The behavior (ready + nested attack, with the "may" choice and target pick)
+// needs chooser access, which the keyword lifecycle hooks don't have. So Ambush
+// is resolved by `resolveAmbush` in runtime/attack.ts, called from the play /
+// deploy / create sites in the reducer + tokens primitive (which DO have the
+// chooser). This def intentionally has NO onPlay/onDeploy/onCreate hook — its
+// only job is to make `hasEffectiveKeyword(..., 'ambush')` return true (incl.
+// when Ambush is granted by another card, e.g. Admiral Piett) and to count as a
+// recognized keyword. Adding a ready-only hook here would double-ready and, worse,
+// ready a unit that then never attacks (the old bug).
 
-import { mapInstance } from '../../state/zones';
 import type { KeywordDef } from './types';
 
 export const Ambush: KeywordDef = {
   name: 'ambush',
-  onPlay: ({ state, inst }) => ({
-    state: mapInstance(state, inst.iid, c => ({ ...c, exhausted: false })),
-    events: [{ kind: 'READIED', iid: inst.iid }],
-  }),
-  onDeploy: ({ state, inst }) => ({
-    state: mapInstance(state, inst.iid, c => ({ ...c, exhausted: false })),
-    events: [{ kind: 'READIED', iid: inst.iid }],
-  }),
-  onCreate: ({ state, inst }) => ({
-    state: mapInstance(state, inst.iid, c => ({ ...c, exhausted: false })),
-    events: [{ kind: 'READIED', iid: inst.iid }],
-  }),
 };

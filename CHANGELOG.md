@@ -4,6 +4,73 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-06-01: Rules-source location documented + session-62 close (docs)
+
+**Established a canonical home for the rules oracle.** The engine is verified against the official SWU rules, but no rules file was committed — sessions re-downloaded a PDF into `/tmp` and (once) used a stale v1.1 copy, causing the Twin Suns counter mistake. Created `docs/rules/` with a README explaining what to commit (current Comprehensive Rules PDF + Twin Suns format insert from `https://starwarsunlimited.com/rules`) and why. Strengthened the CLAUDE.md "verify against the source" note with: the `docs/rules/` source-of-truth pointer, an explicit "don't rely on a re-downloaded /tmp PDF" warning, and a **"Twin Suns ≠ 1v1 SWU"** caveat (counters being the headline difference). PROGRESS.md "Next steps" now leads with (1) Christian's real-deck playtest and (2) committing the rules.
+
+No engine change. Docs only.
+
+### 2026-06-01: Trigger ordering + counter cleanup (table-correctness, session 61 cont.)
+
+**Player-chosen trigger ordering (§3016 / §3018).** `drainTriggers` resolved simultaneous triggered abilities in pure insertion order. The rules: when a player has multiple of their own triggers at once they choose the order (§3016); when both players do, the active player's batch goes first (§3018). New drain logic: eligible set = active player's pending triggers if any else the opponent's; the owning player picks the next one via the chooser. Crucially this only prompts when ≥2 are eligible and `defaultChooser` picks leftmost — so it's behavior-preserving (every prior scenario passes unchanged), and only a scripted/human chooser actually reorders. The active player's rarer §3018 right to let the opponent resolve first is not yet surfaced (active-first default).
+
+Fixture W8_020 (Opportunist Scout — draw on enemy defeat) added so an enemy defeat fires two distinguishable simultaneous p1 triggers alongside W8_006 (damage on enemy defeat). Two scenarios: a label-driven chooser puts the draw before the base damage; the default chooser preserves insertion order (regression guard).
+
+**Counter vocab "cleanup" — REVERTED, then implemented properly (see next entry).** I briefly removed `'blast'`/`'plan'` as "invented dead vocab," reasoning from the 1v1 Comprehensive Rules. That was a rules-from-memory error: **Twin Suns is a different format** with three real counters. Christian corrected it with the official insert. Reverted and built for real — see below.
+
+Engine **109** / translate 59 / validate 16, tsc clean, play-cli completes.
+
+### 2026-06-01: `spec.unique` wired for real decks + keyword-exactness sweep (session 62)
+
+**#1 — uniqueness now applies to real translated decks.** Session 61 built the rule-of-one in `state_based.ts`, but it only fired for hand-authored fixtures because `translate.ts` never populated `spec.unique`. Traced the data: the DB has an `is_unique` column (`db_setup.py`/`models.py`), and both the grouped-cards path (`card_to_dict`, all columns) and the deck-detail path (`me.py`, `SELECT *`) already serialize it — so the flag reaches the frontend. The only gaps were the TS type and the mapping. Added `is_unique?: boolean` to `Card` (`api.ts`) and `unique: Boolean(card.is_unique)` to `translateCard`'s `common` object (flows into unit/event/upgrade/leader; the base spec is built separately and has no `unique`). Translate scenario: unit `is_unique:true` → `spec.unique:true`; absent → `false`; leader unique mapped.
+
+**#3 — keyword-exactness sweep vs the Comprehensive Rules PDF.** Audited all 8 implemented keywords (ambush, grit, overwhelm, raid, restore, saboteur, sentinel, shielded) against the rules text. **All 8 are implemented correctly** — what was missing was *test coverage* of the subtle clauses, now added:
+- **Grit §7.5.6c** — in simultaneous combat, the Grit unit does not gain power from the damage it takes during that combat. `runtime/attack.ts` snapshots both combat powers before any damage lands, so this already held; added the rules' canonical 2/2-Grit-vs-1/3 example as a regression scenario and rewrote grit.ts's comment (it had wrongly called itself a "Week 2 approximation"; it is correct). Flagged §7.5.6d (abilities that make an attacker deal damage before the defender) as the one ordering that would need a post-first-hit power re-read — no such card exists yet.
+- **Overwhelm §7.5.7e/f** — added scenarios proving a Shield on the defender blocks the hit with NO excess routed to the base (§e), and a surviving defender yields NO excess (§f). Both already handled by the defeated/shield-block checks in `attack.ts`.
+
+**Not in scope:** Bounty/Exploit/Smuggle/Piloting/Plot are from sets newer than the cached CR PDF (v1.1). Per the "verify against the source, don't author from memory" rule, they're left as recognized-but-inert keyword words until a current rules reference is available.
+
+Fixture W8_022 (2/2 Grit). Engine **118** / translate **60** / validate 16, tsc clean, play-cli + fuzz (300 games) clean.
+
+### 2026-06-01: Uniqueness (rule-of-one) + random-game fuzzer (table-correctness, session 61 cont.)
+
+**Uniqueness / rule-of-one (§3371).** `runStateBased` now enforces "a player can only control 1 copy of each unique card." When a player controls 2+ in-play copies of the same unique `cardId`, the controller chooses which to keep (default chooser keeps leftmost) and the rest are defeated — bumped to lethal and routed through the existing `processDefeat`, so When-Defeated abilities, owner-discard routing (§8.28.2), and leader flip-back all still apply, and it happens before any enter-play abilities resolve. Player-specific: a player and their opponent may each control a copy (§ uniqueness is per-player).
+
+The check runs at the top of the state-based fixpoint, before the defeat scan. **Ordering subtlety fixed:** a copy already at lethal damage is excluded from the live duplicate set — otherwise the check re-selects the same pair every iteration (the bumped copy isn't removed until the defeat pass) and spins to the 256-guard, leaving both copies alive. New unique fixture W8_021; 3 scenarios (defeat-one-keep-one + discard; player-specific; non-unique cards stack freely). Known follow-up: `engine-v2-data/translate.ts` doesn't yet copy the DB's unique flag into `spec.unique`, so real translated decks won't trigger this until that mapping lands.
+
+**Random-game fuzzer.** New `scripts/fuzz.ts` (`npm run fuzz [games] [baseSeed]`): both seats pick a uniformly-random legal action each step, a random chooser answers every prompt, all driven by a seeded PRNG. Asserts the engine never throws, always terminates with a winner (step budget catches soft-hangs), and never presents an empty legal-action set mid-action-phase. **2000 games across two seed ranges completed cleanly** (avg ~12 rounds / ~104 steps; max 16 / 149). Failures print the reproducing seed. This is the property-test net that scenario tests can't be — it exercises action/prompt combinations no one hand-authored.
+
+Engine **115** / translate 59 / validate 16, tsc clean, play-cli completes, fuzz 2000/2000 clean.
+
+### 2026-06-01: Twin Suns Blast + Plan counters implemented (session 61 cont.)
+
+**Twin Suns "Take an Available Counter"** (official format insert) replaces 1v1's "Take the Initiative": three counters — **Initiative**, **Blast**, **Plan** — each takeable once per round, one per player; taking any ends your turns for the round. The engine had the `'initiative'|'blast'|'plan'` vocab but only ever implemented initiative (and threw on the others). Now all three resolve in `applyTakeCounter`:
+- **Initiative** — take control of initiative → first action next round (unchanged).
+- **Blast** — deal 1 non-combat damage to *each enemy base* (`dealDamageToBase` per opponent).
+- **Plan** — draw 1, then put a card from hand on the *bottom* of the deck (`moveToZone(..., {position:'bottom'})`); the card is chooser-picked (default leftmost).
+
+**"Once per round, game-wide" enforcement:** added round-scoped `GameState.countersTakenThisRound` (can't be derived from `countersHeld` because initiative persists across rounds). Set on take, checked in both `applyTakeCounter` (throws on a re-take) and `legal.ts` (offers only not-yet-taken counters), reset to `[]` at round end. `legal.ts` previously offered initiative only and forbade any second counter once *anyone* took initiative — corrected to the Twin Suns rule: a player who hasn't taken a counter may take any *available* one, so after p1 takes Initiative, p2 can still take Blast or Plan.
+
+No AI/CLI/UI change needed — they select `TAKE_COUNTER` generically and `describeAction` already names the counter. The old "TAKE_COUNTER not legal for opponent after I take initiative" scenario encoded the 1v1 rule and is replaced with the Twin Suns one. Added scenarios: Blast damages each enemy base (own base untouched); Plan draws+bottoms (net hand size unchanged, chosen card on deck bottom); each counter once-per-round.
+
+Engine **112** / translate 59 / validate 16, tsc clean, play-cli completes.
+
+### 2026-06-01: Ambush fixed — keyword now actually attacks (table-correctness, session 61)
+
+**Real rules bug.** Ambush (§7.5.5) is "When this enters play, if there's an enemy unit it can attack, you *may* ready it and attack that enemy unit." The engine only ever readied the unit — the attack half (the entire point of the keyword) was missing, with a code comment admitting the gap. Now that the `attack` effect / `resolveAttack` core exists (session 60), it's fixable properly.
+
+New `resolveAmbush(state, reg, iid, pid, chooser)` in `runtime/attack.ts`: if the unit has effective Ambush and there is a legal enemy **unit** in its arena (base is NOT an Ambush target per §7.5.5a; Sentinel honored via `attackIllegalReason`), it surfaces the "may" as an `optional` prompt; on accept it readies the unit and resolves a nested attack on a chosen target. Per §7.5.5c, with no legal enemy unit it's a no-op and the unit stays exhausted — a behavior change: the old "Ambush: unit enters play ready" scenario (which played into an empty board) was asserting the *wrong* thing and is replaced.
+
+The `ambush` keyword def is now hook-free — it exists only so `hasEffectiveKeyword(..., 'ambush')` returns true (including when Ambush is granted by another card, e.g. Admiral Piett). The old onPlay/onDeploy/onCreate ready-hooks are removed (they double-readied and never attacked). Wired into `reducer.applyPlayCard` after the Shielded onPlay hook, before turn-advance (same window as When-Played, §7.5.5d). Deploy/create paths were already non-functional for Ambush (`onDeploy`/`onCreate` never invoked from the reducer; no token has Ambush), so they're intentionally out of scope.
+
+Verified in passing that Raid applies to **any** attack, not just base attacks (§2885a "While attacking, +X power") — the engine was already correct; only my first test expectation was wrong.
+
+Fixture reuse: W2_002 (Rebel Pathfinder, Ambush + Raid 1). Three scenarios: no enemy unit → stays exhausted; accept → readies, attacks a 1/6 wall for 3 (2 + Raid 1), takes 1 back and is defeated; decline → stays exhausted, enemy untouched. Regression-checked `play-cli -- --ai both` (Ambush is on the play path every unit traverses).
+
+Engine **107** / translate 59 / validate 16, tsc clean, play-cli completes.
+
+**Context:** first item in a table-correctness pass (prioritized over card coverage). Audited counters (only initiative is real SWU; blast/plan are dead vocab), arenas (correct), and multi-choice-per-card (correct via the async Chooser). Next: player-chosen ordering of simultaneous triggers.
+
 ### 2026-06-01: Multi-attack — `attack` effect + combat-core extraction (task #58, session 60)
 
 **The last of the meatier residuals, and the most invasive change.** Cards like "This unit attacks twice" / "attacks again" now make the source unit perform additional **sequential** attacks. Verified against the Comprehensive Rules: §"Only one unit may attack at a time… If an ability triggers multiple attacks, resolve them sequentially" and §"only ready units may perform an attack, unless otherwise specified" — so multi-attack is N separate one-target attacks, and a nested ability-attack may be made by an already-exhausted attacker.

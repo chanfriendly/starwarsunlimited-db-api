@@ -86,6 +86,11 @@ export interface PlayerState {
   base: BaseInstance;
   forceToken: boolean;
   capturedByMe: CapturedCard[];
+  // Twin Suns format: "Take the Initiative" is replaced by "Take an Available
+  // Counter" — three counters (Initiative, Blast, Plan), each takeable once per
+  // round, one per player. Initiative → go first next round; Blast → 1 damage to
+  // each enemy base; Plan → draw 1 then bottom a card. Taking any counter ends
+  // your turns for the round. (Official Twin Suns insert.)
   countersHeld: Array<'initiative' | 'blast' | 'plan'>;
   hasTakenCounterThisRound: boolean;
   hasResourced: boolean;
@@ -139,6 +144,11 @@ export interface GameState {
   delayedEffects: DelayedEffect[];
   pendingTriggers: TriggerInstance[];
   pendingChoice?: PendingChoice;
+  /** Twin Suns: counters taken this round (game-wide). Each of initiative/blast/
+   *  plan can be taken at most once per round by at most one player. Reset at
+   *  round end. Optional for back-compat with hand-built states (absent = none
+   *  taken). */
+  countersTakenThisRound?: Array<'initiative' | 'blast' | 'plan'>;
   winner?: PlayerId | 'draw';
   log: LogEntry[];
   consecutivePasses: number;

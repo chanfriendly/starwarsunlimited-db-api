@@ -14,7 +14,8 @@
     "validate-scenarios": "tsx src/lib/engine-v2/scripts/validate_scenarios.ts",
     "coverage-report": "tsx src/lib/engine-v2-data/coverage_report.ts",
     "deck-coverage": "tsx src/lib/engine-v2-data/deck_coverage.ts",
-    "play-cli": "tsx src/lib/engine-v2/scripts/play_cli.ts"
+    "play-cli": "tsx src/lib/engine-v2/scripts/play_cli.ts",
+    "fuzz": "tsx src/lib/engine-v2/scripts/fuzz.ts"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.3",

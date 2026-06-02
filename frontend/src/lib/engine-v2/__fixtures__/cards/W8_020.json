@@ -1,0 +1,20 @@
+{
+  "id": "W8_020",
+  "name": "Opportunist Scout",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["cunning"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 3,
+  "traits": ["rebel"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.defeated",
+      "where": { "controller": "opponent" },
+      "do": { "effect": "draw", "player": "self", "count": 1 }
+    }
+  ]
+}

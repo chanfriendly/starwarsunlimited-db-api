@@ -21,13 +21,13 @@ import { effectivePower, effectiveHp, hasEffectiveKeyword, effectiveKeywordValue
 import { nextActivePlayer, opponentOf } from './state/types';
 import { KEYWORDS, defeatDefenderShields } from './primitives/keywords';
 import { settleTriggers, isLimitExhausted, bumpLimit, parseUndeployedLeaderIid, makeUndeployedLeaderIid, synthLeaderInstance } from './runtime/triggers';
-import type { Chooser } from './runtime/chooser';
+import { defaultChooser, type Chooser } from './runtime/chooser';
 import { applyEffect } from './runtime/interpret';
 import { isTriggered, type ActionAbility, type Ability, type TriggeredAbility } from './spec/ast';
 import { resolveSelector } from './runtime/selectors';
 import { resolvePlayer } from './runtime/predicates';
 import { effectiveCost } from './runtime/cost';
-import { resolveAttack, attackIllegalReason } from './runtime/attack';
+import { resolveAttack, attackIllegalReason, resolveAmbush } from './runtime/attack';
 
 function settle(state: GameState, reg: CardRegistry, eventsIn: GameEvent[], chooser?: Chooser): StepResult {
   const stepped: GameState = { ...state, step: state.step + 1 };
@@ -264,9 +264,9 @@ function applyPlayCard(state: GameState, pid: PlayerId, iid: string, reg: CardRe
   events.push({ kind: 'CARD_PLAYED', iid, cardId: spec.id, controller: pid });
   s = log(s, `${pid} plays ${spec.name} (${spec.cost ?? 0}) into ${destZone}.`, pid);
 
-  // Keyword onPlay hooks (Shielded, Ambush). Run before triggered When-Played
-  // abilities so that — for example — a Shielded unit's shield is present when
-  // a When-Played damage trigger would resolve.
+  // Keyword onPlay hooks (Shielded). Run before triggered When-Played abilities
+  // so that — for example — a Shielded unit's shield is present when a
+  // When-Played damage trigger would resolve.
   for (const kw of (spec.keywords ?? [])) {
     const def = KEYWORDS[kw.name.toLowerCase()];
     if (!def?.onPlay) continue;
@@ -276,6 +276,11 @@ function applyPlayCard(state: GameState, pid: PlayerId, iid: string, reg: CardRe
     s = r.state;
     events.push(...r.events);
   }
+
+  // Ambush (§7.5.5): may ready + nested attack in the same window as When-Played.
+  const amb = resolveAmbush(s, reg, iid, pid, chooser);
+  s = amb.state;
+  events.push(...amb.events);
 
   return advanceToNextTurn(s, pid, reg, events, undefined, chooser);
 }
@@ -559,12 +564,56 @@ function applyTakeCounter(
 ): StepResult {
   if (state.activePlayer !== pid) throw new Error(`${pid} is not the active player`);
   if (state.phase !== 'action') throw new Error(`Cannot take counter outside action phase`);
-  if (counter !== 'initiative') throw new Error(`Week 2 only supports the initiative counter`);
-  let s: GameState = { ...state, initiative: pid };
+  // Twin Suns "Take an Available Counter": each of the three counters can be
+  // taken at most once per round (game-wide); a player takes at most one and is
+  // then done for the round (handled by hasTakenCounterThisRound + the turn loop).
+  const taken = state.countersTakenThisRound ?? [];
+  if (taken.includes(counter)) throw new Error(`The ${counter} counter has already been taken this round`);
+  if (state.players[pid].hasTakenCounterThisRound) throw new Error(`${pid} already took a counter this round`);
+
+  let s: GameState = { ...state, countersTakenThisRound: [...taken, counter] };
+  const events: GameEvent[] = [];
+
+  if (counter === 'initiative') {
+    // Take control of the initiative → first action next round.
+    s = { ...s, initiative: pid };
+    s = log(s, `${pid} takes the Initiative.`, pid, 'critical');
+  } else if (counter === 'blast') {
+    // Blast: deal 1 damage to each ENEMY base.
+    s = log(s, `${pid} takes the Blast counter — 1 damage to each enemy base.`, pid, 'critical');
+    for (const oid of s.playerOrder) {
+      if (oid === pid) continue;
+      const r = dealDamageToBase(s, reg, oid, 1, { combat: false, indirect: false }, undefined, chooser);
+      s = r.state;
+      events.push(...r.events);
+    }
+  } else {
+    // Plan: draw 1, then put a card from hand on the BOTTOM of your deck.
+    s = log(s, `${pid} takes the Plan counter — draw 1, bottom a card.`, pid, 'critical');
+    const dr = draw(s, reg, pid, 1);
+    s = dr.state;
+    events.push(...dr.events);
+    const hand = s.players[pid].hand;
+    if (hand.length > 0) {
+      // Let the player pick which card to bottom; default chooser → leftmost.
+      const chooseFn = chooser ?? defaultChooser;
+      const pick = chooseFn({
+        kind: 'choose_one',
+        prompt: 'Plan: choose a card to put on the bottom of your deck',
+        options: hand.map(c => ({ label: reg.cards[c.cardId]?.name ?? c.iid, value: c.iid })),
+        player: pid,
+        canPass: false,
+      });
+      const iid = pick.kind === 'option' ? pick.value : hand[0].iid;
+      const mv = moveToZone(s, iid, pid, 'deck', { position: 'bottom' });
+      s = mv.state;
+      events.push({ kind: 'ZONE_CHANGED', iid, from: 'hand', to: 'deck' });
+    }
+  }
+
   const p = s.players[pid];
   s = withPlayer(s, pid, { ...p, countersHeld: [...p.countersHeld, counter], hasTakenCounterThisRound: true });
-  s = log(s, `${pid} takes the initiative.`, pid, 'critical');
-  const events: GameEvent[] = [{ kind: 'COUNTER_TAKEN', player: pid, counter }];
+  events.push({ kind: 'COUNTER_TAKEN', player: pid, counter });
   return advanceToNextTurn(s, pid, reg, events, { taker: pid }, chooser);
 }
 
@@ -658,6 +707,7 @@ function advanceRegroupAfterResource(state: GameState, reg: CardRegistry, events
   // Expire end_of_round lasting effects + reset round bookkeeping.
   s = expireLastingEffects(s, 'end_of_round');
   s = expireLastingEffects(s, 'end_of_phase'); // regroup phase also ends here
+  s = { ...s, countersTakenThisRound: [] }; // counters become available again next round
   const players = { ...s.players };
   for (const pid of s.playerOrder) {
     players[pid] = {

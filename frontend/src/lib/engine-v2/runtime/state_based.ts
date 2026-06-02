@@ -9,7 +9,7 @@ import { getZoneArr, withPlayer, withZoneArr } from '../state/zones';
 import { effectiveHp, effectivePower } from './modifiers';
 import { collectDefeatUnitReplacements, makeProspectiveDefeatEvent } from './replacements';
 import { applyEffect } from './interpret';
-import type { Chooser } from './chooser';
+import { defaultChooser, type Chooser } from './chooser';
 
 export function runStateBased(
   state: GameState,
@@ -46,6 +46,19 @@ export function runStateBased(
       }
     }
     if (s.winner) break;
+
+    // Uniqueness / rule-of-one (§ "A player can only control 1 copy of each
+    // unique card"). If a player controls 2+ in-play copies of the same unique
+    // card, they must immediately defeat all but one — BEFORE any enter-play
+    // abilities resolve. We mark the excess copies at lethal damage and let the
+    // defeat pass below route them through processDefeat (so When-Defeated, owner
+    // discard, leader flip-back all apply). The controller chooses which to keep.
+    const dupe = findUniquenessViolation(s, reg, chooser);
+    if (dupe) {
+      s = bumpToLethal(s, dupe);
+      changed = true;
+      continue;
+    }
 
     // Find ONE dead unit and process it. Defeat replacements intercept here:
     // if a `defeat_unit` replacement matches, run its `with` effect instead
@@ -97,6 +110,68 @@ export function runStateBased(
 }
 
 interface DeadUnit { pid: PlayerId; zone: 'ground_arena' | 'space_arena'; inst: import('../state/types').CardInstance }
+
+/** Rule-of-one (§ uniqueness). If a player controls 2+ in-play copies of the
+ *  same unique card, return the iid of the copy to DEFEAT (the controller keeps
+ *  one of their choice; default chooser keeps the leftmost, defeats the next).
+ *  "In play" = the two arenas. Player-specific — a player and their opponent may
+ *  each control a copy. Returns undefined if no violation. */
+function findUniquenessViolation(
+  state: GameState, reg: CardRegistry, chooser?: Chooser,
+): { pid: PlayerId; iid: string } | undefined {
+  for (const pid of state.playerOrder) {
+    const p = state.players[pid];
+    const inPlay = [...getZoneArr(p, 'ground_arena'), ...getZoneArr(p, 'space_arena')];
+    // Group in-play instances by cardId, keeping only unique cards with ≥2 copies.
+    // Skip copies already at lethal damage — they're about to be removed by the
+    // defeat pass, so they don't count toward the live duplicate set (otherwise
+    // we'd re-flag the same pair every iteration and spin to the guard limit).
+    const byCard = new Map<string, string[]>();
+    for (const c of inPlay) {
+      const spec = reg.cards[c.cardId];
+      const isUniqueCard = spec && 'unique' in spec ? Boolean(spec.unique) : false;
+      if (!isUniqueCard) continue;
+      if (c.damage >= effectiveHp(state, reg, c, pid)) continue; // already dying
+      const arr = byCard.get(c.cardId) ?? [];
+      arr.push(c.iid);
+      byCard.set(c.cardId, arr);
+    }
+    for (const [cardId, iids] of byCard) {
+      if (iids.length < 2) continue;
+      // Controller chooses which to KEEP; we defeat one of the others. Default
+      // chooser keeps the leftmost (iids[0]) → defeat iids[1].
+      const spec = reg.cards[cardId];
+      const name = spec && 'name' in spec ? (spec as { name: string }).name : cardId;
+      const keepChoice = (chooser ?? defaultChooser)({
+        kind: 'choose_one',
+        prompt: `Rule of one: you control multiple copies of ${name} — choose which to keep`,
+        options: iids.map(iid => ({ label: name, value: iid })),
+        player: pid,
+        canPass: false,
+      });
+      const keep = keepChoice.kind === 'option' ? keepChoice.value : iids[0];
+      const toDefeat = iids.find(iid => iid !== keep) ?? iids[1];
+      return { pid, iid: toDefeat };
+    }
+  }
+  return undefined;
+}
+
+/** Bump a unit to lethal damage so the defeat pass routes it through
+ *  processDefeat (When-Defeated, owner discard, leader flip-back all apply). */
+function bumpToLethal(state: GameState, dupe: { pid: PlayerId; iid: string }): GameState {
+  const p = state.players[dupe.pid];
+  for (const z of ['ground_arena', 'space_arena'] as const) {
+    const arr = getZoneArr(p, z);
+    const idx = arr.findIndex(c => c.iid === dupe.iid);
+    if (idx >= 0) {
+      const newArr = arr.slice();
+      newArr[idx] = { ...newArr[idx], damage: newArr[idx].damage + 99999 };
+      return withPlayer(state, dupe.pid, withZoneArr(p, z, newArr));
+    }
+  }
+  return state;
+}
 
 function findOneDefeated(state: GameState, reg: CardRegistry): DeadUnit | undefined {
   for (const pid of state.playerOrder) {

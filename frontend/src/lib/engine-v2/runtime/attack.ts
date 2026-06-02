@@ -17,12 +17,12 @@ import type { CardRegistry, GameState, PlayerId } from '../state/types';
 import type { GameEvent } from '../state/bus';
 import type { LastingEffectRec } from '../state/effects';
 import type { CardSpec } from '../spec/types';
-import { findCard, getZoneArr } from '../state/zones';
+import { findCard, getZoneArr, mapInstance } from '../state/zones';
 import { exhaust } from '../primitives/state';
 import { dealDamageToBase, dealDamageToUnit } from './damage';
 import { effectivePower, effectiveHp, hasEffectiveKeyword, effectiveKeywordValue } from './modifiers';
 import { KEYWORDS, defeatDefenderShields } from '../primitives/keywords';
-import type { Chooser } from './chooser';
+import { defaultChooser, type Chooser } from './chooser';
 
 function log(state: GameState, message: string, player?: PlayerId, kind: 'info' | 'critical' = 'info'): GameState {
   return { ...state, log: [...state.log, { round: state.round, player, message, kind }] };
@@ -161,5 +161,52 @@ export function resolveAttack(
   }
 
   s = expireLastingEffects(s, 'end_of_attack');
+  return { state: s, events };
+}
+
+/** Ambush (§7.5.5): after a unit with Ambush enters play, its controller MAY
+ *  ready it and attack an enemy unit — resolved as a nested attack in the same
+ *  window as When-Played. Per §7.5.5c the unit can only ready/attack if there is
+ *  an enemy unit it can attack (Ambush targets a UNIT, not the base); with no
+ *  legal enemy unit this is a no-op (the unit stays exhausted). The "may" is
+ *  surfaced as an `optional` prompt to the chooser.
+ *
+ *  Called from the play / deploy / create sites (which have the chooser); the
+ *  keyword's own onPlay/onDeploy/onCreate hooks no longer ready the unit so this
+ *  is the single source of truth for Ambush.
+ */
+export function resolveAmbush(
+  state: GameState, reg: CardRegistry, iid: string, pid: PlayerId, chooser?: Chooser,
+): { state: GameState; events: GameEvent[] } {
+  const f = findCard(state, iid);
+  if (!f) return { state, events: [] };
+  if (!hasEffectiveKeyword(state, reg, f.inst, pid, 'ambush')) return { state, events: [] };
+
+  const arena = f.loc.zone;
+  if (arena !== 'ground_arena' && arena !== 'space_arena') return { state, events: [] };
+  const oppId = state.playerOrder.find(p => p !== pid);
+  if (!oppId) return { state, events: [] };
+
+  // Eligible enemy UNITS in this arena that the attack would be legal against
+  // (honors Sentinel). Base is NOT an Ambush target (§7.5.5a "attack that enemy unit").
+  const targets = getZoneArr(state.players[oppId], arena)
+    .filter(c => attackIllegalReason(state, pid, reg, iid, c.iid) === null)
+    .map(c => c.iid);
+  if (targets.length === 0) return { state, events: [] }; // §7.5.5c: can't ready with no target
+
+  const chooseFn = chooser ?? defaultChooser;
+  // "You may" — offer to decline.
+  const may = chooseFn({ kind: 'optional', prompt: 'Ambush: ready and attack an enemy unit?', player: pid });
+  if (may.kind === 'no' || may.kind === 'pass') return { state, events: [] };
+
+  // Ready, then pick a target and attack (nested — resolveAttack ignores ready).
+  let s = mapInstance(state, iid, c => ({ ...c, exhausted: false }));
+  const events: GameEvent[] = [{ kind: 'READIED', iid }];
+  const options = targets.map(t => ({ label: reg.cards[findCard(s, t)!.inst.cardId]?.name ?? t, value: t }));
+  const pick = chooseFn({ kind: 'choose_one', prompt: 'Ambush: choose an enemy unit to attack', options, player: pid, canPass: false });
+  const defenderIid = pick.kind === 'option' ? pick.value : options[0].value;
+  const r = resolveAttack(s, pid, iid, defenderIid, reg, chooseFn);
+  s = r.state;
+  events.push(...r.events);
   return { state: s, events };
 }

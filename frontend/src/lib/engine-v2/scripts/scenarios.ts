@@ -3,7 +3,7 @@
 // and prints pass/fail. Run: cd frontend && npm run scenarios
 
 import { buildRegistry, step, scriptedChooser, declineChooser, stepAsync, resolveStep, getLegalActions } from '../index';
-import type { CardInstance, CardRegistry, GameState, PlayerId, AsyncStepResult } from '../index';
+import type { CardInstance, CardRegistry, GameState, PlayerId, AsyncStepResult, Chooser } from '../index';
 import { ALL_CARDS, W1_BASES } from '../__fixtures__';
 import { findCard, getZoneArr } from '../state/zones';
 import {
@@ -124,6 +124,26 @@ scenario('Grit: Wampa with 2 damage has +2 power', () => {
   assertEq(p, 4 + 2, 'effective power');
 });
 
+scenario('Grit in simultaneous combat: defender deals PRE-damage power (§7.5.6c)', () => {
+  // The rules example: a 2/2 Grit unit with no damage, defending against a
+  // 1-power attacker, deals only 2 back (NOT 3) — the combat damage it takes
+  // does not boost the power it deals in that same combat. Both combat powers
+  // are snapshot before damage lands, so this must hold.
+  const defender = mkInst('W8_022', { iid: 'grit-def' });   // 2/2 Grit
+  const attacker = mkInst('W8_017', { iid: 'grit-atk' });   // 1/6, attacks (power 1)
+  const state = emptyState({ groundP1: [attacker], groundP2: [defender], deckP2: [mkInst('W2_009')], active: 'p1' });
+  const r = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: 'grit-atk', defenderIid: 'grit-def' }, reg);
+  const atkAfter = r.next.players.p1.groundArena.find(c => c.iid === 'grit-atk');
+  const defAfter = r.next.players.p2.groundArena.find(c => c.iid === 'grit-def');
+  if (!atkAfter) throw new Error('1/6 attacker should survive 2 combat damage');
+  if (!defAfter) throw new Error('2/2 Grit defender should survive 1 combat damage');
+  assertEq(atkAfter.damage, 2, 'attacker took the defender PRE-damage 2 (Grit did NOT add the +1 from new damage)');
+  assertEq(defAfter.damage, 1, 'defender took the attacker 1 power');
+  // Sanity: post-combat the defender now reads 3 power (2 + 1 damage via Grit),
+  // but that boost only applies to FUTURE reads, not the combat it just fought.
+  assertEq(effectivePower(r.next, reg, defAfter, 'p2'), 3, 'Grit now reads 3 power (1 damage) for subsequent reads');
+});
+
 scenario('Grit: undamaged Wampa has printed power only', () => {
   const wampa = mkInst('W2_001');
   const state = emptyState({ groundP1: [wampa] });
@@ -183,13 +203,48 @@ scenario('Shielded: blocks first damage instance', () => {
   assertEq(inPlay.inst.shieldTokens, 1, 'shield tokens after onPlay');
 });
 
-scenario('Ambush: unit enters play ready', () => {
+scenario('Ambush: no enemy unit → stays exhausted (§7.5.5c, cannot ready)', () => {
+  // Per §7.5.5c a unit with Ambush can only ready/attack if there is an enemy
+  // UNIT it can attack (base is not an Ambush target). With an empty enemy board
+  // it enters play exhausted like any other unit.
   const card = mkInst('W2_002');                    // Pathfinder w/ Ambush+Raid 1
-  const state = emptyState({ handP1: [card], resourcesP1: 5, active: 'p1' });
+  const state = emptyState({ handP1: [card], resourcesP1: 5, groundP2: [], active: 'p1' });
   const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: card.iid }, reg);
   const inPlay = findCard(r.next, card.iid);
   if (!inPlay) throw new Error('Pathfinder should be in play');
-  assertEq(inPlay.inst.exhausted, false, 'should be ready due to Ambush');
+  assertEq(inPlay.inst.exhausted, true, 'no enemy unit → no Ambush ready, stays exhausted');
+});
+
+scenario('Ambush: enemy present + accept → readies and attacks immediately', () => {
+  // Pathfinder is 2/1 w/ Raid 1 → 3 power while attacking (Raid applies to any
+  // attack, §7.5.x Raid X). Target a 1/6 wall (W8_017): it survives the 3 and
+  // hits back for 1, defeating the 1-hp Pathfinder — proving Ambush ran a real
+  // nested combat. The "may" is accepted; target chosen.
+  const card = mkInst('W2_002');
+  const wall = mkInst('W8_017', { iid: 'amb-def' });   // 1/6
+  const state = emptyState({ handP1: [card], resourcesP1: 5, groundP2: [wall], deckP2: [mkInst('W2_009')], active: 'p1' });
+  const chooser = scriptedChooser([
+    { kind: 'yes' },                                   // accept the Ambush "may"
+    { kind: 'option', value: 'amb-def' },              // choose the target
+  ]);
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: card.iid }, reg, chooser);
+  const def = r.next.players.p2.groundArena.find(c => c.iid === 'amb-def');
+  if (!def) throw new Error('wall should survive (took 3, has 6 hp)');
+  assertEq(def.damage, 3, 'wall took Pathfinder 3 power (2 + Raid 1) via Ambush attack');
+  // Pathfinder (1 hp) took 1 back → defeated → in p1 discard, not arena.
+  if (r.next.players.p1.groundArena.some(c => c.iid === card.iid)) throw new Error('Pathfinder should be defeated by retaliation');
+  if (!r.next.players.p1.discard.some(c => c.iid === card.iid)) throw new Error('Pathfinder should be in discard');
+});
+
+scenario('Ambush: declined → enters play exhausted, no attack', () => {
+  const card = mkInst('W2_002');
+  const enemy = mkInst('W1_001', { iid: 'amb-def2' });
+  const state = emptyState({ handP1: [card], resourcesP1: 5, groundP2: [enemy], active: 'p1' });
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: card.iid }, reg, declineChooser);
+  const inPlay = findCard(r.next, card.iid);
+  if (!inPlay) throw new Error('Pathfinder should be in play');
+  assertEq(inPlay.inst.exhausted, true, 'declined Ambush → stays exhausted');
+  assertEq(r.next.players.p2.groundArena.find(c => c.iid === 'amb-def2')?.damage, 0, 'enemy untouched (declined)');
 });
 
 scenario('Raid 1: attacks base for power+1', () => {
@@ -223,6 +278,35 @@ scenario('Overwhelm: excess combat damage to base', () => {
   // Grunt defeated (in p2 discard, not in arena)
   const stillInArena = getZoneArr(r.next.players.p2, 'ground_arena').some(c => c.iid === grunt.iid);
   if (stillInArena) throw new Error('grunt should be defeated');
+});
+
+scenario('Overwhelm §7.5.7e: a Shield on the defender blocks all damage → NO excess to base', () => {
+  // §e: if an Overwhelm attacker would deal combat damage to a defender with a
+  // Shield token, the shield is defeated and NO damage flows to the base.
+  const tank = mkInst('W2_005');                          // 6/4 Overwhelm
+  const grunt = mkInst('W2_009', { iid: 'shielded', shieldTokens: 1 });  // 2/2 + shield
+  const state = emptyState({ groundP1: [tank], groundP2: [grunt], active: 'p1' });
+  const r = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: tank.iid, defenderIid: 'shielded' }, reg);
+  assertEq(r.next.players.p2.base.damage, 0, 'shield blocked the hit → no Overwhelm excess to base');
+  const def = r.next.players.p2.groundArena.find(c => c.iid === 'shielded');
+  if (!def) throw new Error('grunt should survive (shield absorbed the damage)');
+  assertEq(def.shieldTokens, 0, 'shield consumed');
+});
+
+scenario('Overwhelm §7.5.7f: defender survives → NO excess to base', () => {
+  // §f: if the attack does NOT defeat the defender, no damage flows to the base.
+  const tank = mkInst('W2_005');                          // 6/4 Overwhelm
+  const wall = mkInst('W8_017', { iid: 'wall' });         // 1/6 — survives 6
+  const state = emptyState({ groundP1: [tank], groundP2: [wall], deckP2: [mkInst('W2_009')], active: 'p1' });
+  const r = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: tank.iid, defenderIid: 'wall' }, reg);
+  // Wall has 6 hp, takes exactly 6 → defeated, so excess = 0 anyway. Use a 7-hp
+  // wall via upgrade to make "survives" unambiguous.
+  void r;
+  const wall2 = mkInst('W8_017', { iid: 'wall2', upgrades: [mkInst('W4_002')] }); // 1/6 +2/+2 = 3/8
+  const state2 = emptyState({ groundP1: [mkInst('W2_005', { iid: 't2' })], groundP2: [wall2], deckP2: [mkInst('W2_009')], active: 'p1' });
+  const r2 = step(state2, { kind: 'ATTACK', player: 'p1', attackerIid: 't2', defenderIid: 'wall2' }, reg);
+  assertEq(r2.next.players.p2.base.damage, 0, 'defender survived (8 hp vs 6) → no excess to base');
+  if (!r2.next.players.p2.groundArena.some(c => c.iid === 'wall2')) throw new Error('8-hp wall should survive');
 });
 
 scenario('Triggered When Played: Sniper deals 2 damage', () => {
@@ -686,6 +770,87 @@ scenario('attack effect: stops early when no legal target remains', () => {
   const r = applyEffect({ state, reg, sourceIid: attacker.iid, sourcePlayer: 'p1', chooser: scriptedChooser([]) },
     { effect: 'attack', attacker: { self: true }, count: 3 });
   assertEq(r.state.players.p2.base.damage, 9, 'three base attacks = 9 (default chooser picks base)');
+});
+
+scenario('Trigger ordering: player chooses order of own simultaneous triggers (§3016)', () => {
+  // p1 controls two units that BOTH trigger "when an enemy unit is defeated":
+  // W8_006 deals 2 to the enemy base, W8_020 draws a card. p1 attacks and defeats
+  // a 1-hp enemy → both fire simultaneously for p1, who chooses the order. A
+  // scripted chooser picks W8_020 (draw) first; we assert the CARD_DRAWN event
+  // precedes the DAMAGE_DEALT-to-base event.
+  const dmgUnit = mkInst('W8_006', { iid: 'dmg' });    // deals 2 to base on enemy defeat
+  const drawUnit = mkInst('W8_020', { iid: 'draw' });  // draws on enemy defeat
+  const attacker = mkInst('W1_001', { iid: 'atk' });   // 3/3 ready
+  const victim = mkInst('W1_002', { iid: 'victim' });  // 1/2 → dies to 3 power
+  const state = emptyState({
+    groundP1: [dmgUnit, drawUnit, attacker], groundP2: [victim],
+    deckP1: [mkInst('W2_009'), mkInst('W2_009')], active: 'p1',
+  });
+  // Trigger ids are internal, so order by LABEL: pick the option naming the draw
+  // unit ("Opportunist Scout") first. (Other prompt kinds get sensible defaults.)
+  const orderChooser: Chooser = (prompt) => {
+    if (prompt.kind === 'choose_one') {
+      const drawOpt = prompt.options.find(o => /Opportunist Scout/.test(o.label));
+      return { kind: 'option', value: (drawOpt ?? prompt.options[0]).value };
+    }
+    if (prompt.kind === 'prompt_target') return { kind: 'targets', targets: prompt.candidates.slice(0, prompt.count) };
+    return { kind: 'yes' };
+  };
+  const r = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: 'atk', defenderIid: 'victim' }, reg, orderChooser);
+  const drawIdx = r.events.findIndex(e => e.kind === 'CARD_DRAWN');
+  const baseDmgIdx = r.events.findIndex(e => e.kind === 'DAMAGE_DEALT' && typeof (e as { targetIid: unknown }).targetIid === 'object');
+  if (drawIdx < 0) throw new Error('draw trigger should have fired');
+  if (baseDmgIdx < 0) throw new Error('base-damage trigger should have fired');
+  if (!(drawIdx < baseDmgIdx)) throw new Error(`chooser picked draw first → CARD_DRAWN (${drawIdx}) should precede base DAMAGE_DEALT (${baseDmgIdx})`);
+});
+
+scenario('Trigger ordering: default chooser preserves insertion order (no regression)', () => {
+  // Same board, default chooser → leftmost (insertion) order: W8_006 (dmg) was
+  // placed before W8_020 (draw), so base damage resolves before the draw.
+  const dmgUnit = mkInst('W8_006', { iid: 'dmg2' });
+  const drawUnit = mkInst('W8_020', { iid: 'draw2' });
+  const attacker = mkInst('W1_001', { iid: 'atk2' });
+  const victim = mkInst('W1_002', { iid: 'victim2' });
+  const state = emptyState({
+    groundP1: [dmgUnit, drawUnit, attacker], groundP2: [victim],
+    deckP1: [mkInst('W2_009'), mkInst('W2_009')], active: 'p1',
+  });
+  const r = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: 'atk2', defenderIid: 'victim2' }, reg);
+  const drawIdx = r.events.findIndex(e => e.kind === 'CARD_DRAWN');
+  const baseDmgIdx = r.events.findIndex(e => e.kind === 'DAMAGE_DEALT' && typeof (e as { targetIid: unknown }).targetIid === 'object');
+  if (!(baseDmgIdx < drawIdx)) throw new Error(`default chooser → insertion order: base DAMAGE_DEALT (${baseDmgIdx}) should precede CARD_DRAWN (${drawIdx})`);
+});
+
+scenario('Uniqueness: a player controlling 2 copies of a unique card defeats one (§rule-of-one)', () => {
+  // Two copies of W8_021 (unique) in p1's ground arena → state-based defeats one.
+  // Default chooser keeps the leftmost; the other goes to p1's discard.
+  const a = mkInst('W8_021', { iid: 'uniqA' });
+  const b = mkInst('W8_021', { iid: 'uniqB' });
+  const state = emptyState({ groundP1: [a, b], active: 'p1' });
+  // Any step() runs the state-based loop. PASS is simplest.
+  const r = step(state, { kind: 'PASS', player: 'p1' }, reg);
+  const inArena = r.next.players.p1.groundArena.filter(c => c.cardId === 'W8_021');
+  assertEq(inArena.length, 1, 'exactly one copy remains in play');
+  assertEq(inArena[0].iid, 'uniqA', 'leftmost copy kept (default chooser)');
+  if (!r.next.players.p1.discard.some(c => c.iid === 'uniqB')) throw new Error('defeated copy should be in discard');
+});
+
+scenario('Uniqueness is player-specific: p1 and p2 may each control a copy', () => {
+  const mine = mkInst('W8_021', { iid: 'mine' });
+  const theirs = mkInst('W8_021', { iid: 'theirs' });
+  const state = emptyState({ groundP1: [mine], groundP2: [theirs], active: 'p1' });
+  const r = step(state, { kind: 'PASS', player: 'p1' }, reg);
+  if (!r.next.players.p1.groundArena.some(c => c.iid === 'mine')) throw new Error('p1 keeps their copy');
+  if (!r.next.players.p2.groundArena.some(c => c.iid === 'theirs')) throw new Error('p2 keeps their copy (player-specific)');
+});
+
+scenario('Uniqueness: non-unique cards may stack freely (no false defeat)', () => {
+  // W1_001 is NOT unique → two copies coexist.
+  const a = mkInst('W1_001', { iid: 'dupA' });
+  const b = mkInst('W1_001', { iid: 'dupB' });
+  const state = emptyState({ groundP1: [a, b], active: 'p1' });
+  const r = step(state, { kind: 'PASS', player: 'p1' }, reg);
+  assertEq(r.next.players.p1.groundArena.filter(c => c.cardId === 'W1_001').length, 2, 'both non-unique copies remain');
 });
 
 scenario('Smuggle: resource_zone constant buffs friendlies', () => {
@@ -1873,22 +2038,24 @@ scenario('UAT bug #1: full setup gives both players 2 resources', () => {
   assertEq(s.phase, 'action', 'setup completed → action phase');
 });
 
-scenario('UAT bug #2: TAKE_COUNTER not legal for opponent after I take initiative', () => {
+scenario('Twin Suns counters: after p1 takes Initiative, p2 may still take Blast/Plan (not Initiative)', () => {
   const { getLegalActions } = require('../index');
   const localReg = buildRegistry(ALL_CARDS, W1_BASES);
-  // Hand-built state: action phase, p1 has taken initiative.
+  // Action phase, p1 has taken the Initiative counter this round.
   const state = emptyState({ active: 'p2' });
   const post: GameState = {
     ...state,
     initiative: 'p1',
+    countersTakenThisRound: ['initiative'],
     players: {
       ...state.players,
       p1: { ...state.players.p1, hasTakenCounterThisRound: true, countersHeld: ['initiative'] },
     },
   };
   const { actions } = getLegalActions(post, localReg, 'p2');
-  const hasTake = actions.some((a: { kind: string }) => a.kind === 'TAKE_COUNTER');
-  if (hasTake) throw new Error('p2 should NOT be able to TAKE_COUNTER after p1 already did this round');
+  const counters = actions.filter((a: { kind: string }) => a.kind === 'TAKE_COUNTER').map((a: { counter: string }) => a.counter);
+  if (counters.includes('initiative')) throw new Error('initiative already taken → not offered again');
+  if (!counters.includes('blast') || !counters.includes('plan')) throw new Error('p2 should still be able to take Blast or Plan (Twin Suns)');
 });
 
 scenario('UAT bug #2: action phase ends gracefully if both players took counter', () => {
@@ -1909,6 +2076,45 @@ scenario('UAT bug #2: action phase ends gracefully if both players took counter'
   if (r.next.phase !== 'regroup') {
     throw new Error(`expected regroup phase after both-took-counter pass, got ${r.next.phase}`);
   }
+});
+
+scenario('Twin Suns Blast counter: deals 1 damage to each enemy base', () => {
+  // p1 takes Blast → p2's base takes 1, p1's own base untouched. Taking the
+  // counter also ends p1's turns for the round.
+  const state = emptyState({ active: 'p1' });
+  const r = step(state, { kind: 'TAKE_COUNTER', player: 'p1', counter: 'blast' }, reg);
+  assertEq(r.next.players.p2.base.damage, 1, 'enemy base took 1 from Blast');
+  assertEq(r.next.players.p1.base.damage, 0, 'own base untouched');
+  assertEq(r.next.players.p1.hasTakenCounterThisRound, true, 'p1 done for the round');
+  if (!(r.next.countersTakenThisRound ?? []).includes('blast')) throw new Error('blast recorded as taken this round');
+});
+
+scenario('Twin Suns Plan counter: draw 1 then bottom a card (net hand size unchanged)', () => {
+  // p1 has 1 card in hand + a 2-card deck. Plan → draw 1 (hand 2, deck 1), then
+  // bottom one card (hand 1, deck 2). Net hand size unchanged; deck count restored.
+  const handCard = mkInst('W2_009', { iid: 'h1' });
+  const deckA = mkInst('W1_001', { iid: 'd1' });
+  const deckB = mkInst('W1_001', { iid: 'd2' });
+  const state = emptyState({ handP1: [handCard], deckP1: [deckA, deckB], active: 'p1' });
+  const handBefore = state.players.p1.hand.length;     // 1
+  const deckBefore = state.players.p1.deck.length;     // 2
+  // Bottom the originally-held card so we can verify it moved to the deck bottom.
+  const chooser = scriptedChooser([{ kind: 'option', value: 'h1' }]);
+  const r = step(state, { kind: 'TAKE_COUNTER', player: 'p1', counter: 'plan' }, reg, chooser);
+  assertEq(r.next.players.p1.hand.length, handBefore, 'net hand size unchanged (drew 1, bottomed 1)');
+  assertEq(r.next.players.p1.deck.length, deckBefore, 'deck count restored (drew top, bottomed one)');
+  assertEq(r.next.players.p1.deck[r.next.players.p1.deck.length - 1].iid, 'h1', 'chosen card is on the bottom');
+  if (r.next.players.p1.hand.some(c => c.iid === 'h1')) throw new Error('bottomed card should have left hand');
+});
+
+scenario('Twin Suns counters: each counter takeable only once per round', () => {
+  // p1 takes Blast; the same counter can't be taken again this round (by anyone).
+  const state = emptyState({ active: 'p1' });
+  const afterBlast = step(state, { kind: 'TAKE_COUNTER', player: 'p1', counter: 'blast' }, reg).next;
+  // p2 is now active; p2 may take initiative/plan but NOT blast.
+  const { actions } = getLegalActions(afterBlast, reg, afterBlast.activePlayer);
+  const counters = actions.filter(a => a.kind === 'TAKE_COUNTER').map(a => (a as { counter: string }).counter);
+  if (counters.includes('blast')) throw new Error('blast already taken this round — must not be offered again');
 });
 
 scenario('UAT bug #4: describeAction shows real power for leader attacks', () => {

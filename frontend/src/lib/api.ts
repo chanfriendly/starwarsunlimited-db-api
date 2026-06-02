@@ -47,6 +47,7 @@ export interface Card {
   price_usd?: number;
   epic_action?: string;
   deploy_box?: string;
+  is_unique?: boolean;
   double_sided?: boolean;
   created_at?: string;
   updated_at?: string;
