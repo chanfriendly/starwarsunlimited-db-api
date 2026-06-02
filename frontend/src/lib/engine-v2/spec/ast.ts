@@ -232,6 +232,21 @@ export interface NoopEffect {
   effect: 'noop';
 }
 
+/** "<do>. If you do, <then>." — the `then` effect resolves only if `do` actually
+ *  happened. "Happened" = `do` produced at least one event (a declined optional,
+ *  or an effect that found no legal target, emits nothing → `then` is skipped).
+ *  `do` is often an `optional` ("You may return a unit … If you do, draw a card.").
+ *  `else_` (optional) resolves instead when `do` did NOT happen — for the
+ *  "If you do, X. If you do not, Y." shape. Either or both of `then`/`else_` may
+ *  be present (at least one). Distinct from `if` (which branches on a card
+ *  predicate, not on whether a prior effect resolved). */
+export interface IfDidEffect {
+  effect: 'if_did';
+  do: Effect;
+  then?: Effect;
+  else_?: Effect;
+}
+
 // Player chooses option(s) to resolve. `chooser` indicates who picks.
 // `count` (default 1) is how many DISTINCT options to pick and resolve in pick
 // order — `count: 2` models "Choose two, in any order:". Picking fewer than
@@ -333,6 +348,17 @@ export interface ReturnFromDiscardEffect {
   count?: number;
 }
 
+/** "Take control of an enemy unit" (§8.28). The unit moves to the source
+ *  player's matching arena and they become its controller — permanently (control
+ *  does NOT revert at regroup). It keeps its ready/exhausted status, damage, and
+ *  upgrades. The original controller is recorded as the unit's `owner` (if not
+ *  already set) so it returns to the owner's discard on defeat (§8.28.2). A
+ *  Leader Unit can't change control — it is defeated instead (§1.6). */
+export interface TakeControlEffect {
+  effect: 'take_control';
+  target: Selector;
+}
+
 /** Peek at a hidden zone without changing state. The runtime emits a
  *  CARD_REVEALED event per peeked card so the chooser/UI can display them. */
 export interface LookAtEffect {
@@ -391,6 +417,7 @@ export type Effect =
   | GiveEffect
   | SequenceEffect
   | IfEffect
+  | IfDidEffect
   | NoopEffect
   | ChooseOneEffect
   | OptionalEffect
@@ -404,6 +431,7 @@ export type Effect =
   | DividedDamageEffect
   | ReturnToHandEffect
   | ReturnFromDiscardEffect
+  | TakeControlEffect
   | UseForceEffect
   | GainForceEffect
   | PowerDamageFromEachEffect;
@@ -510,7 +538,25 @@ export interface ReplacementAbility {
   with: Effect;
 }
 
-export type Ability = TriggeredAbility | ActionAbility | ConstantAbility | ReplacementAbility;
+// Count source for a per-X cost reduction ("costs 1 less for each friendly
+// leader unit you control"). Evaluated live against the would-be-player when the
+// card's effective cost is computed (in hand, before it's played).
+export type CostCount = 'friendly_leader_units' | 'friendly_units' | 'friendly_resources';
+
+// Cost ability — a self-referential static modifier to THIS card's play cost
+// (§ a card's cost cannot be modified below 0). Not a firing ability: the cost
+// computation (`effectiveCost`) scans for it on the card in hand. `amount` is a
+// flat reduction (negative = cheaper; positive would be an increase). `per`
+// multiplies `amount` by a live count of the controller's board. A `while`
+// predicate (evaluated against the controller) can gate it.
+export interface CostAbility {
+  type: 'cost';
+  amount: number;            // applied as cost + amount (so -1 = "costs 1 less")
+  per?: CostCount;           // when set, total delta = amount × count
+  while?: Predicate;
+}
+
+export type Ability = TriggeredAbility | ActionAbility | ConstantAbility | ReplacementAbility | CostAbility;
 
 // ---------------------------------------------------------------------------
 // Discriminator helpers
@@ -520,6 +566,7 @@ export const isTriggered   = (a: Ability): a is TriggeredAbility   => a.type ===
 export const isAction      = (a: Ability): a is ActionAbility      => a.type === 'action';
 export const isConstant    = (a: Ability): a is ConstantAbility    => a.type === 'constant';
 export const isReplacement = (a: Ability): a is ReplacementAbility => a.type === 'replacement';
+export const isCost         = (a: Ability): a is CostAbility         => a.type === 'cost';
 
 export const isPredicateAnd = (p: Predicate): p is PredicateAnd => 'and' in p && Array.isArray((p as PredicateAnd).and);
 export const isPredicateOr  = (p: Predicate): p is PredicateOr  => 'or'  in p && Array.isArray((p as PredicateOr).or);

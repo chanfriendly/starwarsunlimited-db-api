@@ -1,0 +1,24 @@
+{
+  "id": "W8_014",
+  "name": "Calculated Withdrawal",
+  "type": "event",
+  "cost": 1,
+  "aspects": ["cunning"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "do": {
+        "effect": "if_did",
+        "do": {
+          "effect": "optional",
+          "do": {
+            "effect": "return_to_hand",
+            "target": { "zone": "any_arena", "controller": "opponent", "selector": "chosen", "count": 1 }
+          }
+        },
+        "then": { "effect": "draw", "player": "self", "count": 1 }
+      }
+    }
+  ]
+}

@@ -10,6 +10,7 @@ import { effectivePower, hasEffectiveKeyword } from './runtime/modifiers';
 import { isLimitExhausted, makeUndeployedLeaderIid } from './runtime/triggers';
 import { resolveSelector } from './runtime/selectors';
 import { defaultChooser } from './runtime/chooser';
+import { effectiveCost } from './runtime/cost';
 
 export interface LegalActionsResult {
   actions: PlayerAction[];
@@ -46,7 +47,7 @@ export function getLegalActions(state: GameState, reg: CardRegistry, pid: Player
     const spec = reg.cards[c.cardId];
     if (!spec) continue;
     if (spec.type !== 'unit' && spec.type !== 'event' && spec.type !== 'upgrade') continue;
-    const cost = spec.cost ?? 0;
+    const cost = effectiveCost(state, reg, spec, pid);
     if (cost > readyResourceCount) continue;
     if (spec.type === 'upgrade') {
       // One PLAY_CARD action per legal friendly host. No host → no action.
@@ -241,7 +242,7 @@ export function describeAction(state: GameState, reg: CardRegistry, a: PlayerAct
     case 'DECLINE_RESOURCE': return 'Decline resource';
     case 'PLAY_CARD': {
       const f = findCard(state, a.iid); const spec = f && reg.cards[f.inst.cardId];
-      const cost = spec && (spec.type === 'unit' || spec.type === 'event' || spec.type === 'upgrade') ? (spec.cost ?? 0) : 0;
+      const cost = spec && (spec.type === 'unit' || spec.type === 'event' || spec.type === 'upgrade') ? effectiveCost(state, reg, spec, a.player) : 0;
       if (a.targetIid) {
         const hf = findCard(state, a.targetIid);
         const hspec = hf && reg.cards[hf.inst.cardId];

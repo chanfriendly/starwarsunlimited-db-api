@@ -26,6 +26,7 @@ import { applyEffect } from './runtime/interpret';
 import { isTriggered, type ActionAbility, type Ability, type TriggeredAbility } from './spec/ast';
 import { resolveSelector } from './runtime/selectors';
 import { resolvePlayer } from './runtime/predicates';
+import { effectiveCost } from './runtime/cost';
 
 function settle(state: GameState, reg: CardRegistry, eventsIn: GameEvent[], chooser?: Chooser): StepResult {
   const stepped: GameState = { ...state, step: state.step + 1 };
@@ -201,7 +202,7 @@ function applyPlayCard(state: GameState, pid: PlayerId, iid: string, reg: CardRe
 
   const p = state.players[pid];
   const readyResources = p.resources.filter(r => !r.exhausted);
-  const cost = spec.cost ?? 0;
+  const cost = effectiveCost(state, reg, spec, pid);
   if (readyResources.length < cost) throw new Error(`Insufficient resources: need ${cost}, have ${readyResources.length}`);
 
   let s = state;

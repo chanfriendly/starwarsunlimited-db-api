@@ -2,13 +2,15 @@
 // GameState, exercises a single behavior, asserts the observable outcome,
 // and prints pass/fail. Run: cd frontend && npm run scenarios
 
-import { buildRegistry, step, scriptedChooser, stepAsync, resolveStep, getLegalActions } from '../index';
+import { buildRegistry, step, scriptedChooser, declineChooser, stepAsync, resolveStep, getLegalActions } from '../index';
 import type { CardInstance, CardRegistry, GameState, PlayerId, AsyncStepResult } from '../index';
 import { ALL_CARDS, W1_BASES } from '../__fixtures__';
 import { findCard, getZoneArr } from '../state/zones';
 import {
   effectivePower, effectiveHp, remainingHp, hasEffectiveKeyword,
 } from '../runtime/modifiers';
+import { applyEffect } from '../runtime/interpret';
+import { effectiveCost } from '../runtime/cost';
 
 const reg: CardRegistry = buildRegistry(ALL_CARDS, W1_BASES);
 
@@ -478,6 +480,182 @@ scenario('return_from_discard: filter (card_type: unit) gates out a non-unit (no
   const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: salvager.iid }, reg);
   if (!r.next.players.p1.discard.some(c => c.iid === ev.iid)) throw new Error('event should stay in discard');
   if (r.next.players.p1.hand.some(c => c.iid === ev.iid)) throw new Error('event must not be returned (unit filter)');
+});
+
+scenario('if_did: "You may return … If you do, draw" — ACCEPTED bounces + draws', () => {
+  // W8_014 Calculated Withdrawal: optional return-to-hand of an enemy unit, then
+  // (only if it happened) draw a card. Accept the optional + pick the target.
+  const event = mkInst('W8_014');
+  const enemy = mkInst('W1_001');
+  const handBefore = 0;
+  const state = emptyState({ handP1: [event], resourcesP1: 5, groundP2: [enemy], active: 'p1' });
+  const chooser = scriptedChooser([
+    { kind: 'yes' }, // accept the optional
+    { kind: 'targets', targets: [{ kind: 'unit', iid: enemy.iid, controller: 'p2' }] },
+  ]);
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: event.iid }, reg, chooser);
+  if (r.next.players.p2.groundArena.some(c => c.iid === enemy.iid)) throw new Error('enemy should be bounced from arena');
+  if (!r.next.players.p2.hand.some(c => c.iid === enemy.iid)) throw new Error('enemy should be in its owner\'s hand');
+  // Drew 1: p1 hand had only the event (now spent); after draw it holds 1 card.
+  assertEq(r.next.players.p1.hand.length, handBefore + 1, 'drew 1 card because the bounce happened');
+});
+
+scenario('if_did: DECLINED optional → "then" is skipped (no draw)', () => {
+  // Decline the optional bounce → nothing happened → the draw must NOT fire.
+  const event = mkInst('W8_014');
+  const enemy = mkInst('W1_001');
+  const state = emptyState({ handP1: [event], resourcesP1: 5, groundP2: [enemy], active: 'p1' });
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: event.iid }, reg, declineChooser);
+  if (!r.next.players.p2.groundArena.some(c => c.iid === enemy.iid)) throw new Error('enemy should stay in arena (declined)');
+  assertEq(r.next.players.p1.hand.length, 0, 'no draw because the optional was declined');
+});
+
+scenario('if_did else_: ACCEPTED → "then" fires, "else_" does NOT', () => {
+  // W8_015 Contingency Plan: "You may return … If you do, draw a card. If you do
+  // not, deal 1 to the enemy base." Accept → bounce + draw, base untouched.
+  const event = mkInst('W8_015');
+  const enemy = mkInst('W1_001');
+  const state = emptyState({ handP1: [event], resourcesP1: 5, groundP2: [enemy], active: 'p1' });
+  const chooser = scriptedChooser([
+    { kind: 'yes' },
+    { kind: 'targets', targets: [{ kind: 'unit', iid: enemy.iid, controller: 'p2' }] },
+  ]);
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: event.iid }, reg, chooser);
+  if (!r.next.players.p2.hand.some(c => c.iid === enemy.iid)) throw new Error('enemy should be bounced to hand');
+  assertEq(r.next.players.p1.hand.length, 1, 'drew 1 (then branch)');
+  assertEq(r.next.players.p2.base.damage, 0, 'enemy base untouched (else_ skipped)');
+});
+
+scenario('if_did else_: DECLINED → "else_" fires, "then" does NOT', () => {
+  // Decline the optional → do did NOT happen → else_ fires: 1 damage to enemy
+  // base, and NO draw.
+  const event = mkInst('W8_015');
+  const enemy = mkInst('W1_001');
+  const state = emptyState({ handP1: [event], resourcesP1: 5, groundP2: [enemy], active: 'p1' });
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: event.iid }, reg, declineChooser);
+  if (!r.next.players.p2.groundArena.some(c => c.iid === enemy.iid)) throw new Error('enemy should stay in arena (declined)');
+  assertEq(r.next.players.p1.hand.length, 0, 'no draw (then skipped)');
+  assertEq(r.next.players.p2.base.damage, 1, 'enemy base took 1 (else_ fired)');
+});
+
+scenario('take_control: moves enemy unit to your arena, records owner (§8.28)', () => {
+  // W8_016 Change of Allegiance: take control of an enemy non-leader unit.
+  const event = mkInst('W8_016');
+  const enemy = mkInst('W1_001', { damage: 1, exhausted: true });   // keeps damage + exhausted
+  const state = emptyState({ handP1: [event], resourcesP1: 5, groundP2: [enemy], active: 'p1' });
+  const chooser = scriptedChooser([
+    { kind: 'targets', targets: [{ kind: 'unit', iid: enemy.iid, controller: 'p2' }] },
+  ]);
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: event.iid }, reg, chooser);
+  if (r.next.players.p2.groundArena.some(c => c.iid === enemy.iid)) throw new Error('unit should leave p2 arena');
+  const taken = r.next.players.p1.groundArena.find(c => c.iid === enemy.iid);
+  if (!taken) throw new Error('unit should be in p1 (new controller) arena');
+  assertEq(taken.owner, 'p2', 'owner recorded as original controller');
+  assertEq(taken.damage, 1, 'damage retained (§8.28.1)');
+  assertEq(taken.exhausted, true, 'exhausted status retained (§8.28.1)');
+});
+
+scenario('take_control: a controlled unit is defeated to its OWNER\'s discard (§8.28.2)', () => {
+  // Take control, then defeat it — it must return to p2 (owner), not p1 (controller).
+  const event = mkInst('W8_016');
+  const enemy = mkInst('W1_001');
+  const state = emptyState({ handP1: [event], resourcesP1: 5, groundP2: [enemy], active: 'p1' });
+  const taken = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: event.iid }, reg,
+    scriptedChooser([{ kind: 'targets', targets: [{ kind: 'unit', iid: enemy.iid, controller: 'p2' }] }])).next;
+  // Hand-damage the now-friendly (to p1) unit to lethal, then run a step to settle.
+  const damaged: GameState = {
+    ...taken,
+    players: { ...taken.players, p1: { ...taken.players.p1,
+      groundArena: taken.players.p1.groundArena.map(c => c.iid === enemy.iid ? { ...c, damage: 99 } : c) } },
+  };
+  const r = step(damaged, { kind: 'PASS', player: damaged.activePlayer }, reg);
+  if (r.next.players.p1.discard.some(c => c.iid === enemy.iid)) throw new Error('must NOT go to controller (p1) discard');
+  if (!r.next.players.p2.discard.some(c => c.iid === enemy.iid)) throw new Error('must go to OWNER (p2) discard');
+  const back = r.next.players.p2.discard.find(c => c.iid === enemy.iid);
+  if (back && back.owner !== undefined) throw new Error('owner flag should be cleared once back home');
+});
+
+scenario('take_control: a Leader Unit can\'t change control — defeated instead (§1.6)', () => {
+  // Deploy p2's leader, then force a take_control targeting it (real cards say
+  // "non-leader" so this guards the engine directly: invoke take_control with a
+  // leader-eligible selector). It must be defeated/flipped-back, NOT moved.
+  const base = emptyState({ active: 'p2' });
+  const withLeader: GameState = {
+    ...base,
+    players: { ...base.players, p2: { ...base.players.p2,
+      leaders: [{ cardId: 'W4_001', side: 'leader', isDeployed: false, exhausted: false }] } },
+  };
+  const deployed = step(withLeader, { kind: 'DEPLOY_LEADER', player: 'p2', leaderIndex: 0 }, reg).next;
+  const luid = deployed.players.p2.leaders[0].unitIid!;
+  // p1 invokes take_control on the deployed leader-unit (no non-leader filter).
+  const taken = applyEffect(
+    { state: deployed, reg, sourcePlayer: 'p1',
+      chooser: scriptedChooser([{ kind: 'targets', targets: [{ kind: 'unit', iid: luid, controller: 'p2' }] }]) },
+    { effect: 'take_control', target: { zone: 'any_arena', controller: 'opponent', selector: 'chosen', count: 1 } },
+  );
+  // The take_control bumps the leader-unit to lethal; settle via state-based.
+  const r = step({ ...taken.state, activePlayer: 'p1' }, { kind: 'PASS', player: 'p1' }, reg);
+  if (r.next.players.p1.groundArena.some(c => c.iid === luid)) throw new Error('leader unit must NOT move to p1 arena');
+  if (r.next.players.p2.groundArena.some(c => c.iid === luid)) throw new Error('leader unit should be gone from arena (defeated)');
+  assertEq(r.next.players.p2.leaders[0].isDeployed, false, 'leader flipped back (defeated instead of changing control)');
+});
+
+scenario('When this unit is attacked: defender trigger fires (draws) when attacked', () => {
+  // W8_017 Vigilant Sentry (1/6) survives an attack; its "When this unit is
+  // attacked: draw a card" fires for its controller (p2).
+  const sentry = mkInst('W8_017');
+  const attacker = mkInst('W1_001');   // 3/3, ready
+  const deckCards = [mkInst('W2_009'), mkInst('W2_009')];
+  const state = emptyState({ groundP1: [attacker], groundP2: [sentry], deckP2: deckCards, handP2: [], active: 'p1' });
+  const handBefore = state.players.p2.hand.length;
+  const r = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: attacker.iid, defenderIid: sentry.iid }, reg);
+  // Sentry survives (6 hp vs 3 power) and its controller drew 1.
+  const stillThere = r.next.players.p2.groundArena.find(c => c.iid === sentry.iid);
+  if (!stillThere) throw new Error('sentry should survive (6 hp)');
+  assertEq(r.next.players.p2.hand.length, handBefore + 1, 'defender drew 1 from "When this unit is attacked"');
+});
+
+scenario('When this unit is attacked: does NOT fire when the unit attacks (attacker, not defender)', () => {
+  // The same trigger must not fire when the sentry is the ATTACKER.
+  const sentry = mkInst('W8_017');     // ready, has the defender trigger
+  const enemy = mkInst('W2_009');      // 2/2 target
+  const deckCards = [mkInst('W2_009'), mkInst('W2_009')];
+  const state = emptyState({ groundP1: [sentry], groundP2: [enemy], deckP1: deckCards, handP1: [], active: 'p1' });
+  const r = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: sentry.iid, defenderIid: enemy.iid }, reg);
+  assertEq(r.next.players.p1.hand.length, 0, 'no draw — sentry was the attacker, not the defender');
+});
+
+scenario('cost reduction: "costs 1 less per friendly leader unit" scales + clamps at 0', () => {
+  // W8_018 Rallied Reinforcements: printed cost 5, costs 1 less per friendly
+  // leader unit. A deployed leader unit is a CardInstance whose cardId is a
+  // leader spec (W4_001 = Clone General).
+  const ev = mkInst('W8_018');
+  // 0 leader units → full cost 5.
+  const s0 = emptyState({ handP1: [ev], active: 'p1' });
+  assertEq(effectiveCost(s0, reg, reg.cards['W8_018'], 'p1'), 5, 'no leaders → cost 5');
+  // 2 deployed leader units → 5 − 2 = 3.
+  const l1 = mkInst('W4_001');
+  const l2 = mkInst('W4_001');
+  const s2 = emptyState({ handP1: [ev], groundP1: [l1, l2], active: 'p1' });
+  assertEq(effectiveCost(s2, reg, reg.cards['W8_018'], 'p1'), 3, '2 leader units → cost 3');
+  // 6 leader units → 5 − 6 = −1 → clamped to 0 (cost cannot go below 0).
+  const many = Array.from({ length: 6 }, () => mkInst('W4_001'));
+  const s6 = emptyState({ handP1: [ev], groundP1: many, active: 'p1' });
+  assertEq(effectiveCost(s6, reg, reg.cards['W8_018'], 'p1'), 0, '6 leaders → clamped to 0');
+});
+
+scenario('cost reduction: PLAY_CARD charges the reduced cost (end-to-end)', () => {
+  // With one friendly leader unit, the cost-5 event costs 4. Give p1 exactly 4
+  // ready resources → it must be playable and charge 4.
+  const ev = mkInst('W8_018');
+  const leader = mkInst('W4_001');
+  const state = emptyState({ handP1: [ev], groundP1: [leader], resourcesP1: 4, deckP1: [mkInst('W2_009')], active: 'p1' });
+  const readyBefore = state.players.p1.resources.filter(r => !r.exhausted).length;
+  assertEq(readyBefore, 4, 'starts with 4 ready resources');
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: ev.iid }, reg);
+  const readyAfter = r.next.players.p1.resources.filter(rr => !rr.exhausted).length;
+  assertEq(readyAfter, 0, 'all 4 resources spent (cost reduced 5→4)');
+  if (!r.next.players.p1.discard.some(c => c.iid === ev.iid)) throw new Error('event should resolve to discard');
 });
 
 scenario('Smuggle: resource_zone constant buffs friendlies', () => {

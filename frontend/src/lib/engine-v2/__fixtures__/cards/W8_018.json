@@ -1,0 +1,20 @@
+{
+  "id": "W8_018",
+  "name": "Rallied Reinforcements",
+  "type": "event",
+  "cost": 5,
+  "aspects": ["command"],
+  "abilities": [
+    {
+      "type": "cost",
+      "amount": -1,
+      "per": "friendly_leader_units"
+    },
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": { "effect": "draw", "player": "self", "count": 1 }
+    }
+  ]
+}

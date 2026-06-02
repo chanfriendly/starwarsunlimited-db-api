@@ -564,6 +564,97 @@ scenario('Matcher: "Return a unit from your discard pile to your hand." → retu
   if (!td.filter?.and || td.filter.and.length !== 3) throw new Error('expected card_type+trait+cost compound filter');
 });
 
+scenario('Matcher: "You may … If you do, …" → if_did(optional(do), then)', () => {
+  const r = matchCard({ name: 'X', type: 'Event', text: "You may return an enemy unit to its owner's hand. If you do, draw a card." });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'triggered' || a.do.effect !== 'if_did') throw new Error('expected when-played if_did');
+  const d = a.do as { do: { effect: string; do?: { effect: string } }; then: { effect: string } };
+  assertEq(d.do.effect, 'optional', '"You may" → optional wrapper');
+  assertEq(d.do.do?.effect, 'return_to_hand', 'inner do is the bounce');
+  assertEq(d.then.effect, 'draw', 'then is the draw');
+});
+
+scenario('Matcher: non-optional "If you do" compound → if_did without optional wrapper', () => {
+  const r = matchCard({ name: 'Y', type: 'Event', text: 'Deal 2 damage to an enemy unit. If you do, draw a card.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const d = (r.abilities[0] as { do: { effect: string; do: { effect: string }; then: { effect: string } } }).do;
+  assertEq(d.effect, 'if_did', 'if_did');
+  assertEq(d.do.effect, 'damage', 'do is damage (no optional wrapper)');
+  assertEq(d.then.effect, 'draw', 'then is draw');
+});
+
+scenario('Matcher: "If you do" with an untemplated half stays residual (no misfire)', () => {
+  const r = matchCard({ name: 'Z', type: 'Event', text: 'Reverse the polarity. If you do, draw a card.' });
+  assertEq(r.coverage, 'none', 'untemplated do → whole clause residual');
+});
+
+scenario('Matcher: "If you do, X. If you do not, Y." → if_did with then + else_', () => {
+  const r = matchCard({ name: 'X', type: 'Event', text: "You may return an enemy unit to its owner's hand. If you do, draw a card. If you do not, deal 1 damage to the enemy base." });
+  assertEq(r.coverage, 'full', 'coverage');
+  const d = (r.abilities[0] as { do: { effect: string; do: { effect: string }; then?: { effect: string }; else_?: { effect: string } } }).do;
+  assertEq(d.effect, 'if_did', 'if_did');
+  assertEq(d.do.effect, 'optional', '"You may" → optional');
+  assertEq(d.then?.effect, 'draw', 'then is draw');
+  assertEq(d.else_?.effect, 'damage', 'else_ is damage');
+});
+
+scenario('Matcher: "X. If you do not, Y." → if_did with else_ only', () => {
+  const r = matchCard({ name: 'Y', type: 'Event', text: 'Draw a card. If you do not, deal 2 damage to an enemy unit.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const d = (r.abilities[0] as { do: { effect: string; do: { effect: string }; then?: unknown; else_?: { effect: string } } }).do;
+  assertEq(d.effect, 'if_did', 'if_did');
+  assertEq(d.do.effect, 'draw', 'do is draw (no optional)');
+  if (d.then !== undefined) throw new Error('no then branch expected');
+  assertEq(d.else_?.effect, 'damage', 'else_ is damage');
+});
+
+scenario('Matcher: "Take control of an enemy non-leader unit." → take_control', () => {
+  const r = matchCard({ name: 'X', type: 'Event', text: 'Take control of an enemy non-leader unit.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'triggered' || a.do.effect !== 'take_control') throw new Error('expected when-played take_control');
+  const tgt = (a.do as { target: { controller?: string; filter?: unknown } }).target;
+  assertEq(tgt.controller, 'opponent', 'targets enemy');
+  if (!tgt.filter) throw new Error('expected a non-leader filter');
+  // Cost-restricted ground variant → ground arena + compound filter.
+  const cv = matchCard({ name: 'Y', type: 'Event', text: 'Take control of a ground unit that costs 3 or less.' });
+  assertEq(cv.coverage, 'full', 'cost variant coverage');
+  const cd = (cv.abilities[0] as { do: { target: { zone?: string; filter?: { card_cost?: { max?: number } } } } }).do;
+  assertEq(cd.target.zone, 'ground_arena', 'ground arena');
+  assertEq(cd.target.filter?.card_cost?.max, 3, 'cost ≤ 3 filter');
+});
+
+scenario('Matcher: "When this unit is attacked: Draw a card." → attack_declared w/ defender:self', () => {
+  const r = matchCard({ name: 'X', type: 'Unit', text: 'When this unit is attacked: Draw a card.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0] as { type: string; on?: string; where?: { defender?: string }; do: { effect: string } };
+  assertEq(a.type, 'triggered', 'triggered');
+  assertEq(a.on, 'event.attack_declared', 'on attack_declared');
+  assertEq(a.where?.defender, 'self', 'defender:self (this unit is attacked)');
+  assertEq(a.do.effect, 'draw', 'draw');
+});
+
+scenario('Matcher: "This event costs 1 less to play for each friendly leader unit." → cost ability', () => {
+  const r = matchCard({ name: 'X', type: 'Event', text: 'This event costs 1 less to play for each friendly leader unit.\nDraw a card.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const costAb = r.abilities.find(a => a.type === 'cost') as { amount?: number; per?: string } | undefined;
+  if (!costAb) throw new Error('expected a cost ability');
+  assertEq(costAb.amount, -1, 'amount -1');
+  assertEq(costAb.per, 'friendly_leader_units', 'per friendly leader units');
+  // The trailing "Draw a card." still becomes a when-played triggered ability.
+  if (!r.abilities.some(a => a.type === 'triggered')) throw new Error('expected the draw to also match');
+});
+
+scenario('Matcher: flat "This unit costs 2 less to play." → cost ability (no per)', () => {
+  const r = matchCard({ name: 'Y', type: 'Unit', text: 'This unit costs 2 less to play.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const costAb = r.abilities[0] as { type: string; amount?: number; per?: string };
+  assertEq(costAb.type, 'cost', 'cost ability');
+  assertEq(costAb.amount, -2, 'amount -2');
+  if (costAb.per !== undefined) throw new Error('flat reduction has no per');
+});
+
 scenario('Matcher: every emitted ability validates clean (spot set)', () => {
   const samples = [
     { type: 'Event', text: 'Deal 2 damage to a unit or base.' },

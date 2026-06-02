@@ -1,0 +1,25 @@
+{
+  "id": "W8_015",
+  "name": "Contingency Plan",
+  "type": "event",
+  "cost": 2,
+  "aspects": ["cunning"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "do": {
+        "effect": "if_did",
+        "do": {
+          "effect": "optional",
+          "do": {
+            "effect": "return_to_hand",
+            "target": { "zone": "any_arena", "controller": "opponent", "selector": "chosen", "count": 1 }
+          }
+        },
+        "then": { "effect": "draw", "player": "self", "count": 1 },
+        "else_": { "effect": "damage", "amount": 1, "target": { "opponent_base": true } }
+      }
+    }
+  ]
+}

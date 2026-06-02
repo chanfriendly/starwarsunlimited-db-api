@@ -1,0 +1,20 @@
+{
+  "id": "W8_017",
+  "name": "Vigilant Sentry",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["vigilance"],
+  "arena": "ground",
+  "power": 1,
+  "hp": 6,
+  "traits": ["rebel", "trooper"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.attack_declared",
+      "where": { "defender": "self" },
+      "do": { "effect": "draw", "player": "self", "count": 1 }
+    }
+  ]
+}

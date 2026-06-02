@@ -41,12 +41,13 @@ const ZONE_FILTER_EXTRA = new Set(['any_arena', 'any_zone']);
 const PLAYER_REFS = new Set(['self', 'opponent', 'any', 'controller_of_trigger']);
 const EFFECT_KINDS = new Set([
   'damage', 'heal', 'defeat', 'give_shield', 'give_experience', 'draw', 'discard',
-  'exhaust', 'ready', 'give', 'sequence', 'if', 'noop', 'choose_one', 'optional',
+  'exhaust', 'ready', 'give', 'sequence', 'if', 'if_did', 'noop', 'choose_one', 'optional',
   'create_token', 'capture', 'rescue', 'move', 'look_at', 'disclose',
   'search', 'divided_damage', 'return_to_hand', 'return_from_discard',
-  'use_force', 'gain_force', 'power_damage_from_each',
+  'take_control', 'use_force', 'gain_force', 'power_damage_from_each',
 ]);
-const ABILITY_TYPES = new Set(['triggered', 'action', 'constant', 'replacement']);
+const ABILITY_TYPES = new Set(['triggered', 'action', 'constant', 'replacement', 'cost']);
+const COST_COUNTS = new Set(['friendly_leader_units', 'friendly_units', 'friendly_resources']);
 const TRIGGER_CONDITIONS = new Set([
   'event.card_played', 'event.card_drawn', 'event.attack_declared',
   'event.attack_ended', 'event.defeated', 'event.damage_dealt',
@@ -327,6 +328,12 @@ function validateEffect(v: V, path: string, e: unknown) {
       validatePredicate(v, `${path}.condition`, e.condition);
       if ('then' in e) validateEffect(v, `${path}.then`, e.then);
       if ('else' in e) validateEffect(v, `${path}.else`, e.else); break;
+    case 'if_did':
+      need('do', 'do' in e);
+      need('then|else_', 'then' in e || 'else_' in e);
+      if ('do' in e) validateEffect(v, `${path}.do`, e.do);
+      if ('then' in e) validateEffect(v, `${path}.then`, e.then);
+      if ('else_' in e) validateEffect(v, `${path}.else_`, e.else_); break;
     case 'noop': break;
     case 'choose_one':
       if (!Array.isArray(e.options)) v.err(`${path}.options`, 'choose_one requires "options" array');
@@ -355,6 +362,7 @@ function validateEffect(v: V, path: string, e: unknown) {
       if ('target' in e) validateSelector(v, `${path}.target`, e.target);
       if ('to' in e) checkEnum(v, `${path}.to`, e.to, MOVE_TO, 'to'); break;
     case 'return_to_hand':
+    case 'take_control':
       need('target', 'target' in e);
       if ('target' in e) validateSelector(v, `${path}.target`, e.target); break;
     case 'return_from_discard':
@@ -430,6 +438,11 @@ function validateAbility(v: V, path: string, a: unknown) {
       if ('where' in a) validateTriggerPredicate(v, `${path}.where`, a.where);
       if (!('with' in a)) v.err(`${path}.with`, 'replacement ability requires "with"');
       else validateEffect(v, `${path}.with`, a.with);
+      break;
+    case 'cost':
+      if (!isNum(a.amount)) v.err(`${path}.amount`, 'cost ability requires numeric "amount"');
+      if ('per' in a) checkEnum(v, `${path}.per`, a.per, COST_COUNTS, 'per');
+      if ('while' in a) validatePredicate(v, `${path}.while`, a.while);
       break;
   }
 }

@@ -4,6 +4,68 @@ Most recent entry first. Captures *why*, not just *what* — decisions, root cau
 
 ---
 
+### 2026-06-01: Cost reduction — `cost` ability + `effectiveCost` (task #58, session 59)
+
+**First dynamic-cost mechanic.** Cards like "This event costs 1 less to play for each friendly leader unit you control" now reduce their play cost. Modeled as a new `cost`-type ability (`{ type:'cost', amount, per?, while? }`) — not a firing ability but a static self-modifier the cost computation scans for. `amount` is a flat delta (negative = cheaper); `per` (a `CostCount`: `friendly_leader_units` | `friendly_units` | `friendly_resources`) multiplies it by a live board count.
+
+**New `runtime/cost.ts` `effectiveCost(state, reg, spec, pid)`** is the single source of truth, clamped to a minimum of 0 per the Comprehensive Rules ("A card's cost cannot be modified below 0" — verified against the rules PDF). Wired into both cost sites that previously read `spec.cost` directly: `legal.ts` (the PLAY_CARD affordability gate AND the `describeAction` cost display) and `reducer.applyPlayCard` (the actual charge). A deployed leader unit is counted as an arena CardInstance whose `cardId` resolves to a leader spec.
+
+AST: `CostAbility` + `isCost` guard + `CostCount` enum. Validator: `cost` added to `ABILITY_TYPES`, new `COST_COUNTS` set, and a validation case (numeric `amount` required, `per`/`while` checked). Matcher: `parseCostClause` handles the per-X forms (leader units / units / resources) and the flat form, checked first in the clause loop (static text, any card type). The `while` field is plumbed through `effectiveCost` (via an optional `evalWhile` callback to avoid a predicates import cycle) but unused — no in-scope card gates its reduction.
+
+Fixture W8_018 (Rallied Reinforcements: cost 5, −1 per friendly leader unit, +draw). Three engine scenarios: scales 5→3 with 2 leader units; clamps to 0 with 6 (negative reduction floored); PLAY_CARD charges the reduced 4 end-to-end. Two matcher scenarios (per-X leader form; flat form). Verified `npm run play-cli -- --ai both` completes — the shared cost path is exercised by every card play in a full game.
+
+Engine **103** / translate **58** / validate 16, tsc clean, play-cli completes.
+
+### 2026-06-01: "When this unit is attacked" trigger (task #58, session 58)
+
+**Matcher-only — the engine already supported it.** Added a `TRIGGER_PREFIXES` entry: "When this unit is attacked:" → `event.attack_declared` with `where: { defender: 'self' }`. The trigger runtime already emits `ATTACK_DECLARED` carrying the real `defenderIid` and scans the defending unit in `collectTriggers`; `evalTriggerPredicate` already handled `p.defender === 'self'` (matches `event.defenderIid === ctx.sourceIid`). So the only missing piece was the text→AST prefix. Added `defender?: 'self'` to the matcher's local `TrigPrefix.where` type.
+
+Fixture W8_017 (Vigilant Sentry, 1/6 — survives a hit, draws when attacked). Two engine scenarios prove the trigger (a) fires for the defender when it survives the attack, and (b) does NOT fire when the same unit is the attacker (the `defender: 'self'` predicate disambiguates — `ATTACK_DECLARED` is one event seen by both parties). One matcher scenario covers the prefix.
+
+Deferred: a defender trigger that targets *the attacker* needs `trigger_source` to resolve to the attacker specifically (it currently approximates the source controller) — no corpus card in scope needed it yet.
+
+Engine **101** / translate **56** / validate 16, tsc clean.
+
+### 2026-06-01: Control-transfer — `take_control` effect + `owner` model (task #58, session 57)
+
+**New engine primitive + a small state-model addition.** `take_control` (§8.28) makes the source player the controller of a target enemy unit. Control is *positional* in this engine (whichever arena array holds the instance is its controller), so the effect physically moves the instance to the new controller's matching arena (ground→ground, space→space), keeping its ready/exhausted status, damage, and upgrades, and emits `CONTROL_CHANGED`.
+
+**Ownership model:** added `CardInstance.owner?: PlayerId` — set to the original controller only when an opponent takes control. A defeated card returns to its **owner's** discard, not the controller's (§8.28.2); `state_based.processDefeat` now accumulates per-owner discard additions (owner = `inst.owner ?? controller`) and clears the `owner` flag as the card goes home. Upgrades follow the host's owner (no separate-controller model for opponent-played upgrades yet — §1.5.2e deferred).
+
+**Leader rule (§1.6):** a Leader Unit can't change control — it's *defeated instead*. `take_control` detects a deployed-leader target, bumps it to lethal, and lets the state-based loop flip it back. (Real take-control cards say "non-leader unit," so this is a defensive guard, tested directly via `applyEffect` with a leader-eligible selector.)
+
+**⚠ Rules correction:** the prior PROGRESS residual note assumed control reverts "start-of-regroup." Verified against the official Comprehensive Rules PDF (extracted via `pdftotext`): take control is **permanent** ("remain so until either that card leaves play or their opponent takes control" — §8.28.1, §1.5.2d). No regroup-return exists. Another rules-from-memory miss caught at the source, per the CLAUDE.md standing rule.
+
+Wired through AST (`ast.ts` `TakeControlEffect`), interpreter (`interpret.ts applyTakeControl`), state (`types.ts` `owner`), defeat routing (`state_based.ts`), validator (`validate.ts` — shares the `return_to_hand` target-only case), and a matcher template (`match.ts` — "Take control of a[n] [enemy] [non-leader] [ground|space] unit [that costs N or less].").
+
+Fixture W8_016 (Change of Allegiance). Three engine scenarios: control moves the unit + records owner + retains damage/exhausted; a controlled unit defeated returns to the OWNER's discard (and the owner flag clears); a leader unit is defeated-not-moved. One matcher scenario (non-leader + ground/cost variant). Verified `npm run play-cli -- --ai both` still completes (owner-field defeat routing exercised in a full game). Closes the control-transfer residual tracked since session 51.
+
+Engine **99** / translate **55** / validate 16, tsc clean, play-cli completes.
+
+### 2026-06-01: "If you do not" else-branch — `if_did.else_` (task #58, session 56b)
+
+**Extension of the session-56 `if_did` primitive.** Added an optional `else_` effect that resolves when `do` did NOT happen (the inverse of `then`). This covers SWU's "If you do, X. If you do not, Y." (both branches off one `do`) and the standalone "X. If you do not, Y." (else only). The interpreter picks `then` when `do` emitted ≥1 event, else `else_`; a missing branch is a no-op. The validator now requires `do` plus at least one of `then`/`else_` (`then` alone, `else_` alone, or both are all valid).
+
+`then`/`else_` were made optional on `IfDidEffect`. Matcher: the "do not"/"don't" forms are matched **before** the plain "if you do" form (since "do not" contains "do" and the plain regex would otherwise swallow it), via a shared `parseDo` helper that handles the optional "You may" wrapper. As with the then-only form, every referenced half must template or the whole clause stays residual (no half-match misfire). Field is named `else_` (trailing underscore) since `else` is a JS reserved word.
+
+Fixture W8_015 (Contingency Plan — "You may return an enemy unit to its owner's hand. If you do, draw a card. If you do not, deal 1 damage to the enemy base."). Two engine scenarios: accept → `then` (draw) fires and `else_` (base damage) is skipped; decline → `else_` fires and `then` is skipped. Two matcher scenarios (both-branches; else-only). Regression-checked: the then-only W8_014 still parses with `else_` undefined.
+
+Engine **96** / translate **54** / validate 16, tsc clean.
+
+### 2026-06-01: "If you do" conditional compound — `if_did` effect (task #58, session 56)
+
+**New engine primitive (one, scoped).** `if_did` models SWU's "<do>. If you do, <then>." — the follow-up resolves only when the preceding effect actually happened. Shape: `{ do, then }`. The interpreter runs `do`, and runs `then` only if `do` emitted **at least one event**. That event-count proxy is the right semantics for the cases this targets: a declined `optional` and a `chosen`/`defeat`/etc. with no legal target both emit nothing, so `then` correctly skips; a bounce/damage/draw that lands emits events, so `then` fires. `do` is usually an `optional` ("You may return a unit … If you do, draw a card.").
+
+Distinct from `if` (which branches on a *card predicate*, not on whether a prior effect resolved), and a generalization of the `use_force` special case (which is "spend Force token, if you do, X" — still its own effect because it also pays a cost).
+
+Wired through AST (`ast.ts` `IfDidEffect` + union), interpreter (`interpret.ts` — resolves `do`, gates `then` on `do`'s event count), validator (`validate.ts` closed vocab + recursive case for `do`/`then`), and a matcher template in `match.ts` ("<do>. If you do, <then>." → `if_did`, with a leading "You may" on the `do` half becoming an `optional` wrapper; both halves must template or the whole clause stays residual — no half-match misfire).
+
+**Matcher event clause-loop change (small, deliberate):** the event loop now tries the RAW clause through `parseEffectClause` *before* stripping a leading "You may" and wrapping as `optional`. This lets compound clauses parse their own "You may" into the correct position (`if_did(optional(do), then)` rather than `optional(if_did(do, then))`). Verified no regression: a plain "You may draw a card." still yields `optional(draw)`, and "Draw a card." stays bare `draw`.
+
+Fixture W8_014 (Calculated Withdrawal) mirrors the matcher output and is covered by the all-fixtures validate regression. Two engine scenarios prove (a) accepting the optional bounces the enemy AND draws, (b) declining it skips the draw. Three matcher scenarios cover the optional form, the non-optional form, and an untemplated half staying residual. Closes the "If you do compound" residual tracked since session 52.
+
+Engine **94** / translate **52** / validate 16, tsc clean.
+
 ### 2026-05-31: Discard-pile recursion — `return_from_discard` effect (task #58, session 55)
 
 **New engine primitive (one, scoped).** `return_from_discard` moves cards from a player's discard pile to their hand — SWU recursion ("Return a unit from your discard pile to your hand"). Shape: `{ player, filter?, count? }`. The interpreter collects discard cards matching `filter`, prompts the chooser once per pick (mirrors `search`/`disclose` — default chooser takes leftmost), and moves the picks to hand as **fresh** cards (damage / exhaust / shields / Experience / upgrades reset, since a card in hand carries no in-play state — same reset convention as `return_to_hand`). No-op when the discard has no match.

@@ -56,6 +56,18 @@ export function applyEffect(ctx: InterpCtx, effect: Effect): InterpResult {
       return { state: s, events };
     }
 
+    case 'if_did': {
+      // "<do>. If you do, <then>. [If you do not, <else_>.]" Resolve `do`; run
+      // `then` if `do` actually happened, else run `else_`. "Happened" is proxied
+      // by "emitted at least one event" — a declined optional or a no-legal-target
+      // effect emits nothing → the `else_` branch (if any) fires instead.
+      const first = applyEffect(ctx, effect.do);
+      const branch = first.events.length > 0 ? effect.then : effect.else_;
+      if (!branch) return first;
+      const second = applyEffect({ ...ctx, state: first.state }, branch);
+      return { state: second.state, events: [...first.events, ...second.events] };
+    }
+
     case 'if': {
       // `if` is evaluated against the source card (or a target, but Week 2
       // only exercises source-conditioned ifs). Source-card lookup via
@@ -83,6 +95,7 @@ export function applyEffect(ctx: InterpCtx, effect: Effect): InterpResult {
     case 'divided_damage':   return applyDividedDamage(ctx, effect);
     case 'return_to_hand':   return applyReturnToHand(ctx, effect);
     case 'return_from_discard': return applyReturnFromDiscard(ctx, effect);
+    case 'take_control':     return applyTakeControl(ctx, effect);
     case 'use_force':        return applyUseForce(ctx, effect);
     case 'gain_force':       return applyGainForce(ctx, effect);
     case 'power_damage_from_each': return applyPowerDamageFromEach(ctx, effect);
@@ -437,6 +450,51 @@ function applyMove(ctx: InterpCtx, e: Extract<Effect, { effect: 'move' }>): Inte
     newP = dest === 'ground_arena' ? { ...newP, groundArena: toArr } : { ...newP, spaceArena: toArr };
     s = withPlayer(s, t.controller, newP);
     events.push({ kind: 'ARENA_MOVED', iid: t.iid, from: fromZone, to: dest });
+  }
+  return { state: s, events };
+}
+
+function applyTakeControl(ctx: InterpCtx, e: Extract<Effect, { effect: 'take_control' }>): InterpResult {
+  // §8.28: the source player takes control of the target unit. Control is
+  // positional here, so we physically move the instance to the new controller's
+  // matching arena. It keeps ready/exhausted, damage, and upgrades. The original
+  // controller is recorded as `owner` (if not already set) so the unit returns
+  // to its owner's discard on defeat (§8.28.2). A Leader Unit can't change
+  // control — it's defeated instead (§1.6).
+  const targets = resolveSelector(ctx, e.target);
+  const newController = ctx.sourcePlayer;
+  let s = ctx.state;
+  const events: GameEvent[] = [];
+  for (const t of targets) {
+    if (t.kind !== 'unit') continue;
+    const f = findCard(s, t.iid);
+    if (!f) continue;
+    if (f.loc.zone !== 'ground_arena' && f.loc.zone !== 'space_arena') continue;
+    const from = f.loc.controller;
+    if (from === newController) continue; // already control it — no-op
+
+    const ps0 = s.players[from];
+    // Leader Unit changing control → defeated instead (§1.6). Bump to lethal and
+    // let the state-based loop flip it back / route it correctly.
+    if (ps0.leaders.some(l => l.isDeployed && l.unitIid === f.inst.iid)) {
+      s = mapInstance(s, f.inst.iid, c => ({ ...c, damage: c.damage + 9999 }));
+      continue;
+    }
+
+    // Remove from the original controller's arena.
+    const fromArr = getZoneArr(ps0, f.loc.zone).slice();
+    const idx = fromArr.findIndex(c => c.iid === f.inst.iid);
+    if (idx < 0) continue;
+    const moved = { ...fromArr[idx], owner: fromArr[idx].owner ?? from, enteredZoneAt: s.step };
+    fromArr.splice(idx, 1);
+    s = withPlayer(s, from, withZoneArr(ps0, f.loc.zone, fromArr));
+
+    // Add to the new controller's MATCHING arena (ground stays ground, etc.).
+    const ps1 = s.players[newController];
+    const toArr = getZoneArr(ps1, f.loc.zone).slice();
+    toArr.push(moved);
+    s = withPlayer(s, newController, withZoneArr(ps1, f.loc.zone, toArr));
+    events.push({ kind: 'CONTROL_CHANGED', iid: f.inst.iid, from, to: newController });
   }
   return { state: s, events };
 }

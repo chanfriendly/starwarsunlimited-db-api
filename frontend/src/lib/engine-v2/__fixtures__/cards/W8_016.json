@@ -1,0 +1,23 @@
+{
+  "id": "W8_016",
+  "name": "Change of Allegiance",
+  "type": "event",
+  "cost": 4,
+  "aspects": ["cunning"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "do": {
+        "effect": "take_control",
+        "target": {
+          "zone": "any_arena",
+          "controller": "opponent",
+          "selector": "chosen",
+          "count": 1,
+          "filter": { "not": { "card_type": "leader" } }
+        }
+      }
+    }
+  ]
+}

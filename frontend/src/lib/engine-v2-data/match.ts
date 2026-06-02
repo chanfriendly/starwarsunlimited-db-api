@@ -125,6 +125,41 @@ export function parseEffectClause(raw: string): Effect | null {
     return { effect: 'ready', target: { self: true } };
   }
 
+  // if_did conditional compounds (NOT the Force form, matched above). The `do`
+  // half is often "You may …" → optional. ALL referenced halves must template,
+  // else the clause falls through and stays residual (no half-match misfire).
+  // "do not" contains "do", so the do-not forms are checked FIRST.
+  {
+    const parseDo = (raw: string): { do: Effect } | null => {
+      const s = raw.trim();
+      const opt = /^You may /i.test(s);
+      const inner = parseEffectClause(s.replace(/^You may /i, ''));
+      return inner ? { do: opt ? { effect: 'optional', do: inner } : inner } : null;
+    };
+
+    // "<do>. If you do, <then>. If you do not, <else>." (both branches)
+    if ((m = t.match(/^(.+?)\.\s*If you do,?\s+(.+?)\.\s*If you do(?:\s+not|n['’]t),?\s+(.+)$/i))) {
+      const d = parseDo(m[1]);
+      const thenEff = parseEffectClause(m[2].trim());
+      const elseEff = parseEffectClause(m[3].trim());
+      if (d && thenEff && elseEff) return { effect: 'if_did', do: d.do, then: thenEff, else_: elseEff };
+    }
+
+    // "<do>. If you do not, <else>." (else branch only)
+    if ((m = t.match(/^(.+?)\.\s*If you do(?:\s+not|n['’]t),?\s+(.+)$/i))) {
+      const d = parseDo(m[1]);
+      const elseEff = parseEffectClause(m[2].trim());
+      if (d && elseEff) return { effect: 'if_did', do: d.do, else_: elseEff };
+    }
+
+    // "<do>. If you do, <then>." (then branch only)
+    if ((m = t.match(/^(.+?)\.\s*If you do,?\s+(.+)$/i))) {
+      const d = parseDo(m[1]);
+      const thenEff = parseEffectClause(m[2].trim());
+      if (d && thenEff) return { effect: 'if_did', do: d.do, then: thenEff };
+    }
+  }
+
   // Give an/N Experience token(s) to each of up to N <trait> units.
   if ((m = t.match(/^Give an? Experience token to each of up to (\d+) (.+?)\.?$/i))) {
     const cap = parseInt(m[1], 10);
@@ -311,6 +346,19 @@ export function parseEffectClause(raw: string): Effect | null {
     return { effect: 'return_to_hand', target: { self: true } };
   }
 
+  // Take control of a[n] [enemy] [non-leader] [ground|space] unit [that costs N or less]. (§8.28)
+  if ((m = t.match(/^Take control of an? (enemy )?(non-leader )?(ground |space )?unit(?: that costs (\d+) or less)?\.?$/i))) {
+    const controller = m[1] ? 'opponent' : 'any';
+    const zone = m[3] ? (/ground/i.test(m[3]) ? 'ground_arena' : 'space_arena') : 'any_arena';
+    const parts: Predicate[] = [];
+    if (m[2]) parts.push({ not: { card_type: 'leader' } });
+    if (m[4]) parts.push({ card_cost: { max: parseInt(m[4], 10) } });
+    const base: Selector = { zone, controller, selector: 'chosen', count: 1 };
+    const target: Selector = parts.length === 0 ? base
+      : { ...base, filter: parts.length === 1 ? parts[0] : { and: parts } };
+    return { effect: 'take_control', target };
+  }
+
   // Return a [Trait] unit [that costs N or less] from your discard pile to your
   // hand. (discard-pile recursion — distinct from bounce, which moves an
   // in-play unit. "your discard pile" → player: 'self'; restrict to units.)
@@ -363,12 +411,17 @@ interface TrigPrefix {
   re: RegExp;
   on: TrigOn;
   /** explicit `where` override; when absent, a sensible self-based default is used */
-  where?: { card?: 'self'; attacker?: 'self'; controller?: 'self' | 'opponent' };
+  where?: { card?: 'self'; attacker?: 'self'; defender?: 'self'; controller?: 'self' | 'opponent' };
 }
 
 const TRIGGER_PREFIXES: TrigPrefix[] = [
   { re: /^When Played:\s*/i,   on: 'event.card_played' },
   { re: /^On Attack:\s*/i,     on: 'event.attack_declared' },
+  // "When this unit is attacked" — this unit is the DEFENDER of an attack.
+  // Must precede On Attack? No — distinct prefix. Maps to attack_declared with
+  // defender: 'self' (the engine fires attack triggers for both attacker and
+  // defender; the where-predicate disambiguates).
+  { re: /^When this unit is attacked:\s*/i, on: 'event.attack_declared', where: { defender: 'self' } },
   // "When [an] enemy/friendly unit is defeated" — defeat of ANOTHER unit,
   // filtered by the defeated unit's controller. Must precede the self prefix.
   { re: /^When an enemy unit is defeated:\s*/i,        on: 'event.defeated', where: { controller: 'opponent' } },
@@ -492,17 +545,6 @@ function parseConstantClause(clause: string): Ability | null {
       grant: { target: { self: true }, modifier: { power: +m[1], health: +m[2] } },
     };
   }
-  // Coordinate — This unit gets +N/+N.  (Coordinate self-buff; the keyword's
-  // reminder — "While you control 3 or more units, …" — is stripped before this,
-  // leaving the em-dash/en-dash/hyphen-prefixed body. The engine already models
-  // Coordinate as controller_unit_count ≥ 3, e.g. W4_004.) Self-buff shape only.
-  if ((m = clause.match(/^Coordinate\s*[–—-]\s*(?:This unit|He|She|It|They) gets? \+(\d+)\/\+(\d+)\.?$/i))) {
-    return {
-      type: 'constant',
-      while: { controller_unit_count: { min: 3 } },
-      grant: { target: { self: true }, modifier: { power: +m[1], health: +m[2] } },
-    };
-  }
   // Each friendly non-leader unit that costs N or more gains KEYWORD.
   if ((m = clause.match(/^Each friendly non-leader unit that costs (\d+) or more gains ([A-Za-z]+)\.?$/i))) {
     return {
@@ -527,6 +569,32 @@ function parseConstantClause(clause: string): Ability | null {
   // This unit gets +N/+N for each upgrade on (him|this unit|it).
   if ((m = clause.match(/^This unit gets \+(\d+)\/\+(\d+) for each upgrade on (?:him|this unit|it)\.?$/i))) {
     return { type: 'constant', grant: { target: { self: true }, modifier: { per: { count: 'self_upgrades', power: +m[1], health: +m[2] } } } };
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Self cost-reduction: "This <card> costs N less to play [for each <X>]."
+// Emits a `cost` ability (amount negative). Applies to events + units + upgrades.
+// ---------------------------------------------------------------------------
+
+function parseCostClause(clause: string): Ability | null {
+  let m: RegExpMatchArray | null;
+  // "This <card> costs N less to play for each friendly leader unit [you control]."
+  if ((m = clause.match(/^This (?:event|unit|upgrade|card) costs (\d+) less to play for each friendly leader unit(?: you control)?\.?$/i))) {
+    return { type: 'cost', amount: -parseInt(m[1], 10), per: 'friendly_leader_units' };
+  }
+  // "… for each friendly unit [you control]."
+  if ((m = clause.match(/^This (?:event|unit|upgrade|card) costs (\d+) less to play for each friendly unit(?: you control)?\.?$/i))) {
+    return { type: 'cost', amount: -parseInt(m[1], 10), per: 'friendly_units' };
+  }
+  // "… for each resource you control."
+  if ((m = clause.match(/^This (?:event|unit|upgrade|card) costs (\d+) less to play for each resource you control\.?$/i))) {
+    return { type: 'cost', amount: -parseInt(m[1], 10), per: 'friendly_resources' };
+  }
+  // Flat: "This <card> costs N less to play."
+  if ((m = clause.match(/^This (?:event|unit|upgrade|card) costs (\d+) less to play\.?$/i))) {
+    return { type: 'cost', amount: -parseInt(m[1], 10) };
   }
   return null;
 }
@@ -627,8 +695,22 @@ export function matchCard(card: MatchableCard): MatchResult {
   const residual: string[] = [];
 
   for (const clause of clauses) {
+    // Self cost-reduction is static text, identical for any card type — check it
+    // first so it isn't mistaken for a When-Played effect.
+    const costAb = parseCostClause(clause);
+    if (costAb) { abilities.push(costAb); continue; }
+
     if (type === 'event') {
       // Event clause → effect, wrapped as a when-played triggered ability.
+      // Try the RAW clause first: compounds like "You may X. If you do, Y." parse
+      // their own "You may" into the right place (if_did(optional(X), Y)). Only if
+      // that fails do we strip a leading "You may" and wrap the remainder as
+      // optional (the plain "You may <effect>." case).
+      const rawEff = parseEffectClause(clause);
+      if (rawEff) {
+        abilities.push({ type: 'triggered', on: 'event.card_played', where: { card: 'self' }, do: rawEff });
+        continue;
+      }
       const eff = parseEffectClause(clause.replace(/^You may /i, ''));
       if (eff) {
         const optional = /^You may /i.test(clause);

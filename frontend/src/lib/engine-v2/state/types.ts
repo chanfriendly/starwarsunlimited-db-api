@@ -31,6 +31,13 @@ export interface CardInstance {
   capturedByIid?: string;
   enteredZoneAt: number;
   deployedThisTurn?: boolean;
+  /** The card's OWNER (the player who started the game with it in their deck/
+   *  leader/base). Control is positional — whichever arena holds the instance is
+   *  its controller — but ownership is fixed. Absent = owner is the current
+   *  controller (the common case). Set only when an opponent takes control
+   *  (§8.28 Take Control). On defeat a unit returns to its OWNER's discard
+   *  (§8.28.2), not the controller's. */
+  owner?: PlayerId;
   /** Experience tokens on this unit. Each grants +1/+1 (§SWU); they stack and
    *  persist while the unit is in play. Optional — absent = 0. */
   experienceTokens?: number;

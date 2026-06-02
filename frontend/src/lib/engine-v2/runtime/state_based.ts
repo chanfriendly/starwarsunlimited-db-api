@@ -120,23 +120,35 @@ function processDefeat(
   lastKnown: { cardId: string; power: number; hp: number; damage: number; controller: PlayerId },
 ): { state: GameState; events: GameEvent[] } {
   const events: GameEvent[] = [];
-  const p = state.players[pid];
+  const p = state.players[pid];          // pid = current CONTROLLER (arena holder)
   const arr = getZoneArr(p, zone);
   const alive = arr.filter(c => c.iid !== inst.iid);
-  const newDiscard = p.discard.slice();
   let newLeaders = p.leaders;
 
   events.push({ kind: 'DEFEATED', iid: inst.iid, combat: false, lastKnown });
 
+  // A defeated card goes to its OWNER's discard (§8.28.2), which differs from the
+  // controller only when an opponent took control of it. Upgrades follow the
+  // host's owner (they have no separate owner model yet). We accumulate per-owner
+  // discard additions so a controlled unit + its upgrades route correctly.
+  const ownerOf = (c: import('../state/types').CardInstance) => c.owner ?? pid;
+  const discardAdds: Record<PlayerId, import('../state/types').CardInstance[]> = {};
+  const addToDiscard = (owner: PlayerId, card: import('../state/types').CardInstance) => {
+    (discardAdds[owner] ??= []).push(card);
+  };
+
   // Detach upgrades into the host owner's discard (cleared of damage/exhaust).
+  const hostOwner = ownerOf(inst);
   for (const up of inst.upgrades) {
     events.push({ kind: 'UPGRADE_DETACHED', upgradeIid: up.iid, hostIid: inst.iid });
-    newDiscard.push({ ...up, damage: 0, exhausted: false, upgrades: [] });
+    addToDiscard(up.owner ?? hostOwner, { ...up, damage: 0, exhausted: false, upgrades: [], owner: undefined });
   }
 
   const leaderIdx = newLeaders.findIndex(l => l.isDeployed && l.unitIid === inst.iid);
   if (leaderIdx >= 0) {
-    // Leader-unit defeat: flip back, do NOT discard.
+    // Leader-unit defeat: flip back, do NOT discard. (A leader unit can't change
+    // control — §1.6 defeats it first — so its leader entry always lives with the
+    // controller it was deployed under.)
     newLeaders = newLeaders.slice();
     newLeaders[leaderIdx] = {
       ...newLeaders[leaderIdx],
@@ -146,10 +158,14 @@ function processDefeat(
     };
     events.push({ kind: 'LEADER_DEFEATED', player: pid, leaderIid: inst.iid });
   } else {
-    newDiscard.push({ ...inst, damage: 0, exhausted: false, upgrades: [] });
+    addToDiscard(hostOwner, { ...inst, damage: 0, exhausted: false, upgrades: [], owner: undefined });
   }
 
-  let newP = withZoneArr(p, zone, alive);
-  newP = { ...newP, discard: newDiscard, leaders: newLeaders };
-  return { state: withPlayer(state, pid, newP), events };
+  // Remove the unit from the controller's arena, then apply per-owner discard adds.
+  let s = withPlayer(state, pid, { ...withZoneArr(p, zone, alive), leaders: newLeaders });
+  for (const owner of Object.keys(discardAdds)) {
+    const op = s.players[owner];
+    s = withPlayer(s, owner, { ...op, discard: [...op.discard, ...discardAdds[owner]] });
+  }
+  return { state: s, events };
 }
