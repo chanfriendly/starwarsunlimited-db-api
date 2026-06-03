@@ -10,9 +10,9 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Check /health endpoint
+      - name: Check /api/health endpoint
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 https://twinsuns.chanfriendly.duckdns.org/health)
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 https://twinsuns.chanfriendly.duckdns.org/api/health)
           echo "HTTP status: $STATUS"
           if [ "$STATUS" != "200" ]; then
             echo "UNHEALTHY — got $STATUS"
@@ -20,8 +20,15 @@ jobs:
           fi
           echo "OK"
 
+      # Email alert is best-effort. It requires the SMTP_USER / SMTP_PASSWORD /
+      # ALERT_EMAIL repo secrets to be set (`gh secret set ...`). If they are
+      # missing the action errors ("Input required and not supplied: from"),
+      # so continue-on-error keeps that from masking the real health signal —
+      # the failed health-check step above is what marks the run red, and
+      # GitHub also emails the repo owner on any failed scheduled run.
       - name: Send alert on failure
         if: failure()
+        continue-on-error: true
         uses: dawidd6/action-send-mail@v4
         with:
           server_address: smtp.gmail.com
@@ -34,6 +41,6 @@ jobs:
           body: |
             The Twin Suns healthcheck failed at ${{ github.run_id }}.
 
-            URL: https://twinsuns.chanfriendly.duckdns.org/health
+            URL: https://twinsuns.chanfriendly.duckdns.org/api/health
 
             Check Portainer or the TrueNAS Docker stack.

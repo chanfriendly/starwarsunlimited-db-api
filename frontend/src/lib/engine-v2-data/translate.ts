@@ -116,6 +116,13 @@ export function parseKeywords(card: Card): KeywordRef[] {
     }
     out.push(ref);
   }
+  // "While attacking, this unit deals combat damage before the defender" is
+  // printed ability text, not a DB keyword (§1618c / §7.5.6d). Detect it with a
+  // narrow regex (like the Raid/Restore value parsing above) and surface it as
+  // the internal marker keyword the combat core reads. See keywords/combat_first.
+  if (card.text && /deals combat damage before the defender|deals combat damage first/i.test(card.text)) {
+    if (!out.some(k => k.name === 'attacker_combat_first')) out.push({ name: 'attacker_combat_first' });
+  }
   return out;
 }
 

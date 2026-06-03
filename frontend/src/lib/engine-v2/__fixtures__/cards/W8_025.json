@@ -1,0 +1,15 @@
+{
+  "id": "W8_025",
+  "name": "Orbital Bombardment (test)",
+  "type": "event",
+  "cost": 2,
+  "aspects": ["aggression"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": { "effect": "indirect_damage", "amount": 3, "player": "opponent" }
+    }
+  ]
+}

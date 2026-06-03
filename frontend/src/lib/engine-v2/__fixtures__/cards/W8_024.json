@@ -1,0 +1,12 @@
+{
+  "id": "W8_024",
+  "name": "Sturdy Incinerator (test)",
+  "type": "unit",
+  "cost": 2,
+  "aspects": ["villainy"],
+  "arena": "ground",
+  "power": 1,
+  "hp": 9,
+  "traits": ["imperial", "trooper"],
+  "keywords": [{ "name": "attacker_combat_first" }]
+}

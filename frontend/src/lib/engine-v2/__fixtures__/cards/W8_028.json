@@ -1,0 +1,20 @@
+{
+  "id": "W8_028",
+  "name": "Wanted Mark (test)",
+  "type": "unit",
+  "cost": 2,
+  "aspects": ["cunning"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 2,
+  "traits": ["bounty hunter"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.defeated",
+      "where": { "card": "self" },
+      "controlled_by": "opponent",
+      "do": { "effect": "optional", "do": { "effect": "draw", "player": "self", "count": 1 } }
+    }
+  ]
+}

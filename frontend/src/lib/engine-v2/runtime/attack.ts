@@ -134,15 +134,38 @@ export function resolveAttack(
   } else {
     const defenderFound = findCard(s, defenderIid);
     if (!defenderFound) throw new Error(`Defender ${defenderIid} not found`);
+    // Power snapshot for the SIMULTANEOUS case (§7.5.6c): both deal damage
+    // computed BEFORE any lands, so a defender with Grit gets no bonus.
     const defenderPower = effectivePower(s, reg, defenderFound.inst, oppId);
     const defenderHpBefore = effectiveHp(s, reg, defenderFound.inst, oppId) - defenderFound.inst.damage;
+
+    // "Deals combat damage before the defender" (§1618c / §7.5.6d): the attacker
+    // deals first; the defender (the unit dealing second) must SURVIVE that damage
+    // to deal combat damage back. If defeated, it deals none.
+    const attackerDealsFirst = hasEffectiveKeyword(s, reg, attackerFound.inst, pid, 'attacker_combat_first');
 
     const d1 = dealDamageToUnit(s, reg, defenderIid, attackerPower, { combat: true }, attackerIid, chooser);
     s = d1.state;
     events.push(...d1.events);
-    const d2 = dealDamageToUnit(s, reg, attackerIid, defenderPower, { combat: true }, defenderIid, chooser);
-    s = d2.state;
-    events.push(...d2.events);
+
+    if (attackerDealsFirst) {
+      // Did the defender survive the first damage?
+      const dn = findCard(s, defenderIid);
+      const defenderSurvives = !!dn && (effectiveHp(s, reg, dn.inst, oppId) - dn.inst.damage) > 0;
+      if (defenderSurvives) {
+        // Recompute the defender's power AFTER taking damage so a Grit defender
+        // gets the bonus from the damage just dealt to it (§7.5.6d).
+        const returnPower = effectivePower(s, reg, dn!.inst, oppId);
+        const d2 = dealDamageToUnit(s, reg, attackerIid, returnPower, { combat: true }, defenderIid, chooser);
+        s = d2.state;
+        events.push(...d2.events);
+      }
+      // else: defender defeated by the first damage → no combat damage in return.
+    } else {
+      const d2 = dealDamageToUnit(s, reg, attackerIid, defenderPower, { combat: true }, defenderIid, chooser);
+      s = d2.state;
+      events.push(...d2.events);
+    }
 
     const attackerHasOverwhelm = hasEffectiveKeyword(s, reg, attackerFound.inst, pid, 'overwhelm');
     if (attackerHasOverwhelm) {
@@ -157,7 +180,7 @@ export function resolveAttack(
     }
 
     events.push({ kind: 'ATTACK_ENDED', attackerIid, defenderIid, damageDealt: attackerPower });
-    s = log(s, `${pid} attacks ${defenderIid} (${attackerPower} vs ${defenderPower}).`, pid);
+    s = log(s, `${pid} attacks ${defenderIid} (${attackerPower} vs ${defenderPower})${attackerDealsFirst ? ' — deals damage first' : ''}.`, pid);
   }
 
   s = expireLastingEffects(s, 'end_of_attack');

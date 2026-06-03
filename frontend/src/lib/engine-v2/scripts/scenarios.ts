@@ -144,6 +144,174 @@ scenario('Grit in simultaneous combat: defender deals PRE-damage power (§7.5.6c
   assertEq(effectivePower(r.next, reg, defAfter, 'p2'), 3, 'Grit now reads 3 power (1 damage) for subsequent reads');
 });
 
+scenario('Deals damage first: defeats defender → takes NO return damage (§1618c)', () => {
+  // Incinerator Trooper (2/2, attacker_combat_first) attacks a 2/2 vanilla unit.
+  // It deals 2 first → defender (2 HP) is defeated → the defender deals no combat
+  // damage back, so the attacker ends combat unharmed. (Without the ability the
+  // attacker would take 2 — see the regression scenario below.)
+  const attacker = mkInst('W8_023', { iid: 'inc-atk' });    // 2/2 deals-first
+  const defender = mkInst('W2_009', { iid: 'van-def' });    // 2/2 vanilla
+  const state = emptyState({ groundP1: [attacker], groundP2: [defender], deckP1: [mkInst('W2_009')], deckP2: [mkInst('W2_009')], active: 'p1' });
+  const r = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: 'inc-atk', defenderIid: 'van-def' }, reg);
+  const atkAfter = r.next.players.p1.groundArena.find(c => c.iid === 'inc-atk');
+  const defAfter = r.next.players.p2.groundArena.find(c => c.iid === 'van-def');
+  if (!atkAfter) throw new Error('deals-first attacker should survive (took no return damage)');
+  assertEq(atkAfter.damage, 0, 'attacker took NO return damage (defender defeated before it could deal back)');
+  if (defAfter) throw new Error('defender should be defeated by the first damage');
+});
+
+scenario('Deals damage first: defender SURVIVES → deals back, with Grit bonus (§7.5.6d)', () => {
+  // A deals-first attacker (1 power, 9 HP) attacks a 4/5 Grit Wampa. It deals 1
+  // first; the Wampa survives (1 damage, 4 HP left), so it deals combat damage
+  // back — and because it now has 1 damage, Grit adds +1, so it returns 5 (4+1),
+  // NOT 4. This is the §7.5.6d nuance (contrast §7.5.6c simultaneous: no bonus).
+  const attacker = mkInst('W8_024', { iid: 'inc-atk' });    // 1/9 deals-first
+  const wampa = mkInst('W2_001', { iid: 'grit-def' });      // 4/5 Grit
+  const state = emptyState({ groundP1: [attacker], groundP2: [wampa], deckP1: [mkInst('W2_009')], deckP2: [mkInst('W2_009')], active: 'p1' });
+  const r = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: 'inc-atk', defenderIid: 'grit-def' }, reg);
+  const atkAfter = r.next.players.p1.groundArena.find(c => c.iid === 'inc-atk');
+  const defAfter = r.next.players.p2.groundArena.find(c => c.iid === 'grit-def');
+  if (!atkAfter) throw new Error('1/9 attacker should survive 5 return damage');
+  if (!defAfter) throw new Error('4/5 Grit Wampa should survive 1 combat damage');
+  assertEq(defAfter.damage, 1, 'Wampa took the attacker 1 power');
+  assertEq(atkAfter.damage, 5, 'attacker took 5 = Wampa 4 + Grit 1 (bonus from the damage just dealt to it)');
+});
+
+scenario('No deals-first: simultaneous combat still hurts the attacker even if defender dies (regression)', () => {
+  // Contrast: a vanilla 3/3 attacker defeats a 2/2 defender, but combat is
+  // simultaneous — the attacker still takes the defender's 2 power.
+  const attacker = mkInst('W1_001', { iid: 'van-atk' });    // 3/3 vanilla
+  const defender = mkInst('W2_009', { iid: 'van-def' });    // 2/2 vanilla
+  const state = emptyState({ groundP1: [attacker], groundP2: [defender], deckP1: [mkInst('W2_009')], deckP2: [mkInst('W2_009')], active: 'p1' });
+  const r = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: 'van-atk', defenderIid: 'van-def' }, reg);
+  const atkAfter = r.next.players.p1.groundArena.find(c => c.iid === 'van-atk');
+  const defAfter = r.next.players.p2.groundArena.find(c => c.iid === 'van-def');
+  if (!atkAfter) throw new Error('3/3 attacker should survive 2 damage');
+  assertEq(atkAfter.damage, 2, 'attacker took the defender 2 power (simultaneous — no deals-first)');
+  if (defAfter) throw new Error('defender should be defeated');
+});
+
+scenario('Indirect damage: default assigns all to the recipient base', () => {
+  // "Deal 3 indirect damage to the defending player" (§8.35). Default chooser
+  // dumps all 3 on the recipient's base (leftmost slot) — behavior-preserving.
+  const event = mkInst('W8_025', { iid: 'bomb' });
+  const enemy = mkInst('W2_001', { iid: 'tgt' });           // 4/5
+  const state = emptyState({ handP1: [event], resourcesP1: 2, groundP2: [enemy], active: 'p1' });
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'bomb' }, reg);
+  assertEq(r.next.players.p2.base.damage, 3, 'all 3 indirect on base by default');
+  const tgt = r.next.players.p2.groundArena.find(c => c.iid === 'tgt');
+  assertEq(tgt?.damage ?? -1, 0, 'recipient unit untouched');
+});
+
+scenario('Indirect damage: recipient distributes among base + units (§8.35.1)', () => {
+  const event = mkInst('W8_025', { iid: 'bomb' });
+  const enemy = mkInst('W2_001', { iid: 'tgt' });           // 4/5, survives 2
+  const state = emptyState({ handP1: [event], resourcesP1: 2, groundP2: [enemy], active: 'p1' });
+  // The RECIPIENT (p2) assigns: 1 to base, 2 to the Wampa.
+  const chooser = scriptedChooser([
+    { kind: 'option', value: '__base__' },
+    { kind: 'option', value: 'tgt' },
+    { kind: 'option', value: 'tgt' },
+  ]);
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'bomb' }, reg, chooser);
+  assertEq(r.next.players.p2.base.damage, 1, 'base took 1');
+  const tgt = r.next.players.p2.groundArena.find(c => c.iid === 'tgt');
+  assertEq(tgt?.damage ?? -1, 2, 'Wampa took 2 and survives (4/5)');
+});
+
+scenario('Indirect damage: ignores Shield tokens without consuming them (§8.35.2a)', () => {
+  const event = mkInst('W8_025', { iid: 'bomb' });
+  const shielded = mkInst('W2_001', { iid: 'tgt', shieldTokens: 1 });   // 4/5 + 1 shield
+  const state = emptyState({ handP1: [event], resourcesP1: 2, groundP2: [shielded], active: 'p1' });
+  const chooser = scriptedChooser([
+    { kind: 'option', value: 'tgt' },
+    { kind: 'option', value: 'tgt' },
+    { kind: 'option', value: 'tgt' },
+  ]);
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'bomb' }, reg, chooser);
+  const tgt = r.next.players.p2.groundArena.find(c => c.iid === 'tgt');
+  assertEq(tgt?.damage ?? -1, 3, 'all 3 landed despite the shield (indirect is unpreventable)');
+  assertEq(tgt?.shieldTokens ?? -1, 1, 'shield NOT consumed (§8.35.2a)');
+});
+
+scenario('Indirect damage: per-unit cap = remaining HP, overflow spills to base (§8.35.3)', () => {
+  const event = mkInst('W8_025', { iid: 'bomb' });
+  const small = mkInst('W2_009', { iid: 'small' });         // 2/2
+  const state = emptyState({ handP1: [event], resourcesP1: 2, groundP2: [small], active: 'p1' });
+  // Try to dump all 3 on the 2-HP unit; the cap forces the 3rd onto the base.
+  const chooser = scriptedChooser([
+    { kind: 'option', value: 'small' },
+    { kind: 'option', value: 'small' },
+    { kind: 'option', value: 'small' },
+  ]);
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'bomb' }, reg, chooser);
+  if (r.next.players.p2.groundArena.some(c => c.iid === 'small')) throw new Error('2-HP unit should be defeated by 2 indirect');
+  assertEq(r.next.players.p2.base.damage, 1, '3rd point spilled to base (cannot exceed remaining HP)');
+});
+
+scenario('Play as resource: event becomes an exhausted resource, not discard (Resupply)', () => {
+  // Cost 3: pay 3 (exhaust them), then the event itself enters the resource zone
+  // exhausted (§2046) instead of going to discard — net +1 permanent resource.
+  const event = mkInst('W8_026', { iid: 'resup' });
+  const state = emptyState({ handP1: [event], resourcesP1: 3, active: 'p1' });
+  const before = state.players.p1.resources.length;          // 3
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'resup' }, reg);
+  const res = r.next.players.p1.resources.find(c => c.iid === 'resup');
+  if (!res) throw new Error('event should be in the resource zone');
+  assertEq(res.exhausted, true, 'new resource enters exhausted (§2046)');
+  assertEq(r.next.players.p1.resources.length, before + 1, 'net +1 resource');
+  if (r.next.players.p1.discard.some(c => c.iid === 'resup')) throw new Error('event should NOT be in discard');
+  if (r.next.players.p1.hand.some(c => c.iid === 'resup')) throw new Error('event should leave hand');
+});
+
+scenario('Attacks-and-defeats trigger: the attacker gains Experience (Darth Revan)', () => {
+  // Revan in play. A DIFFERENT friendly unit (3/3) attacks and defeats a 2/2.
+  // Revan's "When a friendly unit attacks and defeats a unit" fires → the
+  // attacker (trigger_source) gets an Experience token.
+  const revan = mkInst('W8_027', { iid: 'revan' });
+  const attacker = mkInst('W1_001', { iid: 'atk' });        // 3/3
+  const prey = mkInst('W2_009', { iid: 'prey' });           // 2/2 — defeated by 3
+  const state = emptyState({ groundP1: [revan, attacker], groundP2: [prey], deckP1: [mkInst('W2_009')], deckP2: [mkInst('W2_009')], active: 'p1' });
+  const r = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: 'atk', defenderIid: 'prey' }, reg, scriptedChooser([{ kind: 'yes' }]));
+  if (r.next.players.p2.groundArena.some(c => c.iid === 'prey')) throw new Error('prey should be defeated');
+  const atkAfter = r.next.players.p1.groundArena.find(c => c.iid === 'atk');
+  assertEq(atkAfter?.experienceTokens ?? 0, 1, 'attacker gained 1 Experience for attacking-and-defeating');
+});
+
+scenario('Attacks-and-defeats trigger: does NOT fire when the defender survives', () => {
+  const revan = mkInst('W8_027', { iid: 'revan' });
+  const attacker = mkInst('W1_001', { iid: 'atk' });        // 3/3
+  const wall = mkInst('W8_017', { iid: 'wall' });           // 1/6 — survives 3
+  const state = emptyState({ groundP1: [revan, attacker], groundP2: [wall], deckP1: [mkInst('W2_009')], deckP2: [mkInst('W2_009')], active: 'p1' });
+  const r = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: 'atk', defenderIid: 'wall' }, reg, scriptedChooser([{ kind: 'yes' }]));
+  const atkAfter = r.next.players.p1.groundArena.find(c => c.iid === 'atk');
+  assertEq(atkAfter?.experienceTokens ?? 0, 0, 'no Experience — the attack did not defeat the unit');
+});
+
+scenario('Bounty: the player who defeats the unit (the opponent) collects it (§13a/f)', () => {
+  // p1 owns a 2/2 with "Bounty — Draw a card". p2 attacks and defeats it.
+  // The bounty is resolved by p2 (the opponent of the unit's controller), so
+  // p2 — NOT p1 — may draw.
+  const mark = mkInst('W8_028', { iid: 'mark' });           // p1's bounty unit
+  const killer = mkInst('W1_001', { iid: 'killer' });       // p2's 3/3
+  const state = emptyState({ groundP1: [mark], groundP2: [killer], deckP1: [mkInst('W2_009')], deckP2: [mkInst('W2_009'), mkInst('W2_009')], active: 'p2' });
+  const p1HandBefore = state.players.p1.hand.length;
+  const p2HandBefore = state.players.p2.hand.length;
+  const r = step(state, { kind: 'ATTACK', player: 'p2', attackerIid: 'killer', defenderIid: 'mark' }, reg, scriptedChooser([{ kind: 'yes' }]));
+  if (r.next.players.p1.groundArena.some(c => c.iid === 'mark')) throw new Error('bounty unit should be defeated');
+  assertEq(r.next.players.p2.hand.length, p2HandBefore + 1, 'the DEFEATING player (p2) drew the bounty');
+  assertEq(r.next.players.p1.hand.length, p1HandBefore, 'the unit owner (p1) did NOT draw');
+});
+
+scenario('Bounty: collecting is optional — declined → no effect (§13e)', () => {
+  const mark = mkInst('W8_028', { iid: 'mark' });
+  const killer = mkInst('W1_001', { iid: 'killer' });
+  const state = emptyState({ groundP1: [mark], groundP2: [killer], deckP1: [mkInst('W2_009')], deckP2: [mkInst('W2_009'), mkInst('W2_009')], active: 'p2' });
+  const p2HandBefore = state.players.p2.hand.length;
+  const r = step(state, { kind: 'ATTACK', player: 'p2', attackerIid: 'killer', defenderIid: 'mark' }, reg, declineChooser);
+  assertEq(r.next.players.p2.hand.length, p2HandBefore, 'declined bounty → no draw');
+});
+
 scenario('Grit: undamaged Wampa has printed power only', () => {
   const wampa = mkInst('W2_001');
   const state = emptyState({ groundP1: [wampa] });

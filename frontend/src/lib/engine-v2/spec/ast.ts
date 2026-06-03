@@ -419,6 +419,31 @@ export interface DividedDamageEffect {
   indirect?: boolean;      // default true
 }
 
+/** Indirect damage to a player (§8.35). "Deal N indirect damage to a player":
+ *  choose a player — THAT player assigns N unpreventable damage, divided as they
+ *  choose, among their base and any of their units, capped per unit at its
+ *  remaining HP (§8.35.3), all simultaneously (§8.35.5), ignoring Shield tokens
+ *  without consuming them (§8.35.2a). The ASSIGNING player is the recipient
+ *  (`player`), NOT the source's controller — unlike `divided_damage`, where the
+ *  source distributes. `player` is almost always 'opponent' ("the defending
+ *  player"). Distinct from a `damage` effect with `indirect: true` (that targets
+ *  specific units/base chosen by the ability; this hands assignment to the
+ *  recipient over their whole board). */
+export interface IndirectDamageEffect {
+  effect: 'indirect_damage';
+  amount: number;
+  player: PlayerRef;
+}
+
+/** "Put this event into play as a resource" (Resupply). The source event card
+ *  becomes a resource in its controller's resource zone instead of going to the
+ *  discard pile. The new resource enters play exhausted (§2046 — a resource put
+ *  into play by an ability enters exhausted). Self-referential: always acts on
+ *  the source card, so it carries no target. */
+export interface PlayAsResourceEffect {
+  effect: 'play_as_resource';
+}
+
 export type Effect =
   | DamageEffect
   | HealEffect
@@ -444,6 +469,8 @@ export type Effect =
   | DiscloseEffect
   | SearchEffect
   | DividedDamageEffect
+  | IndirectDamageEffect
+  | PlayAsResourceEffect
   | ReturnToHandEffect
   | ReturnFromDiscardEffect
   | TakeControlEffect
@@ -489,6 +516,11 @@ export interface TriggerPredicate {
   controller?: PlayerRef;
   attacker?: 'self' | 'trigger_source';
   defender?: 'self' | 'trigger_source';
+  /** For attack events: true → the defender was DEFEATED by this attack ("…
+   *  attacks and defeats a unit"). Evaluated after state-based actions have run
+   *  (the defeated defender is already out of play), so it reads "defenderIid no
+   *  longer in an arena". A base defender never counts as a defeated unit. */
+  defender_defeated?: boolean;
   card_trait?: string;
   card_type?: string;
   card_aspect?: AspectIcon;

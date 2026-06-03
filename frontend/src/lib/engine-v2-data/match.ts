@@ -85,6 +85,9 @@ const KEYWORD_WORDS = new Set([
 function experienceTargetSelector(phrase: string): Selector {
   const p = phrase.trim().toLowerCase().replace(/\.$/, '');
   if (/^this (unit|leader)$/.test(p)) return { self: true };
+  // "that friendly unit" / "that unit" — the unit named by the trigger (for
+  // attack-and-defeat triggers, the attacker). Resolves via trigger_source.
+  if (/^that (?:friendly )?unit$/.test(p)) return { trigger_source: true };
   const enemy = /\benemy\b/.test(p);
   const controller = enemy ? 'opponent' : 'self';
   // Trait qualifier: "an Imperial unit", "a Trooper unit" → card_trait filter.
@@ -120,9 +123,22 @@ export function parseEffectClause(raw: string): Effect | null {
     return { effect: 'gain_force', player: 'self' };
   }
 
+  // Put this event into play as a resource. (Resupply — the event becomes a
+  // resource instead of going to the discard pile.)
+  if (/^Put this (?:event|card) into play as a resource\.?$/i.test(t)) {
+    return { effect: 'play_as_resource' };
+  }
+
   // Ready this unit. (self)
   if (/^Ready this unit\.?$/i.test(t)) {
     return { effect: 'ready', target: { self: true } };
+  }
+
+  // Exhaust this unit/leader. (self — used as a self-cost in "You may exhaust
+  // this leader. If you do, …"). Exhausting an already-exhausted source no-ops,
+  // so the if_did "then" correctly won't fire when the cost can't be paid.
+  if (/^Exhaust this (?:unit|leader)\.?$/i.test(t)) {
+    return { effect: 'exhaust', target: { self: true } };
   }
 
   // Multi-attack (§ sequential attacks). "This unit attacks again." (1 more),
@@ -295,9 +311,11 @@ export function parseEffectClause(raw: string): Effect | null {
     return { effect: 'heal', amount: parseInt(m[1], 10), target: chosenFriendlyUnit };
   }
 
-  // Deal N indirect damage to a player / the defending player / each opponent → opponent base, indirect.
+  // Deal N indirect damage to a player / the defending player / each opponent
+  // (§8.35): the opponent assigns N among their base + units. (Trailing
+  // parenthetical reminder text is already stripped by stripReminders upstream.)
   if ((m = t.match(/^Deal (\d+) indirect damage to (?:the defending player|a player|your opponent|the opponent|each opponent)\.?$/i))) {
-    return { effect: 'damage', amount: parseInt(m[1], 10), target: opponentBase, indirect: true };
+    return { effect: 'indirect_damage', amount: parseInt(m[1], 10), player: 'opponent' };
   }
 
   // Give an (enemy) unit -N/-N for this phase. (en-dash, em-dash, or hyphen)
@@ -419,12 +437,12 @@ export function parseModalEffect(raw: string): Effect | null {
 // Triggered-prefix detection (units): "When Played:", "On Attack:", etc.
 // ---------------------------------------------------------------------------
 
-type TrigOn = 'event.card_played' | 'event.attack_declared' | 'event.defeated';
+type TrigOn = 'event.card_played' | 'event.attack_declared' | 'event.attack_ended' | 'event.defeated';
 interface TrigPrefix {
   re: RegExp;
   on: TrigOn;
   /** explicit `where` override; when absent, a sensible self-based default is used */
-  where?: { card?: 'self'; attacker?: 'self'; defender?: 'self'; controller?: 'self' | 'opponent' };
+  where?: { card?: 'self'; attacker?: 'self'; defender?: 'self'; controller?: 'self' | 'opponent'; defender_defeated?: boolean };
 }
 
 const TRIGGER_PREFIXES: TrigPrefix[] = [
@@ -435,12 +453,37 @@ const TRIGGER_PREFIXES: TrigPrefix[] = [
   // defender: 'self' (the engine fires attack triggers for both attacker and
   // defender; the where-predicate disambiguates).
   { re: /^When this unit is attacked:\s*/i, on: 'event.attack_declared', where: { defender: 'self' } },
+  // "When a friendly unit attacks and defeats a unit" / "When this unit attacks
+  // and defeats a unit" — fires on attack RESOLUTION (attack_ended) where the
+  // attack defeated the defending unit. "that friendly unit" / "this unit" is the
+  // attacker (trigger_source). Must precede the bare On Attack prefix.
+  { re: /^When a(?:nother)? friendly unit attacks and defeats a unit:\s*/i, on: 'event.attack_ended', where: { controller: 'self', defender_defeated: true } },
+  { re: /^When this unit attacks and defeats a unit:\s*/i, on: 'event.attack_ended', where: { attacker: 'self', defender_defeated: true } },
   // "When [an] enemy/friendly unit is defeated" — defeat of ANOTHER unit,
   // filtered by the defeated unit's controller. Must precede the self prefix.
   { re: /^When an enemy unit is defeated:\s*/i,        on: 'event.defeated', where: { controller: 'opponent' } },
   { re: /^When a(?:nother)? friendly unit is defeated:\s*/i, on: 'event.defeated', where: { controller: 'self' } },
   { re: /^When Defeated:\s*/i, on: 'event.defeated' },   // self
 ];
+
+/** "Bounty — <effect>" (§13). Resolves like a "When Defeated/When Captured"
+ *  triggered ability, except it is controlled by an OPPONENT of the unit's
+ *  controller (the player who defeated/captured it), and collecting it is
+ *  optional (§13e). We model the "When Defeated" half; capture isn't an event
+ *  the engine fires yet. The trailing reminder is already stripped upstream. */
+function parseBountyClause(clause: string): Ability | null {
+  const m = clause.match(/^Bounty\s*[—–-]\s*(.+)$/i);
+  if (!m) return null;
+  const inner = parseEffectClause(m[1].trim());
+  if (!inner) return null;
+  return {
+    type: 'triggered',
+    on: 'event.defeated',
+    where: { card: 'self' },
+    controlled_by: 'opponent',
+    do: { effect: 'optional', do: inner },
+  };
+}
 
 /** Try to parse a unit clause that begins with a triggered prefix into a
  *  TriggeredAbility. Returns null if no prefix or the body doesn't parse. */
@@ -738,6 +781,9 @@ export function matchCard(card: MatchableCard): MatchResult {
     // constant aura.
     const action = parseActionClause(clause);
     if (action) { abilities.push(action); continue; }
+
+    const bounty = parseBountyClause(clause);
+    if (bounty) { abilities.push(bounty); continue; }
 
     const trig = parseTriggeredClause(clause);
     if (trig) { abilities.push(trig); continue; }

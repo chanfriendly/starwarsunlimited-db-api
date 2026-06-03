@@ -18,9 +18,10 @@ import { capture, rescue } from '../primitives/capture';
 import { resolveSelector } from './selectors';
 import { evalCardPredicate, resolvePlayer, type EvalCtx } from './predicates';
 import { findCard, withPlayer, mapInstance, getZoneArr, withZoneArr } from '../state/zones';
+import { moveToZone } from '../primitives/move';
 import { defaultChooser } from './chooser';
 import { dealDamageToBase, dealDamageToUnit } from './damage';
-import { effectivePower } from './modifiers';
+import { effectivePower, effectiveHp } from './modifiers';
 import { shuffleDeterministic } from '../util/rng';
 import { resolveAttack, attackIllegalReason } from './attack';
 
@@ -94,6 +95,8 @@ export function applyEffect(ctx: InterpCtx, effect: Effect): InterpResult {
     case 'disclose':         return applyDisclose(ctx, effect);
     case 'search':           return applySearch(ctx, effect);
     case 'divided_damage':   return applyDividedDamage(ctx, effect);
+    case 'indirect_damage':  return applyIndirectDamage(ctx, effect);
+    case 'play_as_resource': return applyPlayAsResource(ctx);
     case 'return_to_hand':   return applyReturnToHand(ctx, effect);
     case 'return_from_discard': return applyReturnFromDiscard(ctx, effect);
     case 'take_control':     return applyTakeControl(ctx, effect);
@@ -216,6 +219,16 @@ function applyDamage(ctx: InterpCtx, e: Extract<Effect, { effect: 'damage' }>): 
     const r = applyDamageToTarget(s, ctx.reg, t, amount, !!e.combat, !!e.unpreventable, !!e.indirect, ctx.sourceIid, ctx.chooser);
     s = r.state;
     events.push(...r.events);
+    // Surface ability damage in the game log (combat damage logs separately in
+    // attack.ts). Without this, e.g. TIE Bomber's "deal 3 indirect to the
+    // defending player" landed silently.
+    if (amount > 0) {
+      const where = t.kind === 'base'
+        ? `${t.controller}'s base`
+        : (ctx.reg.cards[findCard(s, t.iid)?.inst.cardId ?? '']?.name ?? t.iid);
+      const tag = e.indirect ? ' indirect' : '';
+      s = { ...s, log: [...s.log, { round: s.round, player: ctx.sourcePlayer, message: `Deals ${amount}${tag} damage to ${where}.`, kind: amount >= 5 ? 'critical' : 'info' }] };
+    }
   }
   return { state: s, events };
 }
@@ -715,6 +728,85 @@ function applyDividedDamage(ctx: InterpCtx, e: Extract<Effect, { effect: 'divide
     remaining -= 1;
   }
   return { state: s, events };
+}
+
+// "Deal N indirect damage to a player" (§8.35). The RECIPIENT (the chosen
+// player) assigns N unpreventable damage among their base and units, divided as
+// they choose, capped per unit at remaining HP (§8.35.3), all simultaneously
+// (§8.35.5), ignoring Shield tokens without consuming them (§8.35.2a).
+// Attribution stays with the source (§8.35.4). The assigning player is the
+// recipient, so the chooser's `player` is the recipient — that's what surfaces
+// the assignment prompt to the right side in the UI.
+function applyIndirectDamage(ctx: InterpCtx, e: Extract<Effect, { effect: 'indirect_damage' }>): InterpResult {
+  const recipient = resolvePlayerStrict(e.player, ctx);
+  const p = ctx.state.players[recipient];
+  if (!p || e.amount <= 0) return { state: ctx.state, events: [] };
+  const chooser = ctx.chooser ?? defaultChooser;
+
+  // Assignable slots: the recipient's base (uncapped) + each of their units,
+  // capped at remaining HP. Caps use pre-damage HP so the allocation is
+  // simultaneous (a unit can be assigned at most its remaining HP this ability).
+  type Slot = { key: string; iid?: string; cap: number; assigned: number };
+  const slots: Slot[] = [{ key: '__base__', cap: Infinity, assigned: 0 }];
+  for (const z of ['ground_arena', 'space_arena'] as const) {
+    for (const c of getZoneArr(p, z)) {
+      const remaining = effectiveHp(ctx.state, ctx.reg, c, recipient) - c.damage;
+      if (remaining > 0) slots.push({ key: c.iid, iid: c.iid, cap: remaining, assigned: 0 });
+    }
+  }
+
+  // The recipient assigns each point. Default chooser dumps on the leftmost slot
+  // (the base) — behavior-preserving vs the old "all to base" model and a sane
+  // AI default (spare your own units). A scripted/human chooser distributes.
+  let remaining = e.amount;
+  while (remaining > 0) {
+    const eligible = slots.filter(s => s.assigned < s.cap);
+    if (eligible.length === 0) break; // base is uncapped, so this can't actually happen
+    const options = eligible.map(s => ({
+      label: s.iid
+        ? (ctx.reg.cards[findCard(ctx.state, s.iid)?.inst.cardId ?? '']?.name ?? s.iid)
+        : `${recipient}'s base`,
+      value: s.key,
+    }));
+    const pick = chooser({ kind: 'choose_one', prompt: `Assign 1 of ${remaining} indirect damage`, options, player: recipient, canPass: false });
+    const key = pick.kind === 'option' ? pick.value : eligible[0].key;
+    const slot = slots.find(s => s.key === key && s.assigned < s.cap) ?? eligible[0];
+    slot.assigned += 1;
+    remaining -= 1;
+  }
+
+  // Apply the full allocation (unpreventable + indirect: ignores shields without
+  // consuming them). State-based defeats run after this returns, so all damage
+  // lands before any defeat → simultaneous.
+  let s = ctx.state;
+  const events: GameEvent[] = [];
+  for (const slot of slots) {
+    if (slot.assigned <= 0) continue;
+    const r = slot.iid
+      ? dealDamageToUnit(s, ctx.reg, slot.iid, slot.assigned, { indirect: true, unpreventable: true }, ctx.sourceIid, chooser)
+      : dealDamageToBase(s, ctx.reg, recipient, slot.assigned, { indirect: true, unpreventable: true }, ctx.sourceIid, chooser);
+    s = r.state;
+    events.push(...r.events);
+  }
+  s = { ...s, log: [...s.log, { round: s.round, player: ctx.sourcePlayer, message: `${recipient} assigns ${e.amount} indirect damage.`, kind: e.amount >= 5 ? 'critical' : 'info' }] };
+  return { state: s, events };
+}
+
+// "Put this event into play as a resource" (Resupply). By the time an event's
+// ability resolves it's already in its controller's discard (reducer moves it
+// there first); move it into the resource zone instead. The new resource enters
+// play exhausted (§2046).
+function applyPlayAsResource(ctx: InterpCtx): InterpResult {
+  if (!ctx.sourceIid) return { state: ctx.state, events: [] };
+  const found = findCard(ctx.state, ctx.sourceIid);
+  if (!found) return { state: ctx.state, events: [] };
+  const pid = found.loc.controller;
+  const name = ctx.reg.cards[found.inst.cardId]?.name ?? ctx.sourceIid;
+
+  const moved = moveToZone(ctx.state, ctx.sourceIid, pid, 'resource_zone');
+  let s = mapInstance(moved.state, ctx.sourceIid, c => ({ ...c, exhausted: true }));
+  s = { ...s, log: [...s.log, { round: s.round, player: pid, message: `${pid} puts ${name} into play as a resource.`, kind: 'info' }] };
+  return { state: s, events: [...moved.events, { kind: 'RESOURCE_PLACED', player: pid, iid: ctx.sourceIid }] };
 }
 
 function applySearch(ctx: InterpCtx, e: Extract<Effect, { effect: 'search' }>): InterpResult {

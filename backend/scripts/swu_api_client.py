@@ -282,17 +282,31 @@ class SWUApiClient:
 
         # Add type-specific attributes
         if card_type == "Leader":
-            # Leaders have epic actions and deploy boxes
+            # Leaders have epic actions and deploy boxes. They also carry the
+            # deployed leader-UNIT's stats in power/hp (e.g. Tarkin 2/3); capture
+            # them so the engine uses real stats instead of a generic fallback.
             card_dict.update({
                 "epic_action": attributes.get("epicAction"),
                 "deploy_box": attributes.get("deployBox"),
-                "energy_cost": attributes.get("cost")
+                "energy_cost": attributes.get("cost"),
+                "attack": attributes.get("power"),
+                "health": attributes.get("hp")
             })
         elif card_type == "Base":
             # Bases mainly have health
             card_dict.update({
                 "health": attributes.get("hp"),
                 "energy_cost": None  # Bases don't have energy cost
+            })
+        elif card_type == "Upgrade":
+            # Upgrades carry their stat modifiers in dedicated fields
+            # (upgradePower/upgradeHp); the generic power/hp are null for them.
+            # Store them in attack/health so the translator's upgrade →
+            # powerModifier/hpModifier mapping works.
+            card_dict.update({
+                "energy_cost": attributes.get("cost"),
+                "attack": attributes.get("upgradePower"),
+                "health": attributes.get("upgradeHp")
             })
         else:
             # Regular cards have standard attributes

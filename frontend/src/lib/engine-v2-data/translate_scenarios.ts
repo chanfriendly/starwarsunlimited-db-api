@@ -100,6 +100,19 @@ scenario('Restore value from text', () => {
   assertEq(kws, [{ name: 'restore', value: 1 }], 'restore value');
 });
 
+scenario('Deals-combat-damage-first text → attacker_combat_first marker keyword', () => {
+  const kws = parseKeywords(mkCard({
+    name: 'Incinerator Trooper',
+    text: 'While attacking, this unit deals combat damage before the defender. (If the defender is defeated, it deals no combat damage.)',
+  }));
+  assertEq(kws, [{ name: 'attacker_combat_first' }], 'combat-first marker added from text');
+});
+
+scenario('No deals-first text → no marker keyword', () => {
+  const kws = parseKeywords(mkCard({ name: 'X', keywords: ['Grit'], text: 'Grit. When Played: draw a card.' }));
+  assertEq(kws, [{ name: 'grit' }], 'only the real keyword; no spurious combat-first marker');
+});
+
 scenario('Event: maps to event spec, no stats', () => {
   const r = translateCard(mkCard({ id: 'e1', name: 'Vanquish', type: 'Event', energy_cost: 5, aspects: [aspect('Vigilance')] }));
   if (!r.spec || r.spec.type !== 'event') throw new Error('not event');
@@ -293,6 +306,57 @@ scenario('Matcher: event "Deal 3 damage to an enemy unit." → when-played trigg
   if (a.type !== 'triggered' || a.on !== 'event.card_played') throw new Error('expected when-played trigger');
   if (a.do.effect !== 'damage') throw new Error('expected damage effect');
   assertEq((a.do as { amount: number }).amount, 3, 'damage amount');
+});
+
+scenario('Matcher: "On Attack: Deal 3 indirect damage to the defending player" → indirect_damage', () => {
+  const r = matchCard({ name: 'TIE Bomber', type: 'Unit', text: 'On Attack: Deal 3 indirect damage to the defending player. (They assign 3 unpreventable damage among their base and units.)' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'triggered' || a.on !== 'event.attack_declared') throw new Error('expected on-attack trigger');
+  if (a.do.effect !== 'indirect_damage') throw new Error('expected indirect_damage effect');
+  const ind = a.do as { amount: number; player: string };
+  assertEq(ind.amount, 3, 'amount');
+  assertEq(ind.player, 'opponent', 'recipient = the defending player (opponent)');
+});
+
+scenario('Matcher: "Put this event into play as a resource." → play_as_resource', () => {
+  const r = matchCard({ name: 'Resupply', type: 'Event', text: 'Put this event into play as a resource.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'triggered' || a.do.effect !== 'play_as_resource') throw new Error('expected play_as_resource');
+});
+
+scenario('Matcher: "When a friendly unit attacks and defeats a unit: You may give Experience to that friendly unit"', () => {
+  const r = matchCard({ name: 'Darth Revan', type: 'Unit', text: 'When a friendly unit attacks and defeats a unit: You may give an Experience token to that friendly unit.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0] as { type: string; on?: string; where?: { controller?: string; defender_defeated?: boolean }; do: { effect: string; do?: { effect: string; target?: { trigger_source?: boolean } } } };
+  if (a.type !== 'triggered' || a.on !== 'event.attack_ended') throw new Error('expected attack_ended trigger');
+  if (a.where?.controller !== 'self' || a.where?.defender_defeated !== true) throw new Error('expected friendly + defender_defeated');
+  if (a.do.effect !== 'optional' || a.do.do?.effect !== 'give_experience' || !a.do.do?.target?.trigger_source) {
+    throw new Error('expected optional → give_experience to trigger_source');
+  }
+});
+
+scenario('Matcher: leader "You may exhaust this leader. If you do, give Experience to that friendly unit"', () => {
+  const r = matchCard({ name: 'Darth Revan', type: 'Unit', text: 'When a friendly unit attacks and defeats a unit: You may exhaust this leader. If you do, give an Experience token to that friendly unit.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0] as { type: string; on?: string; do: { effect: string; do?: { effect: string; do?: { effect: string; target?: { self?: boolean } }; then?: { effect: string; target?: { trigger_source?: boolean } } } } };
+  if (a.type !== 'triggered' || a.on !== 'event.attack_ended') throw new Error('expected attack_ended trigger');
+  if (a.do.effect !== 'optional') throw new Error('expected optional wrapper');
+  const ifdid = a.do.do;
+  if (ifdid?.effect !== 'if_did') throw new Error('expected if_did inside optional');
+  if (ifdid.do?.effect !== 'exhaust' || !ifdid.do?.target?.self) throw new Error('expected exhaust self as the cost');
+  if (ifdid.then?.effect !== 'give_experience' || !ifdid.then?.target?.trigger_source) throw new Error('expected then: give_experience to trigger_source');
+});
+
+scenario('Matcher: "Bounty — Draw a card." → opponent-controlled When-Defeated trigger', () => {
+  const r = matchCard({ name: 'Cartel Turncoat', type: 'Unit', text: 'Bounty — Draw a card. (When this unit is defeated or captured, your opponent collects its bounty.)' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0] as { type: string; on?: string; where?: { card?: string }; controlled_by?: string; do: { effect: string; do?: { effect: string } } };
+  if (a.type !== 'triggered' || a.on !== 'event.defeated') throw new Error('expected when-defeated trigger');
+  if (a.where?.card !== 'self') throw new Error('expected where card:self');
+  if (a.controlled_by !== 'opponent') throw new Error('expected controlled_by opponent');
+  if (a.do.effect !== 'optional' || a.do.do?.effect !== 'draw') throw new Error('expected optional → draw');
 });
 
 scenario('Matcher: "deals damage equal to his power to an enemy ground unit" → amountFromPower', () => {

@@ -2,6 +2,7 @@
 // `KEYWORDS[name]` for keyword-specific behavior.
 
 import { Ambush } from './ambush';
+import { AttackerCombatFirst } from './combat_first';
 import { Grit } from './grit';
 import { Overwhelm } from './overwhelm';
 import { Raid } from './raid';
@@ -13,6 +14,7 @@ import type { KeywordDef } from './types';
 
 export const KEYWORDS: Record<string, KeywordDef> = {
   ambush: Ambush,
+  attacker_combat_first: AttackerCombatFirst,
   grit: Grit,
   overwhelm: Overwhelm,
   raid: Raid,

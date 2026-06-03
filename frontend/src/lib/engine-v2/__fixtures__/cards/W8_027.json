@@ -1,0 +1,22 @@
+{
+  "id": "W8_027",
+  "name": "Revan's Echo (test)",
+  "type": "unit",
+  "cost": 5,
+  "aspects": ["villainy"],
+  "arena": "ground",
+  "power": 3,
+  "hp": 6,
+  "traits": ["sith"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.attack_ended",
+      "where": { "controller": "self", "defender_defeated": true },
+      "do": {
+        "effect": "optional",
+        "do": { "effect": "give_experience", "target": { "trigger_source": true }, "count": 1 }
+      }
+    }
+  ]
+}

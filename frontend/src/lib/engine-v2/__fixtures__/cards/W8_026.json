@@ -1,0 +1,15 @@
+{
+  "id": "W8_026",
+  "name": "Resupply (test)",
+  "type": "event",
+  "cost": 3,
+  "aspects": ["command"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": { "effect": "play_as_resource" }
+    }
+  ]
+}

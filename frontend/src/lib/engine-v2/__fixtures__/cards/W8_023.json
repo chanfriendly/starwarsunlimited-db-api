@@ -1,0 +1,12 @@
+{
+  "id": "W8_023",
+  "name": "Incinerator Trooper",
+  "type": "unit",
+  "cost": 2,
+  "aspects": ["villainy"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 2,
+  "traits": ["imperial", "trooper"],
+  "keywords": [{ "name": "attacker_combat_first" }]
+}

@@ -175,11 +175,19 @@ export function collectTriggers(
         // Enforce limit by checking the source player's counter.
         if (ab.limit && isLimitExhausted(state, controller, 'trig', inst.iid, abIdx, ab.limit)) continue;
 
+        // `controlled_by` (Bounty, §13a/f): the ability is resolved by an
+        // opponent of the unit's controller. The predicate matched from the
+        // unit's perspective above, but resolution, ordering (§3018), and the
+        // chooser all key off the RESOLVING player.
+        const resolver = ab.controlled_by
+          ? (state.playerOrder.find(pl => pl !== controller) ?? controller)
+          : controller;
+
         triggers.push({
           id: `t${nextId++}`,
           abilityIndex: abIdx,
           sourceIid: inst.iid,
-          sourceController: controller,
+          sourceController: resolver,
           event,
         });
       }

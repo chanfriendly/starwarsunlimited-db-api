@@ -175,6 +175,25 @@ export function evalTriggerPredicate(
     if (p.card_aspect !== undefined && !aspects.includes(p.card_aspect)) return false;
   }
 
+  if (p.defender_defeated !== undefined) {
+    if (event.kind !== 'ATTACK_DECLARED' && event.kind !== 'ATTACK_ENDED') return false;
+    // A base defender is never a "defeated unit". For a unit defender, count it
+    // defeated if it's gone from play OR still present at lethal damage — attack
+    // triggers may be collected before the state-based defeat pass moves it to
+    // discard, so checking "at lethal HP" too makes this timing-independent.
+    let defeated = false;
+    if (event.defenderIid !== 'base') {
+      const f = findCard(ctx.state, event.defenderIid);
+      const inArena = !!f && (f.loc.zone === 'ground_arena' || f.loc.zone === 'space_arena');
+      // Defeated = no longer in an arena (already moved to discard by the
+      // state-based pass), OR still in the arena at lethal damage (the defeat
+      // pass may run after attack triggers are collected). The discard copy has
+      // its damage reset, so the zone check — not damage — is what catches it.
+      defeated = !inArena || f!.inst.damage >= effectiveHp(ctx.state, ctx.reg, f!.inst, f!.loc.controller);
+    }
+    if (defeated !== p.defender_defeated) return false;
+  }
+
   if (p.combat !== undefined) {
     if (event.kind === 'DAMAGE_DEALT' && event.combat !== p.combat) return false;
   }

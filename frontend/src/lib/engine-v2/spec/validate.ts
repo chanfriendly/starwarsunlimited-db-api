@@ -43,7 +43,7 @@ const EFFECT_KINDS = new Set([
   'damage', 'heal', 'defeat', 'give_shield', 'give_experience', 'draw', 'discard',
   'exhaust', 'ready', 'give', 'sequence', 'if', 'if_did', 'noop', 'choose_one', 'optional',
   'create_token', 'capture', 'rescue', 'move', 'look_at', 'disclose',
-  'search', 'divided_damage', 'return_to_hand', 'return_from_discard',
+  'search', 'divided_damage', 'indirect_damage', 'play_as_resource', 'return_to_hand', 'return_from_discard',
   'take_control', 'use_force', 'gain_force', 'attack', 'power_damage_from_each',
 ]);
 const ABILITY_TYPES = new Set(['triggered', 'action', 'constant', 'replacement', 'cost']);
@@ -80,7 +80,7 @@ const MODIFIER_FIELDS = new Set([
 ]);
 const PER_COUNTS = new Set(['controller_resources', 'controller_units', 'self_upgrades']);
 const TRIGGER_PREDICATE_FIELDS = new Set([
-  'card', 'controller', 'attacker', 'defender', 'card_trait', 'card_type',
+  'card', 'controller', 'attacker', 'defender', 'defender_defeated', 'card_trait', 'card_type',
   'card_aspect', 'combat', 'base_controller', 'and', 'or', 'not',
 ]);
 
@@ -398,6 +398,9 @@ function validateEffect(v: V, path: string, e: unknown) {
     case 'divided_damage':
       need('amount', isNum(e.amount)); need('pool', 'pool' in e);
       if ('pool' in e) validateSelector(v, `${path}.pool`, e.pool); break;
+    case 'indirect_damage':
+      need('amount', isNum(e.amount)); need('player', 'player' in e);
+      if ('player' in e) checkEnum(v, `${path}.player`, e.player, PLAYER_REFS, 'player'); break;
   }
 }
 

@@ -32,6 +32,10 @@ def verify_database(database_path: str):
             ("Cards missing images", "SELECT COUNT(*) FROM cards WHERE image_uri IS NULL"),
             ("Leaders missing epic actions", "SELECT COUNT(*) FROM cards WHERE type='Leader' AND epic_action IS NULL"),
             ("Units missing power", "SELECT COUNT(*) FROM cards WHERE type='Unit' AND attack IS NULL"),
+            # Upgrades carry their stat modifiers in upgradePower/upgradeHp (stored
+            # in attack/health). If ALL upgrades are NULL the API field mapping has
+            # regressed — every stat-granting upgrade would silently do nothing.
+            ("Upgrades missing modifiers (should be 0)", "SELECT COUNT(*) FROM cards WHERE type='Upgrade' AND attack IS NULL AND health IS NULL"),
             ("Cards missing set info", "SELECT COUNT(*) FROM cards WHERE set_name IS NULL OR set_code IS NULL"),
         ]
         
