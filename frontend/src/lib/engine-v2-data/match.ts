@@ -123,10 +123,13 @@ export function parseEffectClause(raw: string): Effect | null {
     return { effect: 'gain_force', player: 'self' };
   }
 
-  // Put this event into play as a resource. (Resupply — the event becomes a
-  // resource instead of going to the discard pile.)
-  if (/^Put this (?:event|card) into play as a resource\.?$/i.test(t)) {
-    return { effect: 'play_as_resource' };
+  // Put this <card> into play as a resource [and ready it]. Two shapes:
+  //   • Resupply (event) — the event becomes a resource instead of discarding.
+  //   • Superlaser Technician (unit, When Defeated) — the defeated unit moves
+  //     from the discard pile to the resource zone "and ready it" (enters ready,
+  //     the exception to §2046's exhausted default).
+  if ((m = t.match(/^Put this (?:event|card|unit) into play as a resource( and ready it)?\.?$/i))) {
+    return m[1] ? { effect: 'play_as_resource', ready: true } : { effect: 'play_as_resource' };
   }
 
   // Ready this unit. (self)
@@ -422,6 +425,12 @@ export function parseModalEffect(raw: string): Effect | null {
   const optionTexts = body
     .split(/\r?\n/)
     .map(s => s.replace(/^[•\-*\s]+/, '').trim())
+    // Strip parenthetical reminder text per option (e.g. "Use the Force
+    // (lose your Force token).") — the same normalization clausesOf() applies
+    // to the normal clause path. Without it, a reminder mid-option defeats the
+    // effect template and — since one unparsed mode voids the whole modal —
+    // silently turns a fully-supported card into a no-op (Shatterpoint).
+    .map(stripReminders)
     .filter(Boolean);
   if (optionTexts.length < 2) return null;
   const options: Array<{ label: string; value: string; do: Effect }> = [];

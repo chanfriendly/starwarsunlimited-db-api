@@ -96,7 +96,7 @@ export function applyEffect(ctx: InterpCtx, effect: Effect): InterpResult {
     case 'search':           return applySearch(ctx, effect);
     case 'divided_damage':   return applyDividedDamage(ctx, effect);
     case 'indirect_damage':  return applyIndirectDamage(ctx, effect);
-    case 'play_as_resource': return applyPlayAsResource(ctx);
+    case 'play_as_resource': return applyPlayAsResource(ctx, effect);
     case 'return_to_hand':   return applyReturnToHand(ctx, effect);
     case 'return_from_discard': return applyReturnFromDiscard(ctx, effect);
     case 'take_control':     return applyTakeControl(ctx, effect);
@@ -796,16 +796,19 @@ function applyIndirectDamage(ctx: InterpCtx, e: Extract<Effect, { effect: 'indir
 // ability resolves it's already in its controller's discard (reducer moves it
 // there first); move it into the resource zone instead. The new resource enters
 // play exhausted (§2046).
-function applyPlayAsResource(ctx: InterpCtx): InterpResult {
+function applyPlayAsResource(ctx: InterpCtx, e: Extract<Effect, { effect: 'play_as_resource' }>): InterpResult {
   if (!ctx.sourceIid) return { state: ctx.state, events: [] };
   const found = findCard(ctx.state, ctx.sourceIid);
   if (!found) return { state: ctx.state, events: [] };
   const pid = found.loc.controller;
   const name = ctx.reg.cards[found.inst.cardId]?.name ?? ctx.sourceIid;
 
+  // Resources put into play by an ability enter exhausted (§2046), UNLESS the
+  // card explicitly readies it ("and ready it" — Superlaser Technician).
+  const exhausted = !e.ready;
   const moved = moveToZone(ctx.state, ctx.sourceIid, pid, 'resource_zone');
-  let s = mapInstance(moved.state, ctx.sourceIid, c => ({ ...c, exhausted: true }));
-  s = { ...s, log: [...s.log, { round: s.round, player: pid, message: `${pid} puts ${name} into play as a resource.`, kind: 'info' }] };
+  let s = mapInstance(moved.state, ctx.sourceIid, c => ({ ...c, exhausted }));
+  s = { ...s, log: [...s.log, { round: s.round, player: pid, message: `${pid} puts ${name} into play as a resource${e.ready ? ' (ready)' : ''}.`, kind: 'info' }] };
   return { state: s, events: [...moved.events, { kind: 'RESOURCE_PLACED', player: pid, iid: ctx.sourceIid }] };
 }
 

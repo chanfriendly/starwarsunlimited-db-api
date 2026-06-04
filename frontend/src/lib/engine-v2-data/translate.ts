@@ -38,7 +38,7 @@ const VALID_ASPECTS = new Set<AspectIcon>([
 
 // v2 keyword registry keys (the ones with real engine behavior). Names not in
 // this set still translate — they're just inert until implemented.
-const VALUE_KEYWORDS = new Set(['raid', 'restore']);
+const VALUE_KEYWORDS = new Set(['raid', 'restore', 'exploit']);
 
 /** Default deployed-unit stats for a leader whose attack/health are NULL in the
  *  DB (common — the SWU API often omits the unit-side stats). Mirrors the v1

@@ -26,7 +26,7 @@ import { applyEffect } from './runtime/interpret';
 import { isTriggered, type ActionAbility, type Ability, type TriggeredAbility } from './spec/ast';
 import { resolveSelector } from './runtime/selectors';
 import { resolvePlayer } from './runtime/predicates';
-import { effectiveCost } from './runtime/cost';
+import { effectiveCost, exploitOf } from './runtime/cost';
 import { resolveAttack, attackIllegalReason, resolveAmbush } from './runtime/attack';
 
 function settle(state: GameState, reg: CardRegistry, eventsIn: GameEvent[], chooser?: Chooser): StepResult {
@@ -177,7 +177,7 @@ function resetResourcedFlags(state: GameState): GameState {
 }
 
 function startActionPhase(state: GameState, reg: CardRegistry, events: GameEvent[], chooser?: Chooser): StepResult {
-  let s: GameState = { ...state, phase: 'action', round: state.round + 1, activePlayer: state.initiative, consecutivePasses: 0 };
+  let s: GameState = { ...state, phase: 'action', round: state.round + 1, activePlayer: state.initiative, consecutivePasses: 0, phaseStartedAtStep: state.step };
   s = log(s, `Round ${s.round} begins.`, undefined, 'critical');
   s = log(s, `${s.activePlayer} acts first.`, s.activePlayer);
   return settle(s, reg, [...events, { kind: 'TURN_STARTED', player: s.activePlayer }], chooser);
@@ -203,17 +203,72 @@ function applyPlayCard(state: GameState, pid: PlayerId, iid: string, reg: CardRe
 
   const p = state.players[pid];
   const readyResources = p.resources.filter(r => !r.exhausted);
-  const cost = effectiveCost(state, reg, spec, pid);
-  if (readyResources.length < cost) throw new Error(`Insufficient resources: need ${cost}, have ${readyResources.length}`);
+  let cost = effectiveCost(state, reg, spec, pid);
 
   let s = state;
   const events: GameEvent[] = [];
+
+  // Exploit (§16): the player MAY defeat up to X friendly units while playing
+  // this card, each cutting the cost by 2 (floored at 0). Resolve the choice
+  // here (Step 3, Determine cost): pick at least enough to afford the card and
+  // up to X. The defeated units are bumped to lethal now but their When-Defeated
+  // abilities resolve in the trailing settle, alongside this card's When-Played
+  // (§16d). The default chooser stops at the minimum needed (sane + fuzzer-safe,
+  // since legal.ts already gated affordability at the best-case reduction).
+  const exploit = exploitOf(spec);
+  const sacrificed: string[] = [];
+  if (exploit > 0) {
+    const candidates = [...p.groundArena, ...p.spaceArena];
+    const maxSac = Math.min(exploit, candidates.length);
+    const neededSac = Math.min(maxSac, Math.max(0, Math.ceil((cost - readyResources.length) / 2)));
+    const chooseFn = chooser ?? defaultChooser;
+    while (sacrificed.length < maxSac) {
+      const remaining = candidates.filter(c => !sacrificed.includes(c.iid));
+      if (remaining.length === 0) break;
+      const canStop = sacrificed.length >= neededSac;
+      const options = [
+        ...(canStop ? [{ label: 'Done (Exploit)', value: '__stop__' }] : []),
+        ...remaining.map(c => ({ label: reg.cards[c.cardId]?.name ?? c.iid, value: c.iid })),
+      ];
+      const pick = chooseFn({ kind: 'choose_one', prompt: `Exploit: defeat a friendly unit to play for 2 less (${sacrificed.length}/${maxSac})`, options, player: pid, canPass: false });
+      const v = pick.kind === 'option' ? pick.value : options[0].value;
+      if (v === '__stop__') break;
+      sacrificed.push(v);
+    }
+    cost = Math.max(0, cost - 2 * sacrificed.length);
+  }
+
+  if (readyResources.length < cost) throw new Error(`Insufficient resources: need ${cost}, have ${readyResources.length}`);
+
   for (let i = 0; i < cost; i++) {
     const ri = readyResources[i].iid;
     const r = exhaust(s, ri);
     s = r.state;
     events.push({ kind: 'RESOURCE_SPENT', player: pid, iid: ri });
   }
+
+  // Exploit: bump the sacrificed units to lethal so the trailing settle defeats
+  // them (their When-Defeated fires with this card's When-Played, §16d).
+  for (const iid of sacrificed) {
+    s = mapInstance(s, iid, c => ({ ...c, damage: c.damage + 9999 }));
+  }
+
+  const played = resolveCardIntoPlay(s, pid, iid, spec, reg, chooser, cost, targetIid);
+  s = played.state;
+  events.push(...played.events);
+  return advanceToNextTurn(s, pid, reg, events, undefined, chooser);
+}
+
+/** Resolve a card whose cost has already been paid: move it to its play zone by
+ *  type and run its enter-play effects (keyword onPlay hooks, Ambush, event
+ *  When-Played). Does NOT advance the turn or settle — the caller does. Shared
+ *  by the normal Play-a-Card action and resource-zone play (Plot). */
+function resolveCardIntoPlay(
+  state: GameState, pid: PlayerId, iid: string, spec: CardSpec,
+  reg: CardRegistry, chooser: Chooser | undefined, cost: number, targetIid?: string,
+): { state: GameState; events: GameEvent[] } {
+  let s = state;
+  const events: GameEvent[] = [];
 
   if (spec.type === 'upgrade') {
     if (!targetIid) throw new Error(`Upgrade requires a target unit`);
@@ -228,7 +283,7 @@ function applyPlayCard(state: GameState, pid: PlayerId, iid: string, reg: CardRe
     events.push(...att.events);
     events.push({ kind: 'CARD_PLAYED', iid, cardId: spec.id, controller: pid });
     s = log(s, `${pid} plays upgrade ${spec.name} (${cost}) on ${hostFound.inst.iid}.`, pid);
-    return advanceToNextTurn(s, pid, reg, events, undefined, chooser);
+    return { state: s, events };
   }
 
   if (spec.type === 'event') {
@@ -237,22 +292,17 @@ function applyPlayCard(state: GameState, pid: PlayerId, iid: string, reg: CardRe
     s = moved.state;
     events.push({ kind: 'CARD_PLAYED', iid, cardId: spec.id, controller: pid });
     s = log(s, `${pid} plays event ${spec.name} (${cost}).`, pid);
-    // Resolve the event's triggered when_played ability inline. Events have
-    // no in-play keywords or constant abilities — only the event ability.
     if (spec.abilities) {
       for (const ab of spec.abilities) {
         if (!isTriggered(ab)) continue;
         const trig = ab as TriggeredAbility;
         if (trig.on !== 'event.card_played') continue;
-        // The event's own when_played fires from the discard pile (where the
-        // event now resides), so don't wait for the trigger drain to find it
-        // — apply it directly.
         const r = applyEffect({ state: s, reg, sourceIid: iid, sourcePlayer: pid, chooser }, trig.do);
         s = r.state;
         events.push(...r.events);
       }
     }
-    return advanceToNextTurn(s, pid, reg, events, undefined, chooser);
+    return { state: s, events };
   }
 
   // unit
@@ -282,7 +332,60 @@ function applyPlayCard(state: GameState, pid: PlayerId, iid: string, reg: CardRe
   s = amb.state;
   events.push(...amb.events);
 
-  return advanceToNextTurn(s, pid, reg, events, undefined, chooser);
+  return { state: s, events };
+}
+
+/** Has this spec got the named keyword? (Only unit/upgrade/token specs carry a
+ *  keywords array in v2; events/leaders/bases don't.) */
+function specHasKeyword(spec: CardSpec | undefined, name: string): boolean {
+  if (!spec) return false;
+  if (spec.type === 'unit' || spec.type === 'upgrade' || spec.type === 'token') {
+    return (spec.keywords ?? []).some(k => k.name.toLowerCase() === name);
+  }
+  return false;
+}
+
+/** Play a card from the player's resource zone (Plot §19; the basis for Smuggle
+ *  §14). Pays `cost` from OTHER ready resources, replaces the played card in the
+ *  resource zone with the top of the deck (exhausted, §19c), then resolves it.
+ *  `played:false` means it couldn't be paid (caller skips). Units/events only —
+ *  upgrades need a host target (not yet supported from the resource zone). */
+function playFromResourceZone(
+  state: GameState, pid: PlayerId, resourceIid: string, reg: CardRegistry, chooser?: Chooser,
+): { state: GameState; events: GameEvent[]; played: boolean } {
+  const found = findCard(state, resourceIid);
+  if (!found || found.loc.zone !== 'resource_zone' || found.loc.controller !== pid) {
+    return { state, events: [], played: false };
+  }
+  const spec = reg.cards[found.inst.cardId];
+  if (!spec || (spec.type !== 'unit' && spec.type !== 'event')) {
+    return { state, events: [], played: false };
+  }
+  const cost = effectiveCost(state, reg, spec, pid);
+  const p = state.players[pid];
+  const ready = p.resources.filter(r => !r.exhausted && r.iid !== resourceIid);
+  if (ready.length < cost) return { state, events: [], played: false };
+
+  let s = state;
+  const events: GameEvent[] = [];
+  for (let i = 0; i < cost; i++) {
+    const r = exhaust(s, ready[i].iid);
+    s = r.state;
+    events.push({ kind: 'RESOURCE_SPENT', player: pid, iid: ready[i].iid });
+  }
+  // Replace the played card in the resource zone with the top of the deck,
+  // exhausted (§19c). If the deck is empty, the resource slot simply empties.
+  const pp = s.players[pid];
+  if (pp.deck.length > 0) {
+    const [top, ...rest] = pp.deck;
+    const replacement = { ...top, exhausted: true, enteredZoneAt: s.step };
+    s = withPlayer(s, pid, { ...pp, deck: rest, resources: [...pp.resources, replacement] });
+    events.push({ kind: 'RESOURCE_PLACED', player: pid, iid: top.iid });
+  }
+  const r = resolveCardIntoPlay(s, pid, resourceIid, spec, reg, chooser, cost);
+  s = r.state;
+  events.push(...r.events);
+  return { state: s, events, played: true };
 }
 
 function applyDeployLeader(
@@ -353,6 +456,25 @@ function applyDeployLeader(
 
   events.push({ kind: 'LEADER_DEPLOYED', player: pid, leaderIid: iid, as: 'unit' });
   s = log(s, `${pid} deploys leader ${spec.name} (${cost}).`, pid, 'critical');
+
+  // Plot (§19): after deploying a leader, the controller MAY play any number of
+  // Plot cards from their resource zone for the printed cost. Snapshot the
+  // eligible set now (§19d: a replacement card drawn this deploy can't be
+  // played). Each is offered optionally; the deck-replacement enters exhausted.
+  const plotIids = s.players[pid].resources
+    .filter(r => specHasKeyword(reg.cards[r.cardId], 'plot'))
+    .map(r => r.iid);
+  if (plotIids.length > 0) {
+    const chooseFn = chooser ?? defaultChooser;
+    for (const plotIid of plotIids) {
+      if (!s.players[pid].resources.some(r => r.iid === plotIid)) continue;
+      const pspec = reg.cards[findCard(s, plotIid)!.inst.cardId];
+      const may = chooseFn({ kind: 'optional', prompt: `Plot: play ${pspec?.name ?? plotIid} from your resource zone?`, player: pid });
+      if (may.kind === 'no' || may.kind === 'pass') continue;
+      const r = playFromResourceZone(s, pid, plotIid, reg, chooseFn);
+      if (r.played) { s = r.state; events.push(...r.events); }
+    }
+  }
 
   return advanceToNextTurn(s, pid, reg, events, undefined, chooser);
 }

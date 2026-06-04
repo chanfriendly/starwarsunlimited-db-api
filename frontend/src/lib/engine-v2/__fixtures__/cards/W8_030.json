@@ -1,0 +1,12 @@
+{
+  "id": "W8_030",
+  "name": "Hidden Operative (test)",
+  "type": "unit",
+  "cost": 2,
+  "aspects": ["cunning"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 2,
+  "traits": ["spy"],
+  "keywords": [{ "name": "hidden" }]
+}

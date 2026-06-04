@@ -326,6 +326,17 @@ scenario('Matcher: "Put this event into play as a resource." → play_as_resourc
   if (a.type !== 'triggered' || a.do.effect !== 'play_as_resource') throw new Error('expected play_as_resource');
 });
 
+scenario('Matcher: When-Defeated "put this unit into play as a resource and ready it" → optional play_as_resource ready (Superlaser Technician)', () => {
+  const r = matchCard({ name: 'Superlaser Technician', type: 'Unit', text: 'When Defeated: You may put this unit into play as a resource and ready it.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'triggered' || a.on !== 'event.defeated') throw new Error('expected When-Defeated trigger');
+  if (a.do.effect !== 'optional') throw new Error('"You may" → optional');
+  const inner = (a.do as { do: { effect: string; ready?: boolean } }).do;
+  assertEq(inner.effect, 'play_as_resource', 'inner play_as_resource');
+  assertEq(inner.ready, true, '"and ready it" → ready: true');
+});
+
 scenario('Matcher: "When a friendly unit attacks and defeats a unit: You may give Experience to that friendly unit"', () => {
   const r = matchCard({ name: 'Darth Revan', type: 'Unit', text: 'When a friendly unit attacks and defeats a unit: You may give an Experience token to that friendly unit.' });
   assertEq(r.coverage, 'full', 'coverage');
@@ -388,6 +399,21 @@ scenario('Matcher: modal with an unparseable mode stays residual (no partial mis
   const r = matchCard({ name: 'W', type: 'Event', text: 'Choose one:\nDraw a card.\nDefeat up to 2 upgrades.' });
   assertEq(r.coverage, 'none', 'coverage none');
   assertEq(r.abilities.length, 0, 'no abilities emitted');
+});
+
+scenario('Matcher: modal option with a parenthetical reminder still parses (Shatterpoint)', () => {
+  // The "Use the Force (lose your Force token)." reminder must be stripped per
+  // option, exactly as the normal clause path does — otherwise the unparsed
+  // mode voids the whole modal and the card silently does nothing (playtest bug).
+  const r = matchCard({ name: 'Shatterpoint', type: 'Event', text:
+    'Choose one:\nDefeat a non-leader unit with 3 or less remaining HP.\nUse the Force (lose your Force token). If you do, defeat a non-leader unit.' });
+  assertEq(r.coverage, 'full', 'coverage full despite reminder');
+  const a = r.abilities[0];
+  if (a.type !== 'triggered' || a.do.effect !== 'choose_one') throw new Error('expected choose_one');
+  const m = a.do as { options: Array<{ do: { effect: string } }> };
+  assertEq(m.options.length, 2, 'two modes');
+  assertEq(m.options[0].do.effect, 'defeat', 'mode 0 = defeat');
+  assertEq(m.options[1].do.effect, 'use_force', 'mode 1 = use_force (reminder stripped)');
 });
 
 scenario('Matcher: "Return a non-leader unit that costs N or less to its owner\'s hand" → return_to_hand', () => {

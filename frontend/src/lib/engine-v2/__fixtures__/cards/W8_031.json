@@ -1,0 +1,12 @@
+{
+  "id": "W8_031",
+  "name": "Hidden Sentinel (test)",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["vigilance"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 3,
+  "traits": ["spy"],
+  "keywords": [{ "name": "hidden" }, { "name": "sentinel" }]
+}

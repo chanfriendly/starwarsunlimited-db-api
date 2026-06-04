@@ -74,6 +74,15 @@ export function attackIllegalReason(
     if (!defenderFound) return `Defender ${defenderIid} not found`;
     if (defenderFound.loc.controller === pid) return `Cannot attack friendly unit`;
     if (defenderFound.loc.zone !== attackerZone) return `Defender must share attacker's arena`;
+    // Hidden (§18): a unit can't be attacked the phase it entered play — unless
+    // it also has Sentinel (§18b: nothing can stop a Sentinel being attacked).
+    const defOwner = defenderFound.loc.controller;
+    if (state.phaseStartedAtStep !== undefined
+        && defenderFound.inst.enteredZoneAt >= state.phaseStartedAtStep
+        && hasEffectiveKeyword(state, reg, defenderFound.inst, defOwner, 'hidden')
+        && !hasEffectiveKeyword(state, reg, defenderFound.inst, defOwner, 'sentinel')) {
+      return `Hidden: cannot be attacked the phase it entered play`;
+    }
   }
   return null;
 }

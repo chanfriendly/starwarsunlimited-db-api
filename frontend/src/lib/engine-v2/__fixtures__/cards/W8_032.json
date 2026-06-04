@@ -1,0 +1,12 @@
+{
+  "id": "W8_032",
+  "name": "Plotting Agent (test)",
+  "type": "unit",
+  "cost": 1,
+  "aspects": ["cunning"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 2,
+  "traits": ["spy"],
+  "keywords": [{ "name": "plot" }]
+}

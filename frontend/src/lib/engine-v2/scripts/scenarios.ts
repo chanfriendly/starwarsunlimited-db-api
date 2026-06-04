@@ -264,6 +264,30 @@ scenario('Play as resource: event becomes an exhausted resource, not discard (Re
   if (r.next.players.p1.hand.some(c => c.iid === 'resup')) throw new Error('event should leave hand');
 });
 
+scenario('Play as resource: When-Defeated unit → READY resource from discard (Superlaser Technician)', () => {
+  // The unit is at lethal damage; the next settle defeats it (→ discard), then
+  // its When-Defeated optional resolves (accept) and moves it from the discard
+  // pile to the resource zone READY ("and ready it" — exception to §2046).
+  const tech = mkInst('W8_033', { iid: 'tech', damage: 9999 });
+  const state = emptyState({ groundP1: [tech], resourcesP1: 3, active: 'p1' });
+  const before = state.players.p1.resources.length;          // 3
+  const r = step(state, { kind: 'PASS', player: 'p1' }, reg, scriptedChooser([{ kind: 'yes' }]));
+  const res = r.next.players.p1.resources.find(c => c.iid === 'tech');
+  if (!res) throw new Error('defeated unit should be in the resource zone');
+  assertEq(res.exhausted, false, 'enters READY ("and ready it")');
+  assertEq(r.next.players.p1.resources.length, before + 1, 'net +1 resource');
+  if (r.next.players.p1.groundArena.some(c => c.iid === 'tech')) throw new Error('should leave the arena');
+  if (r.next.players.p1.discard.some(c => c.iid === 'tech')) throw new Error('should NOT remain in discard');
+});
+
+scenario('Play as resource: When-Defeated unit declined → stays in discard (Superlaser Technician)', () => {
+  const tech = mkInst('W8_033', { iid: 'tech', damage: 9999 });
+  const state = emptyState({ groundP1: [tech], resourcesP1: 3, active: 'p1' });
+  const r = step(state, { kind: 'PASS', player: 'p1' }, reg, declineChooser);
+  if (r.next.players.p1.resources.some(c => c.iid === 'tech')) throw new Error('declined → not a resource');
+  if (!r.next.players.p1.discard.some(c => c.iid === 'tech')) throw new Error('declined → stays in discard');
+});
+
 scenario('Attacks-and-defeats trigger: the attacker gains Experience (Darth Revan)', () => {
   // Revan in play. A DIFFERENT friendly unit (3/3) attacks and defeats a 2/2.
   // Revan's "When a friendly unit attacks and defeats a unit" fires → the
@@ -286,6 +310,121 @@ scenario('Attacks-and-defeats trigger: does NOT fire when the defender survives'
   const r = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: 'atk', defenderIid: 'wall' }, reg, scriptedChooser([{ kind: 'yes' }]));
   const atkAfter = r.next.players.p1.groundArena.find(c => c.iid === 'atk');
   assertEq(atkAfter?.experienceTokens ?? 0, 0, 'no Experience — the attack did not defeat the unit');
+});
+
+scenario('Plot: on leader deploy, play a Plot card from the resource zone, replaced by top of deck (§19)', () => {
+  // p1 has a Plot unit + 5 plain resources (6 total ≥ deploy threshold 4), a
+  // deployable leader (W4_001), and a card on top of the deck. Deploy → accept
+  // the Plot window → the Plot unit enters play (cost 1 paid), and the top of
+  // the deck replaces it in the resource zone (exhausted).
+  const plotRes = mkInst('W8_032', { iid: 'plotcard' });
+  const plain = [1, 2, 3, 4, 5].map(i => mkInst('W1_001', { iid: `pr${i}` }));
+  const base = emptyState({ resourcesP1: 0, deckP1: [mkInst('W2_009', { iid: 'topdeck' })], deckP2: [mkInst('W2_009')], active: 'p1' });
+  const state = {
+    ...base,
+    players: {
+      ...base.players,
+      p1: {
+        ...base.players.p1,
+        resources: [plotRes, ...plain],
+        leaders: [{ cardId: 'W4_001', side: 'leader' as const, isDeployed: false, exhausted: false }],
+      },
+    },
+  };
+  const r = step(state, { kind: 'DEPLOY_LEADER', player: 'p1', leaderIndex: 0 }, reg, scriptedChooser([{ kind: 'yes' }]));
+  if (!r.next.players.p1.leaders[0].isDeployed) throw new Error('leader should be deployed');
+  if (!r.next.players.p1.groundArena.some(c => c.iid === 'plotcard')) throw new Error('Plot unit should have entered play from the resource zone');
+  if (r.next.players.p1.resources.some(c => c.iid === 'plotcard')) throw new Error('Plot card should have left the resource zone');
+  assertEq(r.next.players.p1.resources.length, 6, 'resource count unchanged (Plot card replaced by top of deck)');
+  const repl = r.next.players.p1.resources.find(c => c.iid === 'topdeck');
+  if (!repl) throw new Error('top of deck should now be a resource');
+  assertEq(repl.exhausted, true, 'the replacement resource enters exhausted (§19c)');
+  assertEq(r.next.players.p1.deck.length, 0, 'deck drew its top card as the replacement');
+});
+
+scenario('Plot: declining the window leaves the card in the resource zone', () => {
+  const plotRes = mkInst('W8_032', { iid: 'plotcard' });
+  const plain = [1, 2, 3, 4, 5].map(i => mkInst('W1_001', { iid: `pr${i}` }));
+  const base = emptyState({ resourcesP1: 0, deckP1: [mkInst('W2_009', { iid: 'topdeck' })], deckP2: [mkInst('W2_009')], active: 'p1' });
+  const state = {
+    ...base,
+    players: {
+      ...base.players,
+      p1: { ...base.players.p1, resources: [plotRes, ...plain], leaders: [{ cardId: 'W4_001', side: 'leader' as const, isDeployed: false, exhausted: false }] },
+    },
+  };
+  const r = step(state, { kind: 'DEPLOY_LEADER', player: 'p1', leaderIndex: 0 }, reg, declineChooser);
+  if (!r.next.players.p1.resources.some(c => c.iid === 'plotcard')) throw new Error('declined Plot card should stay in the resource zone');
+  if (r.next.players.p1.groundArena.some(c => c.iid === 'plotcard')) throw new Error('declined Plot card should NOT be in play');
+});
+
+scenario('Hidden: cannot be attacked the phase it entered play (§18)', () => {
+  // phaseStartedAtStep=5; the Hidden unit entered at step 10 (this phase) → not
+  // a legal attack target, and a forced attack throws.
+  const hidden = mkInst('W8_030', { iid: 'hid', enteredZoneAt: 10 });
+  const attacker = mkInst('W1_001', { iid: 'atk' });
+  const base = emptyState({ groundP1: [attacker], groundP2: [hidden], active: 'p1' });
+  const state = { ...base, phaseStartedAtStep: 5 };
+  const legal = getLegalActions(state, reg, 'p1').actions;
+  if (legal.some(a => a.kind === 'ATTACK' && a.defenderIid === 'hid')) throw new Error('Hidden unit should not be an offered attack target');
+  expectThrow(() => step(state, { kind: 'ATTACK', player: 'p1', attackerIid: 'atk', defenderIid: 'hid' }, reg), 'Hidden');
+});
+
+scenario('Hidden: attackable once it has been in play since before this phase', () => {
+  const hidden = mkInst('W8_030', { iid: 'hid', enteredZoneAt: 2 });   // entered before phase start (5)
+  const attacker = mkInst('W1_001', { iid: 'atk' });
+  const base = emptyState({ groundP1: [attacker], groundP2: [hidden], deckP1: [mkInst('W2_009')], deckP2: [mkInst('W2_009')], active: 'p1' });
+  const state = { ...base, phaseStartedAtStep: 5 };
+  const r = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: 'atk', defenderIid: 'hid' }, reg);
+  if (r.next.players.p2.groundArena.some(c => c.iid === 'hid')) throw new Error('Hidden unit from a prior phase should be attackable (and defeated by 3)');
+});
+
+scenario('Hidden + Sentinel: still attackable the phase it entered (§18b)', () => {
+  const hs = mkInst('W8_031', { iid: 'hs', enteredZoneAt: 10 });       // Hidden+Sentinel, this phase
+  const attacker = mkInst('W1_001', { iid: 'atk' });
+  const base = emptyState({ groundP1: [attacker], groundP2: [hs], deckP1: [mkInst('W2_009')], deckP2: [mkInst('W2_009')], active: 'p1' });
+  const state = { ...base, phaseStartedAtStep: 5 };
+  const legal = getLegalActions(state, reg, 'p1').actions;
+  if (!legal.some(a => a.kind === 'ATTACK' && a.defenderIid === 'hs')) throw new Error('Hidden+Sentinel must be attackable (Sentinel overrides Hidden, §18b)');
+  const r = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: 'atk', defenderIid: 'hs' }, reg);
+  if (r.next.players.p2.groundArena.some(c => c.iid === 'hs')) throw new Error('Hidden+Sentinel should be attackable and defeated by 3');
+});
+
+scenario('Exploit: default sacrifices the minimum to afford; cost drops 2 per unit (§16)', () => {
+  // Exploiter: cost 5, Exploit 2. p1 has 3 resources + 2 fodder. Needs to
+  // defeat ceil((5−3)/2)=1 friendly unit → cost 3. Default chooser stops at the
+  // minimum, so exactly 1 fodder is sacrificed and 3 resources are paid.
+  const exploiter = mkInst('W8_029', { iid: 'exp' });
+  const f1 = mkInst('W2_009', { iid: 'f1' });
+  const f2 = mkInst('W2_009', { iid: 'f2' });
+  const state = emptyState({ handP1: [exploiter], groundP1: [f1, f2], resourcesP1: 3, deckP1: [mkInst('W2_009')], deckP2: [mkInst('W2_009')], active: 'p1' });
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'exp' }, reg);
+  if (!r.next.players.p1.groundArena.some(c => c.iid === 'exp')) throw new Error('Exploiter should be in play');
+  assertEq(r.next.players.p1.groundArena.filter(c => c.iid === 'f1' || c.iid === 'f2').length, 1, 'exactly 1 fodder sacrificed (minimum)');
+  assertEq(r.next.players.p1.resources.filter(x => x.exhausted).length, 3, 'paid 3 (cost 5 − 2)');
+});
+
+scenario('Exploit: may sacrifice up to X — 2 sacrifices → cost 5−4=1', () => {
+  const exploiter = mkInst('W8_029', { iid: 'exp' });
+  const f1 = mkInst('W2_009', { iid: 'f1' });
+  const f2 = mkInst('W2_009', { iid: 'f2' });
+  const state = emptyState({ handP1: [exploiter], groundP1: [f1, f2], resourcesP1: 3, deckP1: [mkInst('W2_009')], deckP2: [mkInst('W2_009')], active: 'p1' });
+  const chooser = scriptedChooser([{ kind: 'option', value: 'f1' }, { kind: 'option', value: 'f2' }]);
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'exp' }, reg, chooser);
+  assertEq(r.next.players.p1.groundArena.filter(c => c.iid === 'f1' || c.iid === 'f2').length, 0, 'both fodder sacrificed');
+  assertEq(r.next.players.p1.resources.filter(x => x.exhausted).length, 1, 'paid only 1 (cost 5 − 4)');
+});
+
+scenario('Exploit: enables an otherwise-unaffordable play (legal gate + forced minimum)', () => {
+  const exploiter = mkInst('W8_029', { iid: 'exp' });   // cost 5
+  const f1 = mkInst('W2_009', { iid: 'f1' });
+  const f2 = mkInst('W2_009', { iid: 'f2' });
+  const state = emptyState({ handP1: [exploiter], groundP1: [f1, f2], resourcesP1: 1, deckP1: [mkInst('W2_009')], deckP2: [mkInst('W2_009')], active: 'p1' });
+  const legal = getLegalActions(state, reg, 'p1').actions;
+  if (!legal.some(a => a.kind === 'PLAY_CARD' && a.iid === 'exp')) throw new Error('Exploit should make a cost-5 card legal with 1 resource + 2 fodder');
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'exp' }, reg);
+  if (!r.next.players.p1.groundArena.some(c => c.iid === 'exp')) throw new Error('should be played via Exploit');
+  assertEq(r.next.players.p1.groundArena.filter(c => c.iid === 'f1' || c.iid === 'f2').length, 0, 'both fodder needed and sacrificed');
 });
 
 scenario('Bounty: the player who defeats the unit (the opponent) collects it (§13a/f)', () => {

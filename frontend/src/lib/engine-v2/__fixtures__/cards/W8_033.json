@@ -1,0 +1,20 @@
+{
+  "id": "W8_033",
+  "name": "Superlaser Technician (test)",
+  "type": "unit",
+  "cost": 1,
+  "aspects": ["villainy"],
+  "arena": "ground",
+  "power": 1,
+  "hp": 1,
+  "traits": ["imperial"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.defeated",
+      "where": { "card": "self" },
+      "do": { "effect": "optional", "do": { "effect": "play_as_resource", "ready": true } }
+    }
+  ]
+}

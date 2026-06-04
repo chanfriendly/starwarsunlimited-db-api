@@ -435,13 +435,16 @@ export interface IndirectDamageEffect {
   player: PlayerRef;
 }
 
-/** "Put this event into play as a resource" (Resupply). The source event card
- *  becomes a resource in its controller's resource zone instead of going to the
- *  discard pile. The new resource enters play exhausted (§2046 — a resource put
- *  into play by an ability enters exhausted). Self-referential: always acts on
- *  the source card, so it carries no target. */
+/** "Put this <card> into play as a resource." The source card becomes a resource
+ *  in its controller's resource zone. Used two ways: Resupply (an event, instead
+ *  of going to discard) and When-Defeated units like Superlaser Technician (the
+ *  unit is in the discard pile when the trigger resolves, and moves from there).
+ *  Self-referential: always acts on the source card, so it carries no target.
+ *  The new resource enters play exhausted (§2046) UNLESS the card says "and ready
+ *  it" (`ready: true`), e.g. Superlaser Technician. */
 export interface PlayAsResourceEffect {
   effect: 'play_as_resource';
+  ready?: boolean;
 }
 
 export type Effect =

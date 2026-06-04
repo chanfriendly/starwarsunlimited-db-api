@@ -10,7 +10,7 @@ import { effectivePower, hasEffectiveKeyword } from './runtime/modifiers';
 import { isLimitExhausted, makeUndeployedLeaderIid } from './runtime/triggers';
 import { resolveSelector } from './runtime/selectors';
 import { defaultChooser } from './runtime/chooser';
-import { effectiveCost } from './runtime/cost';
+import { effectiveCost, exploitOf } from './runtime/cost';
 
 export interface LegalActionsResult {
   actions: PlayerAction[];
@@ -48,7 +48,14 @@ export function getLegalActions(state: GameState, reg: CardRegistry, pid: Player
     if (!spec) continue;
     if (spec.type !== 'unit' && spec.type !== 'event' && spec.type !== 'upgrade') continue;
     const cost = effectiveCost(state, reg, spec, pid);
-    if (cost > readyResourceCount) continue;
+    // Exploit (§16): the player may defeat up to X friendly units when playing
+    // this card, each cutting the cost by 2 (floored at 0). The card is
+    // affordable if it's payable at the best-case (max) reduction; how many to
+    // actually sacrifice is chosen in reducer.applyPlayCard.
+    const exploit = exploitOf(spec);
+    const maxSac = Math.min(exploit, p.groundArena.length + p.spaceArena.length);
+    const minCost = Math.max(0, cost - 2 * maxSac);
+    if (minCost > readyResourceCount) continue;
     if (spec.type === 'upgrade') {
       // One PLAY_CARD action per legal friendly host. No host → no action.
       const hosts = [...p.groundArena, ...p.spaceArena];
@@ -95,8 +102,16 @@ export function getLegalActions(state: GameState, reg: CardRegistry, pid: Player
           actions.push({ kind: 'ATTACK', player: pid, attackerIid: attacker.iid, defenderIid: s.iid });
         }
       } else {
-        // Any enemy in this arena
+        // Any enemy in this arena, except a Hidden unit that entered play this
+        // phase (§18 — mirrors attackIllegalReason so legal/reducer agree; a
+        // Hidden+Sentinel unit is offered via the sentinels branch above).
         for (const def of oppArena) {
+          const hiddenProtected =
+            state.phaseStartedAtStep !== undefined
+            && def.enteredZoneAt >= state.phaseStartedAtStep
+            && hasEffectiveKeyword(state, reg, def, oppId, 'hidden')
+            && !hasEffectiveKeyword(state, reg, def, oppId, 'sentinel');
+          if (hiddenProtected) continue;
           actions.push({ kind: 'ATTACK', player: pid, attackerIid: attacker.iid, defenderIid: def.iid });
         }
         // Or attack base

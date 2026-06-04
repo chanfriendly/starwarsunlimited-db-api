@@ -1,0 +1,12 @@
+{
+  "id": "W8_029",
+  "name": "Exploiter (test)",
+  "type": "unit",
+  "cost": 5,
+  "aspects": ["aggression"],
+  "arena": "ground",
+  "power": 3,
+  "hp": 3,
+  "traits": ["separatist"],
+  "keywords": [{ "name": "exploit", "value": 2 }]
+}

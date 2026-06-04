@@ -149,6 +149,11 @@ export interface GameState {
    *  round end. Optional for back-compat with hand-built states (absent = none
    *  taken). */
   countersTakenThisRound?: Array<'initiative' | 'blast' | 'plan'>;
+  /** `step` at which the current action phase began. A unit whose
+   *  `enteredZoneAt >=` this entered play during this phase — used by Hidden
+   *  (§18: can't be attacked the phase it was played/deployed/created). Optional
+   *  for back-compat (absent → no unit counts as "entered this phase"). */
+  phaseStartedAtStep?: number;
   winner?: PlayerId | 'draw';
   log: LogEntry[];
   consecutivePasses: number;

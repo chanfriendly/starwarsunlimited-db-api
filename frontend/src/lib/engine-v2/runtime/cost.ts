@@ -62,3 +62,16 @@ export function effectiveCost(
   }
   return Math.max(0, cost);
 }
+
+/** Total Exploit X on a card (§16): the player MAY defeat up to X friendly units
+ *  while playing it, each reducing the cost by 2. Multiple Exploit instances
+ *  stack (§16b). Read from the card's keywords (the value is pulled from the
+ *  "Exploit N" text by the translator). The interactive sacrifice + the −2-each
+ *  reduction live in reducer.applyPlayCard / legal.ts, not in effectiveCost,
+ *  because Exploit involves a player choice (which/how many units to defeat). */
+export function exploitOf(spec: CardSpec): number {
+  const kws = (spec.type === 'unit' || spec.type === 'upgrade' || spec.type === 'token')
+    ? (spec.keywords ?? [])
+    : [];
+  return kws.reduce((n, k) => k.name.toLowerCase() === 'exploit' ? n + (k.value ?? 0) : n, 0);
+}
