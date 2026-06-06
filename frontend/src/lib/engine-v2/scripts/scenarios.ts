@@ -38,6 +38,7 @@ function emptyState(opts: {
   groundP2?: CardInstance[]; spaceP2?: CardInstance[];
   handP1?: CardInstance[]; handP2?: CardInstance[];
   deckP1?: CardInstance[]; deckP2?: CardInstance[];
+  discardP1?: CardInstance[]; discardP2?: CardInstance[];
   resourcesP1?: number; resourcesP2?: number;
   active?: PlayerId;
   phase?: 'action' | 'setup' | 'regroup';
@@ -57,7 +58,7 @@ function emptyState(opts: {
         id: 'p1', displayName: 'P1',
         hand: opts.handP1 ?? [],
         deck: opts.deckP1 ?? [mkInst('W1_001'), mkInst('W1_001'), mkInst('W1_001')],
-        discard: [], resources: mkRes(opts.resourcesP1 ?? 10, 0), creditTokens: [],
+        discard: opts.discardP1 ?? [], resources: mkRes(opts.resourcesP1 ?? 10, 0), creditTokens: [],
         groundArena: opts.groundP1 ?? [], spaceArena: opts.spaceP1 ?? [],
         leaders: [], base: { cardId: 'B_001', damage: 0 },
         forceToken: false, capturedByMe: [],
@@ -68,7 +69,7 @@ function emptyState(opts: {
         id: 'p2', displayName: 'P2',
         hand: opts.handP2 ?? [],
         deck: opts.deckP2 ?? [mkInst('W1_003'), mkInst('W1_003'), mkInst('W1_003')],
-        discard: [], resources: mkRes(opts.resourcesP2 ?? 10, 100), creditTokens: [],
+        discard: opts.discardP2 ?? [], resources: mkRes(opts.resourcesP2 ?? 10, 100), creditTokens: [],
         groundArena: opts.groundP2 ?? [], spaceArena: opts.spaceP2 ?? [],
         leaders: [], base: { cardId: 'B_002', damage: 0 },
         forceToken: false, capturedByMe: [],
@@ -286,6 +287,384 @@ scenario('Play as resource: When-Defeated unit declined → stays in discard (Su
   const r = step(state, { kind: 'PASS', player: 'p1' }, reg, declineChooser);
   if (r.next.players.p1.resources.some(c => c.iid === 'tech')) throw new Error('declined → not a resource');
   if (!r.next.players.p1.discard.some(c => c.iid === 'tech')) throw new Error('declined → stays in discard');
+});
+
+scenario('Defeat (opponent_choose): the opponent picks which of their units dies (Power of the Dark Side)', () => {
+  // p2 controls two units; p1 plays the event; p2 (opponent) chooses which to
+  // defeat. The scripted chooser picks the second one.
+  const ev = mkInst('W8_034', { iid: 'potds' });
+  const u1 = mkInst('W1_001', { iid: 'u1' });
+  const u2 = mkInst('W1_001', { iid: 'u2' });
+  const state = emptyState({ handP1: [ev], resourcesP1: 3, groundP2: [u1, u2], active: 'p1' });
+  const chooser = scriptedChooser([{ kind: 'targets', targets: [{ kind: 'unit', iid: 'u2', controller: 'p2' }] }]);
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'potds' }, reg, chooser);
+  const arena = r.next.players.p2.groundArena.map(c => c.iid);
+  if (arena.includes('u2')) throw new Error('the opponent-chosen unit should be defeated');
+  if (!arena.includes('u1')) throw new Error('the unchosen unit should survive');
+  if (!r.next.players.p2.discard.some(c => c.iid === 'u2')) throw new Error('defeated unit → its owner discard');
+});
+
+scenario('Upgrade-granted ability: On-Attack exhausts the defender (Vambrace Grappleshot)', () => {
+  // Host (3/3) with Vambrace attacks a high-HP defender (1/9) so it survives to
+  // be observed exhausted. The grant is attributed to the host → fires on its attack.
+  const vamb = mkInst('W8_036', { iid: 'vamb' });
+  const host = mkInst('W1_001', { iid: 'host', upgrades: [vamb] });
+  const tank = mkInst('W8_024', { iid: 'tank' });               // 1/9, survives
+  const state = emptyState({ groundP1: [host], groundP2: [tank], active: 'p1' });
+  const r = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: 'host', defenderIid: 'tank' }, reg);
+  const def = r.next.players.p2.groundArena.find(c => c.iid === 'tank');
+  if (!def) throw new Error('defender should survive');
+  assertEq(def.exhausted, true, 'granted On-Attack exhausts the defender');
+});
+
+scenario('Upgrade-granted ability: On-Attack gives the HOST Experience (Sith Traditions)', () => {
+  // Host with Sith Traditions attacks the base (survives) → the granted
+  // "give Experience to this unit" resolves with self = the host.
+  const sith = mkInst('W8_035', { iid: 'sith' });
+  const host = mkInst('W1_001', { iid: 'host', upgrades: [sith] });
+  const state = emptyState({ groundP1: [host], active: 'p1' });
+  const r = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: 'host', defenderIid: 'base' }, reg);
+  const h = r.next.players.p1.groundArena.find(c => c.iid === 'host');
+  assertEq(h?.experienceTokens ?? 0, 1, 'host gains 1 Experience from its own granted On-Attack');
+});
+
+scenario('Upgrade-granted ability: When-Defeated fires after the host (and upgrade) is defeated (Sith Traditions)', () => {
+  // Host at lethal damage; the settle defeats it. The granted When-Defeated is
+  // recovered from the UPGRADE_DETACHED event (the upgrade already left play) and
+  // gives a friendly unit Experience.
+  const sith = mkInst('W8_035', { iid: 'sith' });
+  const dying = mkInst('W1_001', { iid: 'dying', upgrades: [sith], damage: 9999 });
+  const ally = mkInst('W1_001', { iid: 'ally' });
+  const state = emptyState({ groundP1: [dying, ally], active: 'p1' });
+  const r = step(state, { kind: 'PASS', player: 'p1' }, reg);
+  const a = r.next.players.p1.groundArena.find(c => c.iid === 'ally');
+  assertEq(a?.experienceTokens ?? 0, 1, 'a friendly unit gains Experience from the granted When-Defeated');
+  if (r.next.players.p1.groundArena.some(c => c.iid === 'dying')) throw new Error('host should be defeated');
+});
+
+scenario('Conditional keyword grant: a matching host gains the keyword (Darth Revan\'s Lightsabers → Sith gains Grit)', () => {
+  // W8_038 is a Sith unit; W8_037 grants Grit only "if attached unit is a Sith".
+  const lightsabers = mkInst('W8_037', { iid: 'ls' });
+  const sithHost = mkInst('W8_038', { iid: 'sith', upgrades: [lightsabers] });
+  const state = emptyState({ groundP1: [sithHost], active: 'p1' });
+  if (!hasEffectiveKeyword(state, reg, sithHost, 'p1', 'grit')) throw new Error('Sith host should gain Grit');
+});
+
+scenario('Conditional keyword grant: a NON-matching host does not gain the keyword (non-Sith → no Grit)', () => {
+  // W1_001 (Battlefield Marine) is Rebel/Trooper, not Sith → the filter fails.
+  const lightsabers = mkInst('W8_037', { iid: 'ls' });
+  const plainHost = mkInst('W1_001', { iid: 'plain', upgrades: [lightsabers] });
+  const state = emptyState({ groundP1: [plainHost], active: 'p1' });
+  if (hasEffectiveKeyword(state, reg, plainHost, 'p1', 'grit')) throw new Error('non-Sith host must NOT gain Grit');
+});
+
+scenario('Cost discount: granted On-Attack makes the next unit cost N less, consumed on play (General\'s Blade)', () => {
+  // Jedi host with General's Blade attacks the base → "next unit costs 2 less".
+  const blade = mkInst('W8_039', { iid: 'blade' });
+  const jediHost = mkInst('W8_040', { iid: 'jedi', upgrades: [blade] });
+  const handUnit = mkInst('W1_001', { iid: 'hu' });                 // Battlefield Marine, cost 3
+  const state = emptyState({ groundP1: [jediHost], handP1: [handUnit], resourcesP1: 6, active: 'p1' });
+  const attacked = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: 'jedi', defenderIid: 'base' }, reg).next;
+  assertEq(effectiveCost(attacked, reg, reg.cards['W1_001'], 'p1'), 1, 'next unit discounted 3→1');
+  // The attack ended p1's turn; the discount persists across turns within the
+  // phase. Simulate p1's next turn and play the unit: charges 1, consumes the discount.
+  const afterAttack: GameState = { ...attacked, activePlayer: 'p1' };
+  const afterPlay = step(afterAttack, { kind: 'PLAY_CARD', player: 'p1', iid: 'hu' }, reg).next;
+  assertEq(afterPlay.players.p1.resources.filter(r => !r.exhausted).length, 5, 'charged the discounted cost (1)');
+  assertEq((afterPlay.players.p1.discounts ?? []).length, 0, 'discount consumed');
+});
+
+scenario('Cost discount: granted ability is inert on a non-matching host (non-Jedi → no discount)', () => {
+  const blade = mkInst('W8_039', { iid: 'blade' });
+  const plainHost = mkInst('W1_001', { iid: 'plain', upgrades: [blade] });   // Rebel/Trooper, not Jedi
+  const state = emptyState({ groundP1: [plainHost], resourcesP1: 6, active: 'p1' });
+  const after = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: 'plain', defenderIid: 'base' }, reg).next;
+  assertEq((after.players.p1.discounts ?? []).length, 0, 'no discount from a non-Jedi host');
+});
+
+scenario('Exchange control: a friendly and an enemy unit swap controllers, keeping state (Choose Sides)', () => {
+  // p1 plays Choose Sides; default chooser picks the one friendly + the one enemy.
+  // The friendly goes to p2; the enemy comes to p1. Damage + owner are preserved.
+  const ev = mkInst('W8_041', { iid: 'cs' });
+  const mine = mkInst('W1_001', { iid: 'mine', damage: 1 });
+  const theirs = mkInst('W1_001', { iid: 'theirs' });
+  const state = emptyState({ handP1: [ev], resourcesP1: 3, groundP1: [mine], groundP2: [theirs], active: 'p1' });
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'cs' }, reg);
+  const p1g = r.next.players.p1.groundArena.map(c => c.iid);
+  const p2g = r.next.players.p2.groundArena.map(c => c.iid);
+  if (!p2g.includes('mine')) throw new Error('my unit should move to the opponent');
+  if (!p1g.includes('theirs')) throw new Error("the enemy's unit should come to me");
+  const mineNow = r.next.players.p2.groundArena.find(c => c.iid === 'mine');
+  assertEq(mineNow?.damage, 1, 'damage retained through the swap');
+  assertEq(mineNow?.owner, 'p1', 'original owner recorded (returns to p1 discard on defeat)');
+});
+
+scenario('Play from discard: plays a unit at a reduced cost; Force unit gets the bigger reduction (Palpatine\'s Return)', () => {
+  // Force Colossus (cost 8) in discard; Palpatine's Return → "8 less if Force"
+  // makes it free. Event costs 2; 3 resources covers it with the unit free.
+  const ev = mkInst('W8_042', { iid: 'pr' });
+  const colossus = mkInst('W8_043', { iid: 'col' });
+  const state = emptyState({ handP1: [ev], discardP1: [colossus], resourcesP1: 3, active: 'p1' });
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'pr' }, reg);
+  if (!r.next.players.p1.groundArena.some(c => c.iid === 'col')) throw new Error('Force unit should be played from discard');
+  if (r.next.players.p1.discard.some(c => c.iid === 'col')) throw new Error('played unit should leave the discard');
+  const col = r.next.players.p1.groundArena.find(c => c.iid === 'col');
+  assertEq(col?.exhausted, true, 'enters the arena exhausted (§3.4.4b)');
+});
+
+scenario('Play from discard: no-op when the only candidate is unaffordable (Palpatine\'s Return)', () => {
+  // Battlefield Marine (cost 3) in discard, reduced by 6 → 0... so it IS free.
+  // Use a costlier non-Force unit and starve resources so even the reduced cost
+  // can't be paid. Plain Titan (cost 7) − 6 = 1, but the event eats both resources.
+  const titan: any = { id: 'PT_X', name: 'Plain Titan', type: 'unit', cost: 7, aspects: ['villainy'], arena: 'ground', power: 7, hp: 7, traits: ['rebel'], keywords: [], abilities: [] };
+  const reg2 = buildRegistry([...ALL_CARDS, titan], W1_BASES);
+  const ev = mkInst('W8_042', { iid: 'pr' });
+  const t = mkInst('PT_X', { iid: 't' });
+  const state = emptyState({ handP1: [ev], discardP1: [t], resourcesP1: 2, active: 'p1' });   // event eats 2 → 0 left
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'pr' }, reg2);
+  if (r.next.players.p1.groundArena.some(c => c.iid === 't')) throw new Error('unaffordable unit must not be played');
+  if (!r.next.players.p1.discard.some(c => c.iid === 't')) throw new Error('unit stays in discard');
+});
+
+scenario('Per-X from discard: +1/+0 per Trooper unit in your discard (Captain Enoch)', () => {
+  // Enoch (printed 3 power) + 2 Trooper units (W8_038) + 1 non-Trooper in discard → 3+2 = 5.
+  const enoch = mkInst('W8_044', { iid: 'enoch' });
+  const state = emptyState({
+    groundP1: [enoch],
+    discardP1: [mkInst('W8_038'), mkInst('W8_038'), mkInst('W1_002')], // 2 Trooper units + a Fighter (not a Trooper)
+    active: 'p1',
+  });
+  assertEq(effectivePower(state, reg, enoch, 'p1'), 5, '3 printed + 2 Trooper units in discard');
+});
+
+scenario('Unique-defeated trigger w/ once-per-round limit: draw on a unique defeat, not a non-unique one (Agent Kallus)', () => {
+  // Kallus in play; a unique enemy unit at lethal damage is defeated on settle → p1 draws.
+  const kallus = mkInst('W8_045', { iid: 'kal' });
+  const uniqueEnemy = mkInst('W8_021', { iid: 'ue', damage: 9999 });
+  const state = emptyState({ groundP1: [kallus], groundP2: [uniqueEnemy], deckP1: [mkInst('W1_001'), mkInst('W1_001')], active: 'p1' });
+  const r = step(state, { kind: 'PASS', player: 'p1' }, reg);
+  assertEq(r.next.players.p1.hand.length, 1, 'unique unit defeated → Kallus draws 1');
+
+  // A non-unique unit defeated → no draw.
+  const plain = mkInst('W2_009', { iid: 'pl', damage: 9999 });   // 2/2 non-unique
+  const state2 = emptyState({ groundP1: [mkInst('W8_045', { iid: 'kal2' })], groundP2: [plain], deckP1: [mkInst('W1_001')], active: 'p1' });
+  const r2 = step(state2, { kind: 'PASS', player: 'p1' }, reg);
+  assertEq(r2.next.players.p1.hand.length, 0, 'non-unique defeat → no draw');
+});
+
+scenario('Search and play: plays Villainy units under a combined-cost cap for free (Darth Vader)', () => {
+  // Deck top: W8_033 (Villainy, cost 1), W8_024 (Villainy, cost 2), W8_043
+  // (Villainy, cost 8 — over the cap), W1_001 (Heroism — wrong aspect). The
+  // greedy default chooser takes cost1 + cost2 = 3 (cap hit); the others stay.
+  const ev = mkInst('W8_046', { iid: 'dv' });
+  const deck = [mkInst('W8_033', { iid: 'c1' }), mkInst('W8_024', { iid: 'c2' }), mkInst('W8_043', { iid: 'c8' }), mkInst('W1_001', { iid: 'hero' })];
+  const state = emptyState({ handP1: [ev], deckP1: deck, resourcesP1: 5, active: 'p1' });
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'dv' }, reg);
+  const arena = r.next.players.p1.groundArena.map(c => c.iid).sort();
+  assertEq(JSON.stringify(arena), JSON.stringify(['c1', 'c2']), 'plays the cost-1 + cost-2 Villainy units (combined 3)');
+  if (r.next.players.p1.groundArena.some(c => c.iid === 'c8')) throw new Error('over-cap unit must not be played');
+  if (r.next.players.p1.groundArena.some(c => c.iid === 'hero')) throw new Error('non-Villainy unit must not be played');
+  assertEq(r.next.players.p1.deck.length, 2, 'two played units leave the deck (c8 + hero remain)');
+  // The event cost 2 was paid; the searched units were free → 3 ready resources left.
+  assertEq(r.next.players.p1.resources.filter(x => !x.exhausted).length, 3, 'searched units played for free');
+  const c1 = r.next.players.p1.groundArena.find(c => c.iid === 'c1');
+  assertEq(c1?.exhausted, true, 'played units enter exhausted');
+});
+
+scenario('Attack with a unit + attacker buff: chosen unit attacks at +2/+0 for this attack, buff removed after', () => {
+  const ev = mkInst('W8_049', { iid: 'ev' });
+  const attacker = mkInst('W1_001', { iid: 'atk' });   // 3/3 ready
+  const tank = mkInst('W8_024', { iid: 'def' });        // 1/9 — survives so we can read damage dealt
+  const state = emptyState({ handP1: [ev], resourcesP1: 3, groundP1: [attacker], groundP2: [tank], active: 'p1' });
+  const chooser = scriptedChooser([
+    { kind: 'targets', targets: [{ kind: 'unit', iid: 'atk', controller: 'p1' }] }, // attacker
+    { kind: 'option', value: 'def' },                                                // defender
+  ]);
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'ev' }, reg, chooser);
+  assertEq(r.next.players.p2.groundArena.find(c => c.iid === 'def')?.damage, 5, 'attacker hits for 3 base + 2 buff');
+  const atk = r.next.players.p1.groundArena.find(c => c.iid === 'atk');
+  assertEq(atk?.exhausted, true, 'attacker exhausted by attacking');
+  assertEq(effectivePower(r.next, reg, atk!, 'p1'), 3, 'buff was "for this attack" only — power back to 3');
+  if (r.next.lastingEffects.length !== 0) throw new Error('the temporary attack buff must be cleaned up');
+});
+
+scenario('Conditional attacker buff: applies only when the chosen attacker matches (Snowtrooper Lieutenant)', () => {
+  // "If it's an Imperial unit, it gets +2/+0." An Imperial attacker hits for +2;
+  // a non-Imperial one doesn't.
+  const mkGame = (attCardId: string) => {
+    const ev = mkInst('W8_050', { iid: 'ev' });
+    const att = mkInst(attCardId, { iid: 'a' });
+    const def = mkInst('W8_024', { iid: 'd' });           // 1/9, survives
+    const state = emptyState({ handP1: [ev], resourcesP1: 3, groundP1: [att], groundP2: [def], active: 'p1' });
+    const chooser = scriptedChooser([
+      { kind: 'yes' },                                                         // optional "you may"
+      { kind: 'targets', targets: [{ kind: 'unit', iid: 'a', controller: 'p1' }] },
+      { kind: 'option', value: 'd' },
+    ]);
+    return step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'ev' }, reg, chooser).next;
+  };
+  // W8_038 is an Imperial? It's Sith/Trooper. Use W1_003 (imperial, trooper) as the Imperial attacker, W1_002 (rebel, fighter) as non-Imperial.
+  const imp = mkGame('W1_003');   // 2 power + 2 buff = 4
+  assertEq(imp.players.p2.groundArena.find(c => c.iid === 'd')?.damage, 4, 'Imperial attacker buffed +2');
+  const non = mkGame('W1_002');   // 1 power (Rebel Fighter), no buff
+  assertEq(non.players.p2.groundArena.find(c => c.iid === 'd')?.damage, 1, 'non-Imperial attacker unbuffed');
+});
+
+scenario('Defender debuff: "The defender gets -2/-0 for this attack" lowers its return damage (Catch Unawares)', () => {
+  const ev = mkInst('W8_051', { iid: 'ev' });
+  const att = mkInst('W1_001', { iid: 'a' });   // 3/3
+  const def = mkInst('W8_024', { iid: 'd' });    // 1/9 — survives so we can read the attacker's taken damage
+  const state = emptyState({ handP1: [ev], resourcesP1: 3, groundP1: [att], groundP2: [def], active: 'p1' });
+  const chooser = scriptedChooser([
+    { kind: 'targets', targets: [{ kind: 'unit', iid: 'a', controller: 'p1' }] },
+    { kind: 'option', value: 'd' },
+  ]);
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'ev' }, reg, chooser);
+  // Defender is 1 power, debuffed by -2 → 0 → no return damage to the attacker.
+  assertEq(r.next.players.p1.groundArena.find(c => c.iid === 'a')?.damage, 0, 'debuffed defender deals 0 return damage');
+  assertEq(r.next.players.p2.groundArena.find(c => c.iid === 'd')?.damage, 3, 'defender still takes the attacker\'s 3');
+  if (r.next.lastingEffects.length !== 0) throw new Error('the temporary defender debuff must be cleaned up');
+});
+
+scenario('Granted Bounty: an upgrade gives the host a Bounty — the OPPONENT collects it on the host\'s defeat (Death Mark)', () => {
+  // p1's host carries Death Mark ("Bounty — Draw 2 cards"). When the host is
+  // defeated, the opponent (p2) collects the bounty and draws 2; p1 doesn't.
+  const host = mkInst('W1_001', { iid: 'host', upgrades: [mkInst('W8_056', { iid: 'dm' })], damage: 9999 });
+  const state = emptyState({ groundP1: [host], deckP2: [mkInst('W1_001'), mkInst('W1_001'), mkInst('W1_001')], active: 'p1' });
+  const r = step(state, { kind: 'PASS', player: 'p1' }, reg);
+  if (r.next.players.p1.groundArena.some(c => c.iid === 'host')) throw new Error('host should be defeated');
+  assertEq(r.next.players.p2.hand.length, 2, 'the opponent collects the bounty (draws 2)');
+  assertEq(r.next.players.p1.hand.length, 0, 'the bounty is opponent-controlled — the owner does NOT draw');
+});
+
+scenario('Credit tokens: created, then spent as resources to play a card (removed when spent)', () => {
+  // Play the event (cost 1) → creates 2 Credits. Then a cost-3 card is affordable
+  // with 1 ready resource + 2 Credits; the Credits are consumed.
+  const payout = mkInst('W8_055', { iid: 'pay' });
+  const bigCard = mkInst('W1_001', { iid: 'big' });   // Battlefield Marine, cost 3
+  // Start with 1 resource so that after playing the cost-1 event we have 0 ready,
+  // then top up via Credits. (Give 2 resources: 1 spent on the event, 1 left.)
+  const state = emptyState({ handP1: [payout, bigCard], resourcesP1: 2, active: 'p1' });
+  const afterPayout = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'pay' }, reg).next;
+  assertEq(afterPayout.players.p1.creditTokens.length, 2, 'created 2 Credit tokens');
+  // 1 ready resource left + 2 credits = 3 → can afford the cost-3 card.
+  const legal = getLegalActions({ ...afterPayout, activePlayer: 'p1' }, reg, 'p1').actions
+    .some(a => a.kind === 'PLAY_CARD' && a.iid === 'big');
+  if (!legal) throw new Error('cost-3 card should be affordable with 1 resource + 2 credits');
+  const afterBig = step({ ...afterPayout, activePlayer: 'p1' }, { kind: 'PLAY_CARD', player: 'p1', iid: 'big' }, reg).next;
+  if (!afterBig.players.p1.groundArena.some(c => c.iid === 'big')) throw new Error('card should be played');
+  assertEq(afterBig.players.p1.creditTokens.length, 0, 'both Credits spent (2 of the 3 cost)');
+  assertEq(afterBig.players.p1.resources.filter(r => !r.exhausted).length, 0, 'the 1 ready resource also spent');
+});
+
+scenario('Nimble Prowess (whole card): When-Played exhausts a unit in the HOST\'s arena only (host_arena scope)', () => {
+  // Host is in the GROUND arena. A ground enemy and a space enemy exist; only the
+  // ground one is a candidate (same arena as the host).
+  const host = mkInst('W1_001', { iid: 'host' });               // ground host (Battlefield Marine)
+  const groundEnemy = mkInst('W1_001', { iid: 'ge' });
+  const spaceEnemy = mkInst('W1_008', { iid: 'se' });           // a space unit (Capital Ship)
+  const state = emptyState({ handP1: [mkInst('W8_059', { iid: 'np' })], resourcesP1: 3, groundP1: [host], groundP2: [groundEnemy], spaceP2: [spaceEnemy], active: 'p1' });
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'np', targetIid: 'host' }, reg,
+    scriptedChooser([{ kind: 'yes' }, { kind: 'targets', targets: [{ kind: 'unit', iid: 'ge', controller: 'p2' }] }])).next;
+  assertEq(r.players.p2.groundArena.find(c => c.iid === 'ge')?.exhausted, true, 'a ground unit (host arena) is exhausted');
+  assertEq(r.players.p2.spaceArena.find(c => c.iid === 'se')?.exhausted, false, 'a space unit is out of the host arena → not a candidate');
+});
+
+scenario('The Darksaber (whole card): grants Sentinel + When-Played readies the host iff ≥4 different keywords among friendly units', () => {
+  // Host is W2_001 (Grit). Adding W2_002/003/004 (Raid/Shielded/Restore) makes 4
+  // distinct keywords among friendly units → the upgrade's When-Played readies the
+  // (exhausted) host. With fewer, it stays exhausted. Sentinel is granted either way.
+  const play = (others: string[]) => {
+    const host = mkInst('W2_001', { iid: 'host', exhausted: true });
+    const ds = mkInst('W8_058', { iid: 'ds' });
+    const ground = [host, ...others.map((c, i) => mkInst(c, { iid: `o${i}` }))];
+    const state = emptyState({ handP1: [ds], resourcesP1: 3, groundP1: ground, active: 'p1' });
+    return step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'ds', targetIid: 'host' }, reg).next;
+  };
+  const four = play(['W2_002', 'W2_003', 'W2_004']);   // Grit+Raid+Shielded+Restore = 4 distinct
+  const h4 = four.players.p1.groundArena.find(c => c.iid === 'host');
+  assertEq(h4?.exhausted, false, '≥4 distinct keywords → host readied');
+  if (!hasEffectiveKeyword(four, reg, h4!, 'p1', 'sentinel')) throw new Error('host should gain Sentinel');
+  const two = play(['W2_002']);   // Grit+Raid = 2 distinct
+  const h2 = two.players.p1.groundArena.find(c => c.iid === 'host');
+  assertEq(h2?.exhausted, true, '<4 distinct keywords → host stays exhausted');
+  if (!hasEffectiveKeyword(two, reg, h2!, 'p1', 'sentinel')) throw new Error('host still gains Sentinel regardless');
+});
+
+scenario('Left-play-this-phase: a defeat records it; the condition gates a friendly-only effect', () => {
+  // A defeat populates leftPlayThisPhase with the defeated unit's controller.
+  const dying = mkInst('W1_001', { iid: 'dying', damage: 9999 });
+  const defeated = step(emptyState({ groundP1: [dying], active: 'p1' }), { kind: 'PASS', player: 'p1' }, reg).next;
+  if (!(defeated.leftPlayThisPhase ?? []).includes('p1')) throw new Error('a defeat should record the controller in leftPlayThisPhase');
+
+  // The condition: "if a friendly unit left play this phase, draw 2".
+  const playEv = (left: PlayerId[]) => step(
+    { ...emptyState({ handP1: [mkInst('W8_057', { iid: 'ev' })], resourcesP1: 3, deckP1: [mkInst('W1_001'), mkInst('W1_001')], active: 'p1' }), leftPlayThisPhase: left },
+    { kind: 'PLAY_CARD', player: 'p1', iid: 'ev' }, reg,
+  ).next.players.p1.hand.length;
+  assertEq(playEv(['p1']), 2, 'a friendly unit left → draw 2');
+  assertEq(playEv(['p2']), 0, 'only an enemy unit left → friendly condition false → no draw');
+  assertEq(playEv([]), 0, 'nothing left play → no draw');
+});
+
+scenario('If-on-control: effect fires only when you control another matching unit (If you control another Villainy unit, deal 2)', () => {
+  const mk = (myUnits: CardInstance[]) => {
+    const ev = mkInst('W8_054', { iid: 'ev' });
+    const enemy = mkInst('W8_024', { iid: 'enemy' });    // 1/9 — survives so we can read the damage
+    const state = emptyState({ handP1: [ev], resourcesP1: 3, groundP1: myUnits, groundP2: [enemy], active: 'p1' });
+    return step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'ev' }, reg,
+      scriptedChooser([{ kind: 'targets', targets: [{ kind: 'unit', iid: 'enemy', controller: 'p2' }] }])).next;
+  };
+  assertEq(mk([]).players.p2.groundArena.find(c => c.iid === 'enemy')?.damage, 0, 'no Villainy ally → condition false → no damage');
+  assertEq(mk([mkInst('W8_038', { iid: 'ally' })]).players.p2.groundArena.find(c => c.iid === 'enemy')?.damage, 2, 'another Villainy unit → condition true → 2 damage');
+});
+
+scenario('Control-conditional "While you control another Villainy unit, +2/+0" — gated, excludes self', () => {
+  const self = mkInst('W8_053', { iid: 'self' });
+  // Alone: self is Villainy, but the condition is ANOTHER Villainy unit → no buff.
+  const alone = emptyState({ groundP1: [self], active: 'p1' });
+  assertEq(effectivePower(alone, reg, self, 'p1'), 3, 'no OTHER Villainy unit → unbuffed');
+  // With another Villainy unit (W8_038 is Villainy) → +2.
+  const withAlly = emptyState({ groundP1: [self, mkInst('W8_038', { iid: 'ally' })], active: 'p1' });
+  assertEq(effectivePower(withAlly, reg, self, 'p1'), 5, 'another Villainy unit → +2/+0');
+  // With only a Heroism unit (W1_001) → still no buff.
+  const withHero = emptyState({ groundP1: [self, mkInst('W1_001', { iid: 'h' })], active: 'p1' });
+  assertEq(effectivePower(withHero, reg, self, 'p1'), 3, 'non-Villainy ally → unbuffed');
+});
+
+scenario('Damage "a base": default hits the opponent\'s base; the player may choose their own', () => {
+  const mk = () => emptyState({ handP1: [mkInst('W8_052', { iid: 'bb' })], resourcesP1: 3, active: 'p1' });
+  const def = step(mk(), { kind: 'PLAY_CARD', player: 'p1', iid: 'bb' }, reg).next;
+  assertEq(def.players.p2.base.damage, 3, 'default → opponent base takes 3');
+  assertEq(def.players.p1.base.damage, 0, 'own base untouched by default');
+  const own = step(mk(), { kind: 'PLAY_CARD', player: 'p1', iid: 'bb' }, reg, scriptedChooser([{ kind: 'option', value: 'p1' }])).next;
+  assertEq(own.players.p1.base.damage, 3, 'player can choose to damage their own base');
+});
+
+scenario('Two-target compound damage: N to a friendly + M to an enemy ground unit (Death Trooper)', () => {
+  const dt = mkInst('W8_047', { iid: 'dt' });
+  const mine = mkInst('W1_001', { iid: 'mine' });
+  const foe = mkInst('W1_001', { iid: 'foe' });
+  const state = emptyState({ handP1: [dt], resourcesP1: 3, groundP1: [mine], groundP2: [foe], active: 'p1' });
+  const chooser = scriptedChooser([
+    { kind: 'targets', targets: [{ kind: 'unit', iid: 'mine', controller: 'p1' }] },
+    { kind: 'targets', targets: [{ kind: 'unit', iid: 'foe', controller: 'p2' }] },
+  ]);
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'dt' }, reg, chooser);
+  assertEq(r.next.players.p1.groundArena.find(c => c.iid === 'mine')?.damage, 2, 'friendly takes 2');
+  assertEq(r.next.players.p2.groundArena.find(c => c.iid === 'foe')?.damage, 2, 'enemy takes 2');
+});
+
+scenario('Action with a damage cost: pay by damaging a friendly unit, then draw (Doctor Pershing)', () => {
+  const dp = mkInst('W8_048', { iid: 'dp' });
+  const state = emptyState({ groundP1: [dp], deckP1: [mkInst('W1_001'), mkInst('W1_001')], resourcesP1: 3, active: 'p1' });
+  // Pay the "deal 1 to a friendly unit" cost by targeting Pershing himself.
+  const chooser = scriptedChooser([{ kind: 'targets', targets: [{ kind: 'unit', iid: 'dp', controller: 'p1' }] }]);
+  const r = step(state, { kind: 'USE_ACTION_ABILITY', player: 'p1', sourceIid: 'dp', abilityIndex: 0 }, reg, chooser);
+  assertEq(r.next.players.p1.hand.length, 1, 'drew a card');
+  const d = r.next.players.p1.groundArena.find(c => c.iid === 'dp');
+  assertEq(d?.damage, 1, 'paid 1 damage as part of the cost');
+  assertEq(d?.exhausted, true, 'exhaust cost paid');
 });
 
 scenario('Attacks-and-defeats trigger: the attacker gains Experience (Darth Revan)', () => {

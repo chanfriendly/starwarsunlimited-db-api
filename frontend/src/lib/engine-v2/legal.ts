@@ -43,6 +43,10 @@ export function getLegalActions(state: GameState, reg: CardRegistry, pid: Player
   // PLAY_CARD — every card in hand whose cost ≤ ready resources.
   const p = state.players[pid];
   const readyResourceCount = p.resources.filter(r => !r.exhausted).length;
+  // Credit tokens are one-shot resources spendable to PLAY a card (the reducer
+  // spends them in applyPlayCard). They are NOT yet wired into action-ability /
+  // deploy cost payment, so only the play-a-card affordability counts them.
+  const playAffordCount = readyResourceCount + p.creditTokens.length;
   for (const c of p.hand) {
     const spec = reg.cards[c.cardId];
     if (!spec) continue;
@@ -55,7 +59,7 @@ export function getLegalActions(state: GameState, reg: CardRegistry, pid: Player
     const exploit = exploitOf(spec);
     const maxSac = Math.min(exploit, p.groundArena.length + p.spaceArena.length);
     const minCost = Math.max(0, cost - 2 * maxSac);
-    if (minCost > readyResourceCount) continue;
+    if (minCost > playAffordCount) continue;
     if (spec.type === 'upgrade') {
       // One PLAY_CARD action per legal friendly host. No host → no action.
       const hosts = [...p.groundArena, ...p.spaceArena];

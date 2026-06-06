@@ -1,0 +1,25 @@
+{
+  "id": "W8_056",
+  "name": "Death Mark (test)",
+  "type": "upgrade",
+  "cost": 1,
+  "aspects": ["cunning"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "constant",
+      "grant": {
+        "target": { "attached_to_self": true },
+        "abilities": [
+          {
+            "type": "triggered",
+            "on": "event.defeated",
+            "where": { "card": "self" },
+            "controlled_by": "opponent",
+            "do": { "effect": "optional", "do": { "effect": "draw", "player": "self", "count": 2 } }
+          }
+        ]
+      }
+    }
+  ]
+}

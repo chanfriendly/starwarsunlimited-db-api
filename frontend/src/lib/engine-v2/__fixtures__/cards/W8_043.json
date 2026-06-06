@@ -1,0 +1,13 @@
+{
+  "id": "W8_043",
+  "name": "Force Colossus (test)",
+  "type": "unit",
+  "cost": 8,
+  "aspects": ["villainy"],
+  "arena": "ground",
+  "power": 8,
+  "hp": 8,
+  "traits": ["force", "sith"],
+  "keywords": [],
+  "abilities": []
+}

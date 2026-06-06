@@ -1,0 +1,19 @@
+{
+  "id": "W8_057",
+  "name": "Opportune Moment (test)",
+  "type": "event",
+  "cost": 1,
+  "aspects": ["cunning"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": {
+        "effect": "if",
+        "condition": { "unit_left_play_this_phase": "friendly" },
+        "then": { "effect": "draw", "player": "self", "count": 2 }
+      }
+    }
+  ]
+}

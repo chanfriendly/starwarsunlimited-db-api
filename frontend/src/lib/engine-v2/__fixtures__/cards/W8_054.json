@@ -1,0 +1,19 @@
+{
+  "id": "W8_054",
+  "name": "Conditional Strike (test)",
+  "type": "event",
+  "cost": 1,
+  "aspects": ["villainy"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": {
+        "effect": "if",
+        "condition": { "controller_controls": { "filter": { "card_aspect": "villainy" }, "exclude_self": true } },
+        "then": { "effect": "damage", "amount": 2, "target": { "zone": "any_arena", "controller": "opponent", "selector": "chosen", "count": 1 } }
+      }
+    }
+  ]
+}

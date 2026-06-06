@@ -1,0 +1,20 @@
+{
+  "id": "W8_042",
+  "name": "Palpatine's Return (test)",
+  "type": "event",
+  "cost": 2,
+  "aspects": ["villainy"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": {
+        "effect": "play_from_discard",
+        "filter": { "card_type": "unit" },
+        "cost_reduction": 6,
+        "cost_reduction_if": { "filter": { "card_trait": "force" }, "amount": 8 }
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "id": "W8_048",
+  "name": "Doctor Pershing (test)",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["villainy"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 5,
+  "traits": ["imperial"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "action",
+      "cost": { "exhaust": true, "damage": { "amount": 1, "target": { "zone": "any_arena", "controller": "self", "selector": "chosen", "count": 1 } } },
+      "do": { "effect": "draw", "player": "self", "count": 1 }
+    }
+  ]
+}

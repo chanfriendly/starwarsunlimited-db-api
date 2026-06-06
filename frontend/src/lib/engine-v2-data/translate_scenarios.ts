@@ -326,6 +326,305 @@ scenario('Matcher: "Put this event into play as a resource." → play_as_resourc
   if (a.type !== 'triggered' || a.do.effect !== 'play_as_resource') throw new Error('expected play_as_resource');
 });
 
+scenario('Matcher: "Attached unit gains: \'On Attack: …\' and \'When Defeated: …\'" → constant grant.abilities (Sith Traditions)', () => {
+  const r = matchCard({ name: 'Sith Traditions', type: 'Upgrade', text: 'Attach to a non-Vehicle unit.\nAttached unit gains: “On Attack: Give an Experience token to this unit.” and “When Defeated: Give an Experience token to a friendly unit.”' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'constant' || !a.grant.abilities) throw new Error('expected constant grant.abilities');
+  assertEq(a.grant.abilities.length, 2, 'two granted abilities');
+  if (!('attached_to_self' in a.grant.target)) throw new Error('grant targets the host');
+  const [g0, g1] = a.grant.abilities;
+  if (g0.type !== 'triggered' || g0.on !== 'event.attack_declared') throw new Error('granted On-Attack');
+  if (g0.do.effect !== 'give_experience' || !('self' in (g0.do as { target: object }).target)) throw new Error('On-Attack gives Experience to the host (self)');
+  if (g1.type !== 'triggered' || g1.on !== 'event.defeated') throw new Error('granted When-Defeated');
+});
+
+scenario('Matcher: "If attached unit is a Jedi, it gains: \'On Attack: The next unit you play this phase costs 2 resources less.\'" → conditional discount grant (General\'s Blade)', () => {
+  const r = matchCard({ name: "General's Blade", type: 'Upgrade', text: 'Attach to a non-Vehicle unit.\nIf attached unit is a Jedi, it gains: “On Attack: The next unit you play this phase costs 2 resources less.”' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'constant' || !a.grant.abilities) throw new Error('expected constant grant.abilities');
+  const tgt = a.grant.target as { attached_to_self?: boolean; filter?: { card_trait?: string } };
+  if (!tgt.attached_to_self || tgt.filter?.card_trait !== 'jedi') throw new Error('host gated on Jedi');
+  const g = a.grant.abilities[0];
+  if (g.type !== 'triggered' || g.on !== 'event.attack_declared' || g.do.effect !== 'discount') throw new Error('granted On-Attack discount');
+  if ((g.do as { amount?: number; card_type?: string }).amount !== 2 || (g.do as { card_type?: string }).card_type !== 'unit') throw new Error('discount 2, units');
+});
+
+scenario('Matcher: "Defeat a non-leader ground unit with 3 or less remaining HP." → arena-scoped remaining-HP defeat', () => {
+  const r = matchCard({ name: 'X', type: 'Event', text: 'Defeat a non-leader ground unit with 3 or less remaining HP.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const tgt = (r.abilities[0] as { do: { effect: string; target: { zone?: string; filter?: unknown } } }).do.target;
+  assertEq(tgt.zone, 'ground_arena', 'ground-scoped');
+  if (!tgt.filter) throw new Error('expected remaining_hp + non-leader filter');
+});
+
+scenario('Matcher: "Create a Credit token." / "Create 2 Credit tokens." → create_credit (not a unit token)', () => {
+  const one = matchCard({ name: 'X', type: 'Event', text: 'Create a Credit token.' });
+  assertEq(one.coverage, 'full', 'a credit');
+  const a = one.abilities[0];
+  if (a.type !== 'triggered' || a.do.effect !== 'create_credit') throw new Error('expected create_credit');
+  const two = matchCard({ name: 'X', type: 'Event', text: 'Create 2 Credit tokens.' });
+  assertEq((two.abilities[0] as { do: { count?: number } }).do.count, 2, 'count 2');
+});
+
+scenario('Matcher: "If a unit left play this phase, create a Clone Trooper token." → if-on-left-play (Chancellor Palpatine)', () => {
+  const r = matchCard({ name: 'Chancellor Palpatine', type: 'Unit', text: 'On Attack: If a unit left play this phase, create a Clone Trooper token.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const do_ = (r.abilities[0] as { do: { effect: string; condition?: { unit_left_play_this_phase?: string }; then?: { effect: string } } }).do;
+  assertEq(do_.effect, 'if', 'if effect');
+  assertEq(do_.condition?.unit_left_play_this_phase, 'any', '"a unit" → any controller');
+  assertEq(do_.then?.effect, 'create_token', 'creates a token');
+  // "a friendly unit" → friendly scope.
+  const fr = matchCard({ name: 'X', type: 'Event', text: 'If a friendly unit left play this phase, draw 2 cards.' });
+  assertEq(((fr.abilities[0] as { do: { condition?: { unit_left_play_this_phase?: string } } }).do.condition?.unit_left_play_this_phase), 'friendly', '"a friendly unit" → friendly');
+});
+
+scenario('Matcher: "If you control a Jedi unit, you may give an Experience token to this unit." → if-on-control + optional inner (control-gated effect)', () => {
+  const r = matchCard({ name: 'X', type: 'Unit', text: 'On Attack: If you control a Jedi unit, you may give an Experience token to this unit.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const do_ = (r.abilities[0] as { do: { effect: string; condition?: { controller_controls?: { filter?: { card_trait?: string } } }; then?: { effect: string } } }).do;
+  assertEq(do_.effect, 'if', 'if effect');
+  assertEq(do_.condition?.controller_controls?.filter?.card_trait, 'jedi', 'gated on controlling a Jedi unit');
+  assertEq(do_.then?.effect, 'optional', '"you may" → optional inner');
+});
+
+scenario('Matcher: "If you control a ground unit and a space unit, …" (compound condition) stays residual', () => {
+  const r = matchCard({ name: 'X', type: 'Event', text: 'If you control a ground unit and a space unit, draw 2 cards.' });
+  if (r.coverage === 'full') throw new Error('compound / arena control conditions are not modeled — must stay residual');
+});
+
+scenario('Matcher: "While you control another Villainy unit, this unit gets +2/+0." → controller_controls gate (exclude_self, aspect)', () => {
+  const r = matchCard({ name: 'X', type: 'Unit', text: 'While you control another Villainy unit, this unit gets +2/+0.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'constant') throw new Error('expected constant');
+  const cc = (a.while as { controller_controls?: { filter?: { card_aspect?: string }; exclude_self?: boolean } }).controller_controls;
+  assertEq(cc?.filter?.card_aspect, 'villainy', 'gated on a Villainy unit');
+  assertEq(cc?.exclude_self, true, '"another" excludes this unit');
+  assertEq(a.grant.modifier!.power, 2, '+2 power');
+});
+
+scenario('Matcher: "While you control a Vehicle unit, this unit gains Sentinel." → controls gate (no exclude_self), keyword', () => {
+  const r = matchCard({ name: 'X', type: 'Unit', text: 'While you control a Vehicle unit, this unit gains Sentinel.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'constant') throw new Error('expected constant');
+  const cc = (a.while as { controller_controls?: { filter?: { card_trait?: string }; exclude_self?: boolean } }).controller_controls;
+  assertEq(cc?.filter?.card_trait, 'vehicle', 'gated on a Vehicle unit (trait)');
+  if (cc?.exclude_self) throw new Error('"a" (not "another") includes this unit');
+  assertEq(a.grant.modifier!.keyword, 'sentinel', 'grants Sentinel');
+});
+
+scenario('Matcher: "Exhaust a unit in attached unit\'s arena." → host_arena-scoped exhaust (Nimble Prowess)', () => {
+  const r = matchCard({ name: 'Nimble Prowess', type: 'Upgrade', text: "When Played: You may exhaust a unit in attached unit's arena." });
+  assertEq(r.coverage, 'full', 'coverage');
+  const inner = (r.abilities[0] as { do: { effect: string; do?: { effect: string; target: { zone?: string } } } }).do;
+  assertEq(inner.effect, 'optional', '"you may" → optional');
+  assertEq(inner.do?.effect, 'exhaust', 'exhaust');
+  assertEq(inner.do?.target.zone, 'host_arena', 'scoped to the host\'s arena');
+});
+
+scenario('Matcher: The Darksaber — both clauses (Sentinel grant + When-Played conditional ready) → full', () => {
+  const r = matchCard({ name: 'The Darksaber', type: 'Upgrade', text: 'Attach to a non-Vehicle unit.\nAttached unit gains Sentinel.\nWhen Played: If there are 4 or more different keywords among friendly units, ready attached unit.' });
+  assertEq(r.coverage, 'full', 'whole card covered');
+  assertEq(r.abilities.length, 2, 'two abilities');
+  const wp = r.abilities.find(a => a.type === 'triggered');
+  if (!wp || wp.type !== 'triggered' || wp.do.effect !== 'if') throw new Error('When-Played is an if');
+  const cond = (wp.do as { condition: { controller_distinct_keywords?: { min?: number } } }).condition;
+  assertEq(cond.controller_distinct_keywords?.min, 4, 'gated on 4+ distinct keywords');
+  const then = (wp.do as { then: { effect: string; target: object } }).then;
+  assertEq(then.effect, 'ready', 'then = ready');
+  if (!('attached_to_self' in then.target)) throw new Error('readies the host');
+});
+
+scenario('Matcher: "Attached unit gains: \'Bounty — Draw 2 cards.\'" → grants an opponent-controlled bounty (Death Mark)', () => {
+  const r = matchCard({ name: 'Death Mark', type: 'Upgrade', text: 'Attached unit gains: “Bounty — Draw 2 cards.”' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'constant' || !a.grant.abilities) throw new Error('expected granted ability');
+  const g = a.grant.abilities[0];
+  if (g.type !== 'triggered' || g.on !== 'event.defeated') throw new Error('granted When-Defeated bounty');
+  assertEq((g as { controlled_by?: string }).controlled_by, 'opponent', 'bounty is opponent-resolved');
+});
+
+scenario('Matcher: "Attached unit gains Restore 2." → unconditional keyword grant w/ value (Devotion)', () => {
+  const r = matchCard({ name: 'Devotion', type: 'Upgrade', text: 'Attach to a non-Vehicle unit.\nAttached unit gains Restore 2.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'constant' || !a.grant.modifier) throw new Error('expected constant grant.modifier');
+  assertEq(a.grant.modifier.keyword, 'restore', 'grants restore');
+  assertEq(a.grant.modifier.keyword_value, 2, 'value 2');
+  if (!('attached_to_self' in a.grant.target) || (a.grant.target as { filter?: unknown }).filter) throw new Error('unconditional (no host filter)');
+});
+
+scenario('Matcher: "Attached unit gains the Mandalorian trait." stays residual (trait grant not modeled)', () => {
+  const r = matchCard({ name: 'Foundling', type: 'Upgrade', text: 'Attached unit gains the Mandalorian trait.' });
+  if (r.coverage === 'full') throw new Error('trait grants are not a keyword grant — must stay residual');
+});
+
+scenario('Matcher: "If attached unit is a Sith, it gains Grit." → host-gated keyword grant (Darth Revan\'s Lightsabers)', () => {
+  const r = matchCard({ name: "Darth Revan's Lightsabers", type: 'Upgrade', text: 'Attach to a non-Vehicle unit.\nIf attached unit is a Sith, it gains Grit.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'constant' || !a.grant.modifier) throw new Error('expected constant grant.modifier');
+  assertEq(a.grant.modifier.keyword, 'grit', 'grants grit');
+  const tgt = a.grant.target as { attached_to_self?: boolean; filter?: { card_trait?: string } };
+  if (!tgt.attached_to_self || tgt.filter?.card_trait !== 'sith') throw new Error('host gated on Sith trait');
+});
+
+scenario('Matcher: Constructed Lightsaber → 3 aspect-gated keyword grants incl. valued + negated', () => {
+  const r = matchCard({ name: 'Constructed Lightsaber', type: 'Upgrade', text: 'Attach to a Force unit.\nIf attached unit is a Heroism unit, it gains Restore 2.\nIf attached unit is a Villainy unit, it gains Raid 2.\nIf attached unit is a non-Heroism, non-Villainy unit, it gains Sentinel.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  assertEq(r.abilities.length, 3, 'three conditional grants');
+  const restore = r.abilities[0];
+  if (restore.type !== 'constant' || restore.grant.modifier?.keyword !== 'restore' || restore.grant.modifier?.keyword_value !== 2) throw new Error('Restore 2 (valued)');
+  const sentinel = r.abilities[2];
+  if (sentinel.type !== 'constant') throw new Error('expected constant');
+  const f = (sentinel.grant.target as { filter?: { and?: unknown[] } }).filter;
+  if (!f?.and || f.and.length !== 2) throw new Error('non-Heroism, non-Villainy → and of two negations');
+});
+
+scenario('Matcher: "Attached unit gains: \'On Attack: Exhaust the defender.\'" → granted exhaust trigger_defender (Vambrace Grappleshot)', () => {
+  const r = matchCard({ name: 'Vambrace Grappleshot', type: 'Upgrade', text: 'Attach to a non-Vehicle unit.\nAttached unit gains: “On Attack: Exhaust the defender.”' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'constant' || !a.grant.abilities) throw new Error('expected constant grant.abilities');
+  const g = a.grant.abilities[0];
+  if (g.type !== 'triggered' || g.do.effect !== 'exhaust') throw new Error('granted exhaust');
+  if (!('trigger_defender' in (g.do as { target: object }).target)) throw new Error('targets the defender');
+});
+
+scenario('Matcher: "Search the top 10 cards … for any number of [Villainy] units with combined cost 3 or less and play each for free." → search_play (Darth Vader)', () => {
+  const r = matchCard({ name: 'Darth Vader', type: 'Unit', text: 'Ambush\n\nWhen Played: Search the top 10 cards of your deck for any number of [Villainy] units with combined cost 3 or less and play each of them for free.' });
+  assertEq(r.coverage, 'full', 'coverage (Ambush keyword + search_play clause)');
+  const a = r.abilities.find(x => x.type === 'triggered');
+  if (!a || a.type !== 'triggered' || a.do.effect !== 'search_play') throw new Error('expected search_play');
+  const d = a.do as { count?: number; max_combined_cost?: number; filter?: { and?: Array<{ card_aspect?: string }> } };
+  assertEq(d.count, 10, 'top 10');
+  assertEq(d.max_combined_cost, 3, 'combined cost ≤ 3');
+  if (!d.filter?.and?.some(p => p.card_aspect === 'villainy')) throw new Error('filtered to Villainy units');
+});
+
+scenario('Matcher: "Attack with a unit. It gets +2/+0 and gains Overwhelm for this attack." → attack w/ chosen ready attacker + attacker_buff', () => {
+  const r = matchCard({ name: 'X', type: 'Event', text: 'Attack with a unit. It gets +2/+0 and gains Overwhelm for this attack.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const d = (r.abilities[0] as { do: { effect: string; attacker?: { controller?: string; filter?: { self_exhausted?: boolean } }; attacker_buff?: { power?: number; keyword?: string } } }).do;
+  assertEq(d.effect, 'attack', 'attack effect');
+  assertEq(d.attacker?.controller, 'self', 'choose a friendly unit');
+  assertEq(d.attacker?.filter?.self_exhausted, false, 'must be a ready unit');
+  assertEq(d.attacker_buff?.power, 2, '+2 power for this attack');
+  assertEq(d.attacker_buff?.keyword, 'overwhelm', 'gains Overwhelm');
+});
+
+scenario('Matcher: "You may attack with a unit." → optional attack', () => {
+  const opt = matchCard({ name: 'X', type: 'Event', text: 'You may attack with a unit.' });
+  assertEq(opt.coverage, 'full', 'bare optional attack matches');
+  if ((opt.abilities[0] as { do: { effect: string } }).do.effect !== 'optional') throw new Error('"You may" → optional');
+});
+
+scenario('Matcher: "Attack with a unit. If it\'s an Imperial unit, it gets +2/+0 for this attack." → conditional attacker buff (Snowtrooper Lieutenant)', () => {
+  const r = matchCard({ name: 'Snowtrooper Lieutenant', type: 'Event', text: "Attack with a unit. If it's an Imperial unit, it gets +2/+0 for this attack." });
+  assertEq(r.coverage, 'full', 'coverage');
+  const d = (r.abilities[0] as { do: { attacker_buff?: { power?: number }; attacker_buff_if?: { card_trait?: string } } }).do;
+  assertEq(d.attacker_buff?.power, 2, '+2 power buff');
+  assertEq(d.attacker_buff_if?.card_trait, 'imperial', 'gated on the attacker being Imperial');
+});
+
+scenario('Matcher: "Attack with a unit. The defender gets –4/–0 for this attack." → attack w/ defender_debuff (Catch Unawares)', () => {
+  const r = matchCard({ name: 'Catch Unawares', type: 'Event', text: 'Attack with a unit. The defender gets –4/–0 for this attack.' });
+  assertEq(r.coverage, 'full', 'coverage (en-dash debuff)');
+  const d = (r.abilities[0] as { do: { effect: string; defender_debuff?: { power?: number } } }).do;
+  assertEq(d.effect, 'attack', 'attack effect');
+  assertEq(d.defender_debuff?.power, -4, 'defender -4 power for this attack');
+});
+
+scenario('Matcher: "If it\'s attacking a unit …" (defender condition) stays residual', () => {
+  // The "If it's a/an <noun>" attacker-identity form is handled; "If it's
+  // attacking …" is a defender condition we don't model → residual.
+  const cond = matchCard({ name: 'Y', type: 'Event', text: "Attack with a unit. If it's attacking a unit, it gets +2/+0 for this attack." });
+  if (cond.coverage === 'full') throw new Error('defender-condition attack buff is not modeled — must stay residual');
+});
+
+scenario('Matcher: damage-target batch — "a base" (chosen), "your base", "each base", "this unit", "each ground unit"', () => {
+  const ab = matchCard({ name: 'X', type: 'Event', text: 'Deal 2 damage to a base.' });
+  assertEq(ab.coverage, 'full', 'a base');
+  if (!('chosen_base' in ((ab.abilities[0] as { do: { target: object } }).do.target))) throw new Error('a base → chosen_base');
+  const yb = matchCard({ name: 'X', type: 'Event', text: 'Deal 1 damage to your base.' });
+  if (!('self_base' in ((yb.abilities[0] as { do: { target: object } }).do.target))) throw new Error('your base → self_base');
+  const eb = matchCard({ name: 'X', type: 'Event', text: 'Deal 1 damage to each base.' });
+  assertEq((eb.abilities[0] as { do: { effect: string } }).do.effect, 'sequence', 'each base → both bases');
+  const tu = matchCard({ name: 'X', type: 'Unit', text: 'On Attack: Deal 2 damage to this unit.' });
+  if (!('self' in ((tu.abilities[0] as { do: { target: object } }).do.target))) throw new Error('this unit → self');
+  const eg = matchCard({ name: 'X', type: 'Event', text: 'Deal 1 damage to each ground unit.' });
+  assertEq((eg.abilities[0] as { do: { target: { zone?: string } } }).do.target.zone, 'ground_arena', 'each ground unit → ground arena AOE');
+});
+
+scenario('Matcher: "Deal 2 damage to a friendly ground unit and 2 damage to an enemy ground unit." → sequence of two damages (Death Trooper)', () => {
+  const r = matchCard({ name: 'Death Trooper', type: 'Unit', text: 'When Played: Deal 2 damage to a friendly ground unit and 2 damage to an enemy ground unit.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'triggered' || a.do.effect !== 'sequence') throw new Error('expected sequence');
+  const steps = (a.do as { steps: Array<{ effect: string; amount?: number; target: { controller?: string; zone?: string } }> }).steps;
+  assertEq(steps.length, 2, 'two damage steps');
+  assertEq(steps[0].target.controller, 'self', 'first hits a friendly');
+  assertEq(steps[1].target.controller, 'opponent', 'second hits an enemy');
+  assertEq(steps[0].target.zone, 'ground_arena', 'ground-scoped');
+});
+
+scenario('Matcher: "This unit gets +1/+0 for each Trooper unit in your discard pile." → per controller_discard_units (Captain Enoch)', () => {
+  const r = matchCard({ name: 'Captain Enoch', type: 'Unit', text: 'This unit gets +1/+0 for each Trooper unit in your discard pile.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'constant' || !a.grant.modifier?.per) throw new Error('expected per-X modifier');
+  const per = a.grant.modifier.per as { count?: string; power?: number; filter?: { card_trait?: string } };
+  assertEq(per.count, 'controller_discard_units', 'counts units in discard');
+  assertEq(per.power, 1, '+1 power each');
+  assertEq(per.filter?.card_trait, 'trooper', 'restricted to Troopers');
+});
+
+scenario('Matcher: "When another unique unit is defeated: You may draw a card. Use this ability only once each round." → unique-defeat trigger + once_per_round (Agent Kallus)', () => {
+  const r = matchCard({ name: 'Agent Kallus', type: 'Unit', text: 'When another unique unit is defeated: You may draw a card. Use this ability only once each round.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'triggered' || a.on !== 'event.defeated') throw new Error('expected When-Defeated trigger');
+  assertEq(a.limit, 'once_per_round', 'once-per-round limit parsed from the suffix');
+  const w = a.where as { and?: Array<{ card_is_unique?: boolean; not?: { card?: string } }> };
+  if (!w.and || w.and[0].card_is_unique !== true || w.and[1].not?.card !== 'self') throw new Error('where = unique AND not self');
+  if (a.do.effect !== 'optional') throw new Error('"You may" → optional draw');
+});
+
+scenario('Matcher: multi-line "Play a unit from your discard pile. It costs 6 less. If Force, 8 less." → play_from_discard (Palpatine\'s Return)', () => {
+  const r = matchCard({ name: "Palpatine's Return", type: 'Event', text: "Play a unit from your discard pile. \nIt costs 6 resources less. If it's a Force unit, \nit costs 8 resources less instead." });
+  assertEq(r.coverage, 'full', 'coverage (whitespace-flattened whole text)');
+  const a = r.abilities[0];
+  if (a.type !== 'triggered' || a.do.effect !== 'play_from_discard') throw new Error('expected play_from_discard');
+  const d = a.do as { cost_reduction?: number; cost_reduction_if?: { amount?: number; filter?: { card_trait?: string } } };
+  assertEq(d.cost_reduction, 6, '6 less normally');
+  assertEq(d.cost_reduction_if?.amount, 8, '8 less if Force');
+  assertEq(d.cost_reduction_if?.filter?.card_trait, 'force', 'conditional on the Force trait');
+});
+
+scenario('Matcher: "Choose a friendly non-leader unit and an enemy non-leader unit. Exchange control of those units." → exchange_control (Choose Sides)', () => {
+  const r = matchCard({ name: 'Choose Sides', type: 'Event', text: 'Choose a friendly non-leader unit and an enemy non-leader unit. Exchange control of those units.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'triggered' || a.do.effect !== 'exchange_control') throw new Error('expected exchange_control');
+  const e = a.do as { friendly: { controller?: string }; enemy: { controller?: string } };
+  assertEq(e.friendly.controller, 'self', 'friendly = your unit');
+  assertEq(e.enemy.controller, 'opponent', 'enemy = their unit');
+});
+
+scenario('Matcher: "An opponent chooses a unit they control. Defeat that unit." → defeat opponent_choose (Power of the Dark Side)', () => {
+  const r = matchCard({ name: 'Power of the Dark Side', type: 'Event', text: 'An opponent chooses a unit they control. Defeat that unit.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'triggered' || a.do.effect !== 'defeat') throw new Error('expected defeat');
+  const tgt = (a.do as { target: { controller?: string; selector?: string } }).target;
+  assertEq(tgt.controller, 'opponent', 'targets opponent units');
+  assertEq(tgt.selector, 'opponent_choose', 'opponent chooses which dies');
+});
+
 scenario('Matcher: When-Defeated "put this unit into play as a resource and ready it" → optional play_as_resource ready (Superlaser Technician)', () => {
   const r = matchCard({ name: 'Superlaser Technician', type: 'Unit', text: 'When Defeated: You may put this unit into play as a resource and ready it.' });
   assertEq(r.coverage, 'full', 'coverage');
@@ -596,9 +895,22 @@ scenario('Matcher: leader abilities route to leaderAbilities via translateCard',
   assertEq(r.spec.leaderAbilities?.length, 1, 'one leader ability matched');
 });
 
-scenario('Matcher: uninterpretable action cost → residual (Doctor Pershing)', () => {
-  const r = matchCard({ name: 'X', type: 'Unit', text: 'Action [Exhaust, deal 1 damage to a friendly unit]: Draw a card.' });
-  // The damage-as-cost component can't be expressed → left residual, not a bad match.
+scenario('Matcher: "Action [Exhaust, deal 1 damage to a friendly unit]: Draw a card." → action w/ damage cost (Doctor Pershing)', () => {
+  const r = matchCard({ name: 'Doctor Pershing', type: 'Unit', text: 'Action [Exhaust, deal 1 damage to a friendly unit]: Draw a card.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'action') throw new Error('expected action ability');
+  if (!a.cost?.exhaust) throw new Error('exhaust cost');
+  const dmg = (a.cost as { damage?: { amount?: number; target?: { controller?: string } } }).damage;
+  assertEq(dmg?.amount, 1, 'deal 1 damage cost');
+  assertEq(dmg?.target?.controller, 'self', 'to a friendly unit');
+  if (a.do.effect !== 'draw') throw new Error('draw a card');
+});
+
+scenario('Matcher: a genuinely uninterpretable action cost still → residual', () => {
+  // A cost component we don't model (e.g. "reveal your hand") must leave the
+  // action residual rather than silently dropping the cost.
+  const r = matchCard({ name: 'X', type: 'Unit', text: 'Action [Exhaust, reveal your hand]: Draw a card.' });
   if (r.coverage === 'full') throw new Error('should not fully match an uninterpretable cost');
 });
 
@@ -607,7 +919,7 @@ scenario('Matcher: Piett "Each friendly non-leader unit that costs 6 or more gai
   assertEq(r.coverage, 'full', 'coverage');
   const a = r.abilities[0];
   if (a.type !== 'constant') throw new Error('expected constant');
-  assertEq(a.grant.modifier.keyword, 'ambush', 'grants ambush');
+  assertEq(a.grant.modifier!.keyword, 'ambush', 'grants ambush');
 });
 
 scenario('Matcher: Shoretrooper "While you control 6 or more resources, this unit gets +2/+0." → resource-count gate', () => {
@@ -617,19 +929,12 @@ scenario('Matcher: Shoretrooper "While you control 6 or more resources, this uni
   if (a.type !== 'constant' || !a.while || !('controller_resource_count' in a.while)) throw new Error('expected resource-count gate');
 });
 
-scenario('Matcher: Bunker Defender "While you control a Vehicle unit, this unit gains Sentinel." → controls-trait gate', () => {
-  const r = matchCard({ name: 'X', type: 'Unit', text: 'While you control a Vehicle unit, this unit gains Sentinel.' });
-  assertEq(r.coverage, 'full', 'coverage');
-  const a = r.abilities[0];
-  if (a.type !== 'constant' || (a.while as { controller_controls_trait?: string } | undefined)?.controller_controls_trait !== 'vehicle') throw new Error('expected controls-trait gate');
-  assertEq(a.grant.modifier.keyword, 'sentinel', 'grants sentinel');
-});
 
 scenario('Matcher: 97th Legion "This unit gets +1/+1 for each resource you control." → per-X scaling', () => {
   const r = matchCard({ name: 'X', type: 'Unit', text: 'This unit gets +1/+1 for each resource you control.' });
   assertEq(r.coverage, 'full', 'coverage');
   const a = r.abilities[0];
-  if (a.type !== 'constant' || a.grant.modifier.per?.count !== 'controller_resources') throw new Error('expected per controller_resources');
+  if (a.type !== 'constant' || a.grant.modifier!.per?.count !== 'controller_resources') throw new Error('expected per controller_resources');
 });
 
 scenario('Matcher: Crosshair "Action [2 resources]: This unit gets +1/+0 for this phase." → action self-buff', () => {
@@ -648,8 +953,8 @@ scenario('Matcher: Coordinate "Coordinate — This unit gets +2/+2." → control
   if (!a.while || (a.while as { controller_unit_count?: { min?: number } }).controller_unit_count?.min !== 3) {
     throw new Error('expected controller_unit_count >= 3 gate');
   }
-  assertEq(a.grant.modifier.power, 2, '+2 power');
-  assertEq(a.grant.modifier.health, 2, '+2 health');
+  assertEq(a.grant.modifier!.power, 2, '+2 power');
+  assertEq(a.grant.modifier!.health, 2, '+2 health');
   if (!('self' in a.grant.target)) throw new Error('expected self target');
 });
 

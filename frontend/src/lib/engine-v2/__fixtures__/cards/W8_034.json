@@ -1,0 +1,18 @@
+{
+  "id": "W8_034",
+  "name": "Power of the Dark Side (test)",
+  "type": "event",
+  "cost": 1,
+  "aspects": ["villainy"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": {
+        "effect": "defeat",
+        "target": { "zone": "any_arena", "controller": "opponent", "selector": "opponent_choose", "count": 1 }
+      }
+    }
+  ]
+}

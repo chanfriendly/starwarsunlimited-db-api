@@ -17,8 +17,8 @@ import type { GameEvent } from '../state/bus';
 import type { CardInstance, CardRegistry, GameState, PlayerId, TriggerInstance } from '../state/types';
 import type { Ability, TriggeredAbility, TriggerCondition } from '../spec/ast';
 import { isTriggered } from '../spec/ast';
-import { getZoneArr } from '../state/zones';
-import { evalTriggerPredicate, type EvalCtx } from './predicates';
+import { getZoneArr, findCard } from '../state/zones';
+import { evalTriggerPredicate, evalCardPredicate, type EvalCtx } from './predicates';
 import { applyEffect } from './interpret';
 import { defaultChooser } from './chooser';
 
@@ -99,6 +99,43 @@ function cardAbilities(reg: CardRegistry, inst: CardInstance): Ability[] {
   return [];
 }
 
+/** Abilities a HOST unit has gained from attached upgrades ("Attached unit
+ *  gains: '<ability>'"). They live in a constant `grant.abilities` on the
+ *  upgrade and are attributed to the host (sourceIid = host.iid), so `self` /
+ *  `attacker: self` resolve to the host. Two sources:
+ *   • In-play host — read its currently-attached upgrades.
+ *   • Just-defeated host — its upgrades were already detached to discard, so
+ *     recover the granting upgrades from this batch's UPGRADE_DETACHED events
+ *     (lets a granted When-Defeated ability fire on the host's own defeat). */
+function grantedAbilitiesForHost(
+  state: GameState, reg: CardRegistry, host: CardInstance, hostController: PlayerId, events: GameEvent[],
+): Ability[] {
+  const out: Ability[] = [];
+  const fromUpgradeSpecId = (cardId: string | undefined, upIid: string) => {
+    const s = cardId ? reg.cards[cardId] : undefined;
+    if (!s || !('abilities' in s) || !s.abilities) return;
+    for (const ab of s.abilities) {
+      if (ab.type !== 'constant' || !ab.grant.abilities) continue;
+      // Respect the grant's host condition ("If attached unit is a Jedi, …"):
+      // the target's `filter` must hold against the host or the grant is inert.
+      const filter = (ab.grant.target as { filter?: import('../spec/ast').Predicate }).filter;
+      if (filter) {
+        const ctx: EvalCtx = { state, reg, sourceIid: upIid, sourcePlayer: hostController };
+        if (!evalCardPredicate(filter, ctx, host, hostController)) continue;
+      }
+      out.push(...ab.grant.abilities);
+    }
+  };
+  for (const up of host.upgrades) fromUpgradeSpecId(up.cardId, up.iid);
+  for (const e of events) {
+    if (e.kind === 'UPGRADE_DETACHED' && e.hostIid === host.iid) {
+      const up = findCard(state, e.upgradeIid);
+      if (up) fromUpgradeSpecId(up.inst.cardId, up.inst.iid);
+    }
+  }
+  return out;
+}
+
 interface CardSlot { inst: CardInstance; controller: PlayerId }
 
 function inPlayCards(state: GameState): CardSlot[] {
@@ -157,7 +194,14 @@ export function collectTriggers(
   let nextId = state.step * 1000 + state.lastingEffects.length;
 
   for (const { inst, controller } of slots) {
-    const abs = cardAbilities(reg, inst);
+    const own = cardAbilities(reg, inst);
+    // Host units also fire abilities granted by attached upgrades, attributed
+    // to the host. Indexed AFTER the host's own abilities so per-ability limit
+    // keys stay distinct. Only units/leader-units can host upgrades.
+    const spec = reg.cards[inst.cardId];
+    const isHost = spec && (spec.type === 'unit' || spec.type === 'leader');
+    const granted = isHost ? grantedAbilitiesForHost(state, reg, inst, controller, events) : [];
+    const abs = granted.length > 0 ? [...own, ...granted] : own;
     abs.forEach((ab, abIdx) => {
       if (!isTriggered(ab)) return;
       const wanted = ab.on;
@@ -183,12 +227,18 @@ export function collectTriggers(
           ? (state.playerOrder.find(pl => pl !== controller) ?? controller)
           : controller;
 
+        // Granted abilities (abIdx >= own.length) are attributed to the host but
+        // aren't on its spec — snapshot the ability inline so resolution doesn't
+        // re-derive it by index against the host's own abilities.
+        const isGranted = abIdx >= own.length;
+
         triggers.push({
           id: `t${nextId++}`,
           abilityIndex: abIdx,
           sourceIid: inst.iid,
           sourceController: resolver,
           event,
+          ...(isGranted ? { grantedAbility: ab } : {}),
         });
       }
     });
@@ -282,9 +332,12 @@ export function drainTriggers(state: GameState, reg: CardRegistry, chooser?: imp
     s = { ...s, pendingTriggers: remaining };
 
     const found = locateSource(s, trigger.sourceIid);
-    if (!found) continue; // source left play entirely; trigger still resolves but lacks card abilities
-    const abilities = cardAbilities(reg, found.inst);
-    const ability = abilities[trigger.abilityIndex];
+    // A granted ability carries its own AST inline (the granting upgrade may have
+    // detached by now), so it resolves even if the source slot is gone. A normal
+    // ability is re-derived by index from the source's spec.
+    const ability = trigger.grantedAbility
+      ?? (found ? cardAbilities(reg, found.inst)[trigger.abilityIndex] : undefined);
+    if (!found && !trigger.grantedAbility) continue; // source left play entirely
     if (!ability || !isTriggered(ability)) continue;
 
     // Optional + "you may" — Week 2 auto-resolves; pending-choice ships later.

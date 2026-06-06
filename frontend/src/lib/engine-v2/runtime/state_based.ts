@@ -242,5 +242,8 @@ function processDefeat(
     const op = s.players[owner];
     s = withPlayer(s, owner, { ...op, discard: [...op.discard, ...discardAdds[owner]] });
   }
+  // Record that a unit controlled by `pid` left play this phase (for "if a
+  // [friendly] unit left play this phase, …").
+  s = { ...s, leftPlayThisPhase: [...(s.leftPlayThisPhase ?? []), pid] };
   return { state: s, events };
 }

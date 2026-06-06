@@ -1,0 +1,30 @@
+{
+  "id": "W8_035",
+  "name": "Sith Traditions (test)",
+  "type": "upgrade",
+  "cost": 1,
+  "aspects": ["villainy"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "constant",
+      "grant": {
+        "target": { "attached_to_self": true },
+        "abilities": [
+          {
+            "type": "triggered",
+            "on": "event.attack_declared",
+            "where": { "attacker": "self" },
+            "do": { "effect": "give_experience", "target": { "self": true }, "count": 1 }
+          },
+          {
+            "type": "triggered",
+            "on": "event.defeated",
+            "where": { "card": "self" },
+            "do": { "effect": "give_experience", "target": { "zone": "any_arena", "controller": "self", "selector": "chosen", "count": 1 }, "count": 1 }
+          }
+        ]
+      }
+    }
+  ]
+}

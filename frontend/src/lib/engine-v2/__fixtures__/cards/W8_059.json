@@ -1,0 +1,19 @@
+{
+  "id": "W8_059",
+  "name": "Nimble Prowess (test)",
+  "type": "upgrade",
+  "cost": 1,
+  "aspects": ["cunning"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": {
+        "effect": "optional",
+        "do": { "effect": "exhaust", "target": { "zone": "host_arena", "controller": "any", "selector": "chosen", "count": 1 } }
+      }
+    }
+  ]
+}

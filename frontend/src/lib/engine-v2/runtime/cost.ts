@@ -60,7 +60,18 @@ export function effectiveCost(
     const delta = c.per ? c.amount * countFor(c.per, state, pid, reg) : c.amount;
     cost += delta;
   }
+  // One-shot pending discounts ("the next unit you play this phase costs N less"
+  // — General's Blade). All matching discounts stack on this play. Pure read —
+  // consumption happens in reducer.applyPlayCard when the card is actually played.
+  cost -= matchingDiscount(state, spec, pid);
   return Math.max(0, cost);
+}
+
+/** Sum of pending discounts on `pid` that apply to `spec` (by card type). */
+export function matchingDiscount(state: GameState, spec: CardSpec, pid: PlayerId): number {
+  const ds = state.players[pid]?.discounts;
+  if (!ds || ds.length === 0) return 0;
+  return ds.reduce((n, d) => (!d.cardType || d.cardType === spec.type) ? n + d.amount : n, 0);
 }
 
 /** Total Exploit X on a card (§16): the player MAY defeat up to X friendly units

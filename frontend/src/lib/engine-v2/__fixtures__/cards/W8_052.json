@@ -1,0 +1,15 @@
+{
+  "id": "W8_052",
+  "name": "Base Blast (test)",
+  "type": "event",
+  "cost": 1,
+  "aspects": ["aggression"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": { "effect": "damage", "amount": 3, "target": { "chosen_base": true } }
+    }
+  ]
+}

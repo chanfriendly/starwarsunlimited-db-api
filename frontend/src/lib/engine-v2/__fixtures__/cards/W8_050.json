@@ -1,0 +1,28 @@
+{
+  "id": "W8_050",
+  "name": "Snowtrooper Lt (test)",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["villainy"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 3,
+  "traits": ["imperial", "trooper"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": {
+        "effect": "optional",
+        "do": {
+          "effect": "attack",
+          "attacker": { "zone": "any_arena", "controller": "self", "selector": "chosen", "count": 1, "filter": { "self_exhausted": false } },
+          "attacker_buff": { "power": 2, "health": 0 },
+          "attacker_buff_if": { "card_trait": "imperial" }
+        }
+      }
+    }
+  ]
+}

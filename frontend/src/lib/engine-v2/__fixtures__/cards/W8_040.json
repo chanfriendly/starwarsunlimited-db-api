@@ -1,0 +1,13 @@
+{
+  "id": "W8_040",
+  "name": "Jedi Sentinel (test host)",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["heroism"],
+  "arena": "ground",
+  "power": 3,
+  "hp": 3,
+  "traits": ["jedi"],
+  "keywords": [],
+  "abilities": []
+}

@@ -1,0 +1,24 @@
+{
+  "id": "W8_036",
+  "name": "Vambrace Grappleshot (test)",
+  "type": "upgrade",
+  "cost": 1,
+  "aspects": ["aggression"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "constant",
+      "grant": {
+        "target": { "attached_to_self": true },
+        "abilities": [
+          {
+            "type": "triggered",
+            "on": "event.attack_declared",
+            "where": { "attacker": "self" },
+            "do": { "effect": "exhaust", "target": { "trigger_defender": true } }
+          }
+        ]
+      }
+    }
+  ]
+}

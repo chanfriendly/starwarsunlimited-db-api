@@ -124,6 +124,36 @@ export function evalCardPredicate(
     if (!ps || (!hasTrait(ps.groundArena) && !hasTrait(ps.spaceArena))) return false;
   }
 
+  if (leaf.unit_left_play_this_phase !== undefined) {
+    const left = ctx.state.leftPlayThisPhase ?? [];
+    const ok = leaf.unit_left_play_this_phase === 'friendly' ? left.includes(instController) : left.length > 0;
+    if (!ok) return false;
+  }
+
+  if (leaf.controller_distinct_keywords !== undefined) {
+    const ps = ctx.state.players[instController];
+    const names = new Set<string>();
+    const addFrom = (cardId: string) => {
+      const cs = ctx.reg.cards[cardId];
+      if (cs && 'keywords' in cs && cs.keywords) for (const k of cs.keywords) names.add(k.name.toLowerCase());
+    };
+    if (ps) for (const u of [...ps.groundArena, ...ps.spaceArena]) {
+      addFrom(u.cardId);
+      for (const up of u.upgrades) addFrom(up.cardId); // keywords granted by attached upgrades
+    }
+    if (!inRange(names.size, leaf.controller_distinct_keywords)) return false;
+  }
+
+  if (leaf.controller_controls !== undefined) {
+    const ps = ctx.state.players[instController];
+    const { filter, exclude_self } = leaf.controller_controls;
+    const matches = (arr: CardInstance[], zone: 'ground_arena' | 'space_arena') => arr.some(c => {
+      if (exclude_self && c.iid === inst.iid) return false;
+      return evalCardPredicate(filter, ctx, c, instController, zone);
+    });
+    if (!ps || (!matches(ps.groundArena, 'ground_arena') && !matches(ps.spaceArena, 'space_arena'))) return false;
+  }
+
   return true;
 }
 
@@ -157,7 +187,7 @@ export function evalTriggerPredicate(
 
   // For non-self triggers (Ki-Adi-Mundi: any clone played by self), allow
   // controller/trait/type predicates to apply to the event's card.
-  if (p.controller !== undefined || p.card_trait !== undefined || p.card_type !== undefined || p.card_aspect !== undefined) {
+  if (p.controller !== undefined || p.card_trait !== undefined || p.card_type !== undefined || p.card_aspect !== undefined || p.card_is_unique !== undefined) {
     const iid = eventCardIid(event);
     if (!iid) return false;
     const found = findCard(ctx.state, iid);
@@ -173,6 +203,7 @@ export function evalTriggerPredicate(
     if (p.card_trait !== undefined && !traits.some(t => t.toLowerCase() === p.card_trait!.toLowerCase())) return false;
     if (p.card_type !== undefined && spec?.type !== p.card_type) return false;
     if (p.card_aspect !== undefined && !aspects.includes(p.card_aspect)) return false;
+    if (p.card_is_unique !== undefined && Boolean(spec && 'unique' in spec ? spec.unique : false) !== p.card_is_unique) return false;
   }
 
   if (p.defender_defeated !== undefined) {

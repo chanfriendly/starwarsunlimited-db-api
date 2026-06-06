@@ -58,6 +58,19 @@ export interface PredicateLeaf {
   /** True iff the controller has at least one in-arena unit with this trait.
    *  For "while you control a Vehicle unit, this gains Sentinel"-style cards. */
   controller_controls_trait?: string;
+  /** True iff the controller has at least one in-arena unit matching `filter`
+   *  (any unit if omitted). `exclude_self` drops the unit being evaluated, for
+   *  "while you control ANOTHER <X> unit, …". Generalizes controller_controls_trait
+   *  to aspects/power/"another". */
+  controller_controls?: { filter?: Predicate; exclude_self?: boolean };
+  /** True iff a unit left play this action phase: 'friendly' = one the evaluated
+   *  card's controller controlled; 'any' = any player's. For "if a [friendly]
+   *  unit left play this phase, …". Reads `state.leftPlayThisPhase`. */
+  unit_left_play_this_phase?: 'friendly' | 'any';
+  /** Range over the count of DISTINCT keyword names among the controller's
+   *  in-play units (printed keywords + those on attached upgrades). For "if there
+   *  are 4 or more different keywords among friendly units, …" (The Darksaber). */
+  controller_distinct_keywords?: Range;
 }
 
 export interface PredicateAnd { and: Predicate[] }
@@ -70,7 +83,7 @@ export type Predicate = PredicateLeaf | PredicateAnd | PredicateOr | PredicateNo
 // Selectors
 // ---------------------------------------------------------------------------
 
-export type ZoneFilter = Zone | Zone[] | 'any_arena' | 'any_zone';
+export type ZoneFilter = Zone | Zone[] | 'any_arena' | 'any_zone' | 'host_arena';
 
 export interface ScopedSelector {
   zone?: ZoneFilter;
@@ -83,14 +96,25 @@ export interface ScopedSelector {
 export type Selector =
   | { self: true }
   | { trigger_source: true }
+  /** The DEFENDER of the triggering attack event — "the defender" / "the
+   *  attacked unit". Resolved from ATTACK_DECLARED/ATTACK_ENDED.defenderIid.
+   *  Used by upgrade-granted On-Attack abilities ("Exhaust the defender"). */
+  | { trigger_defender: true }
   | { self_base: true }
   | { opponent_base: true }
+  /** "a base" — the source player chooses which base (theirs or an opponent's).
+   *  The default/AI chooser picks the opponent's base (the sane aggressive
+   *  default). Resolves to a single base ResolvedTarget. */
+  | { chosen_base: true }
   /** The base of the controller of the unit in the triggering event — i.e. "its
    *  controller's base" on a defeat trigger. Resolved from DEFEATED.lastKnown.
    *  controller. Falls back to opponent's base if there's no usable trigger. */
   | { trigger_controller_base: true }
   | { all_friendly_units: true; filter?: Predicate }
-  | { attached_to_self: true }
+  /** The upgrade's host. Optional `filter` gates on the host (e.g. "If attached
+   *  unit is a Sith, it gains Grit" → filter `{ card_trait: 'sith' }`); the host
+   *  must match or the selector resolves empty. */
+  | { attached_to_self: true; filter?: Predicate }
   | { exclude: Selector; from: Selector }
   | ScopedSelector;
 
@@ -122,7 +146,7 @@ export interface KeywordGrant {
 /** Count source for per-X scaling modifiers ("+1/+1 for each resource you
  *  control", "for each upgrade on this unit"). Evaluated live in the modifier
  *  aggregator against the target's controller / the target instance. */
-export type PerCount = 'controller_resources' | 'controller_units' | 'self_upgrades';
+export type PerCount = 'controller_resources' | 'controller_units' | 'self_upgrades' | 'controller_discard_units';
 
 export interface Modifier {
   duration?: Duration;
@@ -130,8 +154,10 @@ export interface Modifier {
   power?: number;
   health?: number;
   /** Dynamic bonus: `power`/`health` multiplied by a live count. Stacks with
-   *  the flat `power`/`health` above. */
-  per?: { count: PerCount; power?: number; health?: number };
+   *  the flat `power`/`health` above. `filter` (only for `controller_discard_units`)
+   *  restricts which discard cards count — "for each Trooper unit in your discard
+   *  pile" → `count: 'controller_discard_units', filter: { card_trait: 'trooper' }`. */
+  per?: { count: PerCount; power?: number; health?: number; filter?: Predicate };
   keyword?: string;
   keyword_value?: number;
   keywords?: KeywordGrant[];
@@ -339,6 +365,20 @@ export interface AttackEffect {
   effect: 'attack';
   attacker?: Selector;
   count?: number;
+  /** A buff applied to the resolved attacker FOR THIS ATTACK ("Attack with a
+   *  unit. It gets +2/+0 and gains Overwhelm for this attack."). Added as a
+   *  lasting effect on the attacker before combat and removed after, so it
+   *  affects exactly this attack. */
+  attacker_buff?: Modifier;
+  /** Gates `attacker_buff` on the CHOSEN attacker ("…If it's an Imperial unit,
+   *  it gets +2/+0 for this attack" — Snowtrooper Lieutenant). The buff applies
+   *  only if the attacker matches; the attack happens either way. */
+  attacker_buff_if?: Predicate;
+  /** A debuff applied to the CHOSEN defender FOR THIS ATTACK ("Attack with a
+   *  unit. The defender gets -4/-0 for this attack." — Catch Unawares). Applied
+   *  as a lasting effect on the defender before combat and removed after; only
+   *  unit defenders are affected (a base can't be debuffed). */
+  defender_debuff?: Modifier;
 }
 
 /** "Return a unit to its owner's hand" (bounce). The unit leaves play and goes
@@ -374,6 +414,17 @@ export interface TakeControlEffect {
   target: Selector;
 }
 
+/** "Choose a friendly unit and an enemy unit. Exchange control of those units."
+ *  (Choose Sides). The `friendly` target moves to the OPPONENT's control and the
+ *  `enemy` target moves to the SOURCE player's control — a two-way control swap.
+ *  Same per-unit rules as take_control (keeps damage/upgrades/exhausted, records
+ *  `owner`, a Leader Unit is defeated instead of changing control — §1.6). */
+export interface ExchangeControlEffect {
+  effect: 'exchange_control';
+  friendly: Selector;
+  enemy: Selector;
+}
+
 /** Peek at a hidden zone without changing state. The runtime emits a
  *  CARD_REVEALED event per peeked card so the chooser/UI can display them. */
 export interface LookAtEffect {
@@ -404,6 +455,18 @@ export interface SearchEffect {
   filter?: Predicate;
   to: 'hand' | 'discard';
   reveal?: boolean;        // default true: emit CARD_REVEALED for the chosen card
+}
+
+/** "Search the top `count` cards of your deck for any number of <units matching
+ *  `filter`> with combined cost ≤ `max_combined_cost` and play each for free."
+ *  (Darth Vader — Commanding the First Legion.) The chosen units enter their
+ *  arena for free (exhausted; When-Played fires); the deck is shuffled afterward
+ *  (§8.36). Units only. Always acts on the source player's deck. */
+export interface SearchPlayEffect {
+  effect: 'search_play';
+  count: number;
+  filter?: Predicate;
+  max_combined_cost?: number;
 }
 
 /** Divided damage: distribute `amount` damage among any number of candidates in
@@ -447,6 +510,39 @@ export interface PlayAsResourceEffect {
   ready?: boolean;
 }
 
+/** "Create N Credit token(s)." A Credit token is a one-shot resource: it can be
+ *  spent like a resource to pay a play cost, and is removed when spent (§ Credit
+ *  tokens). Added to the controller's `creditTokens`. */
+export interface CreateCreditEffect {
+  effect: 'create_credit';
+  player?: PlayerRef;
+  count?: number;
+}
+
+/** "The next <card_type> you play this phase costs N resources less." Registers
+ *  a one-shot, phase-scoped play-cost discount on the controller (the source
+ *  player). Consumed by the first matching card play; phase-scoped. `card_type`
+ *  gates which cards it applies to ("unit"). General's Blade. */
+export interface DiscountEffect {
+  effect: 'discount';
+  amount: number;
+  card_type?: 'unit' | 'event' | 'upgrade';
+}
+
+/** "Play a unit from your discard pile [at a reduced cost]." (Palpatine's
+ *  Return). Choose a matching unit in the controller's discard and play it into
+ *  its arena (enters exhausted, runs onPlay keyword hooks + Ambush; its
+ *  When-Played fires via the trailing settle). `cost_reduction` is subtracted
+ *  from its play cost (clamped ≥0); `cost_reduction_if` overrides that amount
+ *  when the chosen card matches its filter ("…8 less instead if it's a Force
+ *  unit"). A no-op if no eligible card is affordable. */
+export interface PlayFromDiscardEffect {
+  effect: 'play_from_discard';
+  filter?: Predicate;
+  cost_reduction?: number;
+  cost_reduction_if?: { filter: Predicate; amount: number };
+}
+
 export type Effect =
   | DamageEffect
   | HealEffect
@@ -471,12 +567,17 @@ export type Effect =
   | LookAtEffect
   | DiscloseEffect
   | SearchEffect
+  | SearchPlayEffect
   | DividedDamageEffect
   | IndirectDamageEffect
   | PlayAsResourceEffect
+  | CreateCreditEffect
+  | DiscountEffect
+  | PlayFromDiscardEffect
   | ReturnToHandEffect
   | ReturnFromDiscardEffect
   | TakeControlEffect
+  | ExchangeControlEffect
   | UseForceEffect
   | GainForceEffect
   | AttackEffect
@@ -527,6 +628,10 @@ export interface TriggerPredicate {
   card_trait?: string;
   card_type?: string;
   card_aspect?: AspectIcon;
+  /** The triggering card is/ isn't unique. Used by "When another unique unit is
+   *  defeated" (Agent Kallus) — combine with `not: { card: 'self' }` for
+   *  "another". Read from the event card's spec (the discard copy for defeats). */
+  card_is_unique?: boolean;
   combat?: boolean;
   /** For base-damage events: the controller of the base being damaged. Used
    *  by `damage_base` replacements that guard the source's own base
@@ -546,6 +651,9 @@ export interface ActionAbilityCost {
   discard?: { player: PlayerRef; count: number };
   defeat?: Selector;
   remove_shield?: Selector;
+  /** "deal N damage to a friendly unit" as part of an action's cost (Doctor
+   *  Pershing). The damage is dealt through the normal damage layer. */
+  damage?: { amount: number; target: Selector };
 }
 
 export interface ActionAbility {
@@ -563,7 +671,16 @@ export interface ConstantAbility {
   while?: Predicate;
   grant: {
     target: Selector;
-    modifier: Modifier;
+    /** Stat/keyword modifier the target gains. Provide `modifier` and/or
+     *  `abilities`. */
+    modifier?: Modifier;
+    /** Full abilities the target GAINS ("Attached unit gains: '<ability>'").
+     *  On an upgrade this targets the host; the granted abilities are attributed
+     *  to the host (so `self` / `attacker: self` resolve to the host, not the
+     *  upgrade). Granted TRIGGERED abilities fire from the host while in play,
+     *  and granted When-Defeated abilities fire when the host is defeated
+     *  (recovered from the UPGRADE_DETACHED event). */
+    abilities?: Ability[];
   };
 }
 

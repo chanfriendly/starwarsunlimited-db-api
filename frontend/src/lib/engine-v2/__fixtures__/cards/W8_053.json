@@ -1,0 +1,19 @@
+{
+  "id": "W8_053",
+  "name": "Loyal Enforcer (test)",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["villainy"],
+  "arena": "ground",
+  "power": 3,
+  "hp": 3,
+  "traits": ["imperial"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "constant",
+      "while": { "controller_controls": { "filter": { "card_aspect": "villainy" }, "exclude_self": true } },
+      "grant": { "target": { "self": true }, "modifier": { "power": 2, "health": 0 } }
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "id": "W8_039",
+  "name": "General's Blade (test)",
+  "type": "upgrade",
+  "cost": 1,
+  "aspects": ["command"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "constant",
+      "grant": {
+        "target": { "attached_to_self": true, "filter": { "card_trait": "jedi" } },
+        "abilities": [
+          {
+            "type": "triggered",
+            "on": "event.attack_declared",
+            "where": { "attacker": "self" },
+            "do": { "effect": "discount", "amount": 2, "card_type": "unit" }
+          }
+        ]
+      }
+    }
+  ]
+}

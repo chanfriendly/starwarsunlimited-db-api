@@ -37,14 +37,14 @@ const ZONES = new Set([
   'hand', 'deck', 'discard', 'resource_zone', 'ground_arena', 'space_arena',
   'base_zone', 'leader_unit', 'capture_zone', 'set_aside',
 ]);
-const ZONE_FILTER_EXTRA = new Set(['any_arena', 'any_zone']);
+const ZONE_FILTER_EXTRA = new Set(['any_arena', 'any_zone', 'host_arena']);
 const PLAYER_REFS = new Set(['self', 'opponent', 'any', 'controller_of_trigger']);
 const EFFECT_KINDS = new Set([
   'damage', 'heal', 'defeat', 'give_shield', 'give_experience', 'draw', 'discard',
   'exhaust', 'ready', 'give', 'sequence', 'if', 'if_did', 'noop', 'choose_one', 'optional',
   'create_token', 'capture', 'rescue', 'move', 'look_at', 'disclose',
-  'search', 'divided_damage', 'indirect_damage', 'play_as_resource', 'return_to_hand', 'return_from_discard',
-  'take_control', 'use_force', 'gain_force', 'attack', 'power_damage_from_each',
+  'search', 'search_play', 'divided_damage', 'indirect_damage', 'play_as_resource', 'create_credit', 'discount', 'play_from_discard', 'return_to_hand', 'return_from_discard',
+  'take_control', 'exchange_control', 'use_force', 'gain_force', 'attack', 'power_damage_from_each',
 ]);
 const ABILITY_TYPES = new Set(['triggered', 'action', 'constant', 'replacement', 'cost']);
 const COST_COUNTS = new Set(['friendly_leader_units', 'friendly_units', 'friendly_resources']);
@@ -71,23 +71,23 @@ const PREDICATE_LEAF_FIELDS = new Set([
   'card_is_unique', 'card_is_token', 'card_is_leader_unit', 'stat_power',
   'stat_hp', 'controller', 'zone', 'self_damage', 'self_exhausted',
   'self_upgraded', 'player_has_force_token', 'controller_unit_count',
-  'controller_resource_count', 'controller_controls_trait', 'has_shield_token',
+  'controller_resource_count', 'controller_controls_trait', 'controller_controls', 'unit_left_play_this_phase', 'controller_distinct_keywords', 'has_shield_token',
   'remaining_hp',
 ]);
 const MODIFIER_FIELDS = new Set([
   'duration', 'until', 'power', 'health', 'per', 'keyword', 'keyword_value',
   'keywords', 'lose_keyword', 'lose_all_abilities', 'cant', 'must',
 ]);
-const PER_COUNTS = new Set(['controller_resources', 'controller_units', 'self_upgrades']);
+const PER_COUNTS = new Set(['controller_resources', 'controller_units', 'self_upgrades', 'controller_discard_units']);
 const TRIGGER_PREDICATE_FIELDS = new Set([
   'card', 'controller', 'attacker', 'defender', 'defender_defeated', 'card_trait', 'card_type',
-  'card_aspect', 'combat', 'base_controller', 'and', 'or', 'not',
+  'card_aspect', 'card_is_unique', 'combat', 'base_controller', 'and', 'or', 'not',
 ]);
 
 // Boolean-flag selector forms (e.g. { self: true }). The presence of one of
 // these keys means "this is a named selector, not a scoped one."
 const SELECTOR_FLAG_KEYS = new Set([
-  'self', 'trigger_source', 'self_base', 'opponent_base', 'trigger_controller_base', 'all_friendly_units',
+  'self', 'trigger_source', 'trigger_defender', 'self_base', 'opponent_base', 'chosen_base', 'trigger_controller_base', 'all_friendly_units',
   'attached_to_self',
 ]);
 const SCOPED_SELECTOR_KEYS = new Set(['zone', 'controller', 'filter', 'selector', 'count']);
@@ -166,9 +166,15 @@ function validatePredicate(v: V, path: string, p: unknown) {
       case 'zone': checkEnum(v, `${path}.zone`, val, ZONES, 'zone'); break;
       case 'card_cost': case 'stat_power': case 'stat_hp': case 'self_damage':
       case 'controller_unit_count': case 'controller_resource_count': case 'remaining_hp':
+      case 'controller_distinct_keywords':
         checkRange(v, `${path}.${key}`, val as Range); break;
       case 'card_traits_any':
         if (!Array.isArray(val)) v.err(`${path}.card_traits_any`, 'must be an array of strings'); break;
+      case 'controller_controls':
+        if (!isObj(val)) v.err(`${path}.controller_controls`, 'must be an object {filter?, exclude_self?}');
+        else if ('filter' in val) validatePredicate(v, `${path}.controller_controls.filter`, val.filter); break;
+      case 'unit_left_play_this_phase':
+        checkEnum(v, `${path}.unit_left_play_this_phase`, val, new Set(['friendly', 'any']), 'unit_left_play_this_phase'); break;
       // booleans / strings — light touch
     }
   }
@@ -192,8 +198,10 @@ function validateSelector(v: V, path: string, sel: unknown) {
   // boolean-flag forms
   const flag = keys.find(k => SELECTOR_FLAG_KEYS.has(k));
   if (flag) {
-    // all_friendly_units may carry a filter
-    if (flag === 'all_friendly_units' && 'filter' in sel) validatePredicate(v, `${path}.filter`, sel.filter);
+    // all_friendly_units and attached_to_self may carry a filter
+    if ((flag === 'all_friendly_units' || flag === 'attached_to_self') && 'filter' in sel) {
+      validatePredicate(v, `${path}.filter`, sel.filter);
+    }
     return;
   }
 
@@ -236,6 +244,7 @@ function validateModifier(v: V, path: string, m: unknown) {
       checkEnum(v, `${path}.per.count`, p.count, PER_COUNTS, 'count');
       if ('power' in p && !isNum(p.power)) v.err(`${path}.per.power`, 'per.power must be a number');
       if ('health' in p && !isNum(p.health)) v.err(`${path}.per.health`, 'per.health must be a number');
+      if ('filter' in p) validatePredicate(v, `${path}.per.filter`, p.filter);
     }
   }
   if ('cant' in m) {
@@ -365,6 +374,10 @@ function validateEffect(v: V, path: string, e: unknown) {
     case 'take_control':
       need('target', 'target' in e);
       if ('target' in e) validateSelector(v, `${path}.target`, e.target); break;
+    case 'exchange_control':
+      need('friendly', 'friendly' in e); need('enemy', 'enemy' in e);
+      if ('friendly' in e) validateSelector(v, `${path}.friendly`, e.friendly);
+      if ('enemy' in e) validateSelector(v, `${path}.enemy`, e.enemy); break;
     case 'return_from_discard':
       need('player', 'player' in e);
       if ('player' in e) checkEnum(v, `${path}.player`, e.player, PLAYER_REFS, 'player');
@@ -377,7 +390,10 @@ function validateEffect(v: V, path: string, e: unknown) {
       if ('player' in e) checkEnum(v, `${path}.player`, e.player, PLAYER_REFS, 'player'); break;
     case 'attack':
       if ('attacker' in e) validateSelector(v, `${path}.attacker`, e.attacker);
-      if ('count' in e && !isNum(e.count)) v.err(`${path}.count`, 'count must be a number'); break;
+      if ('count' in e && !isNum(e.count)) v.err(`${path}.count`, 'count must be a number');
+      if ('attacker_buff' in e) validateModifier(v, `${path}.attacker_buff`, e.attacker_buff);
+      if ('attacker_buff_if' in e) validatePredicate(v, `${path}.attacker_buff_if`, e.attacker_buff_if);
+      if ('defender_debuff' in e) validateModifier(v, `${path}.defender_debuff`, e.defender_debuff); break;
     case 'power_damage_from_each':
       need('sources', 'sources' in e); need('target', 'target' in e);
       if ('sources' in e) validateSelector(v, `${path}.sources`, e.sources);
@@ -401,6 +417,24 @@ function validateEffect(v: V, path: string, e: unknown) {
     case 'indirect_damage':
       need('amount', isNum(e.amount)); need('player', 'player' in e);
       if ('player' in e) checkEnum(v, `${path}.player`, e.player, PLAYER_REFS, 'player'); break;
+    case 'create_credit':
+      if ('player' in e) checkEnum(v, `${path}.player`, e.player, PLAYER_REFS, 'player');
+      if ('count' in e && !isNum(e.count)) v.err(`${path}.count`, 'count must be a number'); break;
+    case 'discount':
+      need('amount', isNum(e.amount));
+      if ('card_type' in e) checkEnum(v, `${path}.card_type`, e.card_type, new Set(['unit', 'event', 'upgrade']), 'card_type'); break;
+    case 'search_play':
+      need('count', isNum(e.count));
+      if ('filter' in e) validatePredicate(v, `${path}.filter`, e.filter);
+      if ('max_combined_cost' in e && !isNum(e.max_combined_cost)) v.err(`${path}.max_combined_cost`, 'max_combined_cost must be a number'); break;
+    case 'play_from_discard':
+      if ('filter' in e) validatePredicate(v, `${path}.filter`, e.filter);
+      if ('cost_reduction' in e && !isNum(e.cost_reduction)) v.err(`${path}.cost_reduction`, 'cost_reduction must be a number');
+      if ('cost_reduction_if' in e) {
+        const ci = e.cost_reduction_if;
+        if (!isObj(ci)) v.err(`${path}.cost_reduction_if`, 'cost_reduction_if must be {filter, amount}');
+        else { validatePredicate(v, `${path}.cost_reduction_if.filter`, ci.filter); if (!isNum(ci.amount)) v.err(`${path}.cost_reduction_if.amount`, 'amount must be a number'); }
+      } break;
   }
 }
 
@@ -433,10 +467,19 @@ function validateAbility(v: V, path: string, a: unknown) {
       if ('while' in a) validatePredicate(v, `${path}.while`, a.while);
       if (!isObj(a.grant)) v.err(`${path}.grant`, 'constant ability requires "grant" object');
       else {
-        if (!('target' in a.grant)) v.err(`${path}.grant.target`, 'grant requires "target"');
-        else validateSelector(v, `${path}.grant.target`, (a.grant as Record<string, unknown>).target);
-        if (!('modifier' in a.grant)) v.err(`${path}.grant.modifier`, 'grant requires "modifier"');
-        else validateModifier(v, `${path}.grant.modifier`, (a.grant as Record<string, unknown>).modifier);
+        const grant = a.grant as Record<string, unknown>;
+        if (!('target' in grant)) v.err(`${path}.grant.target`, 'grant requires "target"');
+        else validateSelector(v, `${path}.grant.target`, grant.target);
+        // A grant must give a `modifier` and/or `abilities` (the host gains
+        // those abilities — "Attached unit gains: '<ability>'").
+        if (!('modifier' in grant) && !('abilities' in grant)) {
+          v.err(`${path}.grant`, 'grant requires "modifier" and/or "abilities"');
+        }
+        if ('modifier' in grant) validateModifier(v, `${path}.grant.modifier`, grant.modifier);
+        if ('abilities' in grant) {
+          if (!Array.isArray(grant.abilities)) v.err(`${path}.grant.abilities`, 'abilities must be an array');
+          else grant.abilities.forEach((g, i) => validateAbility(v, `${path}.grant.abilities[${i}]`, g));
+        }
       }
       break;
     case 'replacement':
@@ -455,11 +498,16 @@ function validateAbility(v: V, path: string, a: unknown) {
 
 function validateActionCost(v: V, path: string, c: unknown) {
   if (!isObj(c)) { v.err(path, 'cost must be an object'); return; }
-  const allowed = new Set(['exhaust', 'resources', 'discard', 'defeat', 'remove_shield']);
+  const allowed = new Set(['exhaust', 'resources', 'discard', 'defeat', 'remove_shield', 'damage']);
   for (const k of Object.keys(c)) if (!allowed.has(k)) v.err(`${path}.${k}`, `unknown cost field "${k}"`);
   if ('resources' in c && !isNum(c.resources)) v.err(`${path}.resources`, 'resources must be a number');
   if ('defeat' in c) validateSelector(v, `${path}.defeat`, c.defeat);
   if ('remove_shield' in c) validateSelector(v, `${path}.remove_shield`, c.remove_shield);
+  if ('damage' in c) {
+    const d = c.damage;
+    if (!isObj(d)) v.err(`${path}.damage`, 'damage cost must be {amount, target}');
+    else { if (!isNum(d.amount)) v.err(`${path}.damage.amount`, 'amount must be a number'); validateSelector(v, `${path}.damage.target`, d.target); }
+  }
   if ('discard' in c) {
     const d = c.discard;
     if (!isObj(d)) v.err(`${path}.discard`, 'discard cost must be {player, count}');

@@ -1,0 +1,15 @@
+{
+  "id": "W8_055",
+  "name": "Cantina Payout (test)",
+  "type": "event",
+  "cost": 1,
+  "aspects": ["cunning"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": { "effect": "create_credit", "player": "self", "count": 2 }
+    }
+  ]
+}

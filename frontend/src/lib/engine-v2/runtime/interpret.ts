@@ -23,7 +23,9 @@ import { defaultChooser } from './chooser';
 import { dealDamageToBase, dealDamageToUnit } from './damage';
 import { effectivePower, effectiveHp } from './modifiers';
 import { shuffleDeterministic } from '../util/rng';
-import { resolveAttack, attackIllegalReason } from './attack';
+import { resolveAttack, attackIllegalReason, resolveAmbush } from './attack';
+import { effectiveCost } from './cost';
+import { KEYWORDS } from '../primitives/keywords';
 
 export interface InterpCtx extends EvalCtx {}
 
@@ -94,12 +96,17 @@ export function applyEffect(ctx: InterpCtx, effect: Effect): InterpResult {
     case 'look_at':          return applyLookAt(ctx, effect);
     case 'disclose':         return applyDisclose(ctx, effect);
     case 'search':           return applySearch(ctx, effect);
+    case 'search_play':      return applySearchPlay(ctx, effect);
     case 'divided_damage':   return applyDividedDamage(ctx, effect);
     case 'indirect_damage':  return applyIndirectDamage(ctx, effect);
     case 'play_as_resource': return applyPlayAsResource(ctx, effect);
+    case 'create_credit':    return applyCreateCredit(ctx, effect);
+    case 'discount':         return applyDiscount(ctx, effect);
+    case 'play_from_discard': return applyPlayFromDiscard(ctx, effect);
     case 'return_to_hand':   return applyReturnToHand(ctx, effect);
     case 'return_from_discard': return applyReturnFromDiscard(ctx, effect);
     case 'take_control':     return applyTakeControl(ctx, effect);
+    case 'exchange_control': return applyExchangeControl(ctx, effect);
     case 'use_force':        return applyUseForce(ctx, effect);
     case 'gain_force':       return applyGainForce(ctx, effect);
     case 'attack':           return applyAttackEffect(ctx, effect);
@@ -152,6 +159,24 @@ function applyAttackEffect(ctx: InterpCtx, e: Extract<Effect, { effect: 'attack'
 
   let s = ctx.state;
   const events: GameEvent[] = [];
+
+  // "It gets +N/+0 [and gains K] for this attack" — buff the chosen attacker via
+  // a lasting effect, scoped to exactly this attack (added now, removed after the
+  // attack loop so it doesn't leak to a later attack/phase). `attacker_buff_if`
+  // (if present) gates the buff on the chosen attacker matching ("…if it's an
+  // Imperial unit"); the attack still happens, just unbuffed.
+  const af0 = findCard(s, attackerIid);
+  const buffApplies = !!e.attacker_buff
+    && (!e.attacker_buff_if || (!!af0 && evalCardPredicate(e.attacker_buff_if, ctx, af0.inst, pid, af0.loc.zone)));
+  const buffId = buffApplies ? `le_atk_${s.step}_${s.lastingEffects.length}` : undefined;
+  if (buffId) {
+    const rec: LastingEffectRec = {
+      id: buffId, modifier: e.attacker_buff!,
+      targets: { kind: 'units', iids: [attackerIid] },
+      expiry: 'end_of_phase', sourceIid: ctx.sourceIid,
+    };
+    s = { ...s, lastingEffects: [...s.lastingEffects, rec] };
+  }
   for (let i = 0; i < count; i++) {
     const af = findCard(s, attackerIid);
     if (!af) break; // attacker left play (e.g. defeated by a previous attack's combat)
@@ -175,10 +200,24 @@ function applyAttackEffect(ctx: InterpCtx, e: Extract<Effect, { effect: 'attack'
     const result = chooser({ kind: 'choose_one', prompt: 'Choose what to attack', options, player: pid, canPass: false });
     const defenderIid: string = result.kind === 'option' ? result.value : options[0].value;
 
+    // "The defender gets -N/-0 for this attack" — debuff the chosen defender (a
+    // unit, not the base) via a lasting effect scoped to exactly this attack.
+    const debuffId = (e.defender_debuff && defenderIid !== 'base') ? `le_def_${s.step}_${s.lastingEffects.length}` : undefined;
+    if (debuffId) {
+      s = { ...s, lastingEffects: [...s.lastingEffects, {
+        id: debuffId, modifier: e.defender_debuff!,
+        targets: { kind: 'units', iids: [defenderIid] },
+        expiry: 'end_of_phase', sourceIid: ctx.sourceIid,
+      }] };
+    }
+
     const r = resolveAttack(s, pid, attackerIid, defenderIid, ctx.reg, chooser);
     s = r.state;
+    if (debuffId) s = { ...s, lastingEffects: s.lastingEffects.filter(le => le.id !== debuffId) };
     events.push(...r.events);
   }
+  // Remove the "for this attack" buff so it doesn't outlast the attack.
+  if (buffId) s = { ...s, lastingEffects: s.lastingEffects.filter(le => le.id !== buffId) };
   return { state: s, events };
 }
 
@@ -515,47 +554,67 @@ function applyMove(ctx: InterpCtx, e: Extract<Effect, { effect: 'move' }>): Inte
   return { state: s, events };
 }
 
+/** Move a single in-arena unit to `toController`'s control (§8.28). Control is
+ *  positional — the instance physically moves to the new controller's matching
+ *  arena, keeping ready/exhausted + damage + upgrades; the original controller is
+ *  recorded as `owner` so it returns to the owner's discard on defeat (§8.28.2).
+ *  A Leader Unit can't change control — it's defeated instead (§1.6): bump to
+ *  lethal and let the state-based loop handle it. Shared by take_control and
+ *  exchange_control. */
+function transferUnitControl(s: GameState, iid: string, toController: PlayerId): { state: GameState; event?: GameEvent } {
+  const f = findCard(s, iid);
+  if (!f) return { state: s };
+  if (f.loc.zone !== 'ground_arena' && f.loc.zone !== 'space_arena') return { state: s };
+  const from = f.loc.controller;
+  if (from === toController) return { state: s }; // already controls it — no-op
+  const ps0 = s.players[from];
+  if (ps0.leaders.some(l => l.isDeployed && l.unitIid === iid)) {
+    return { state: mapInstance(s, iid, c => ({ ...c, damage: c.damage + 9999 })) };
+  }
+  const fromArr = getZoneArr(ps0, f.loc.zone).slice();
+  const idx = fromArr.findIndex(c => c.iid === iid);
+  if (idx < 0) return { state: s };
+  const moved = { ...fromArr[idx], owner: fromArr[idx].owner ?? from, enteredZoneAt: s.step };
+  fromArr.splice(idx, 1);
+  let s2 = withPlayer(s, from, withZoneArr(ps0, f.loc.zone, fromArr));
+  const ps1 = s2.players[toController];
+  const toArr = getZoneArr(ps1, f.loc.zone).slice();
+  toArr.push(moved);
+  s2 = withPlayer(s2, toController, withZoneArr(ps1, f.loc.zone, toArr));
+  return { state: s2, event: { kind: 'CONTROL_CHANGED', iid, from, to: toController } };
+}
+
 function applyTakeControl(ctx: InterpCtx, e: Extract<Effect, { effect: 'take_control' }>): InterpResult {
-  // §8.28: the source player takes control of the target unit. Control is
-  // positional here, so we physically move the instance to the new controller's
-  // matching arena. It keeps ready/exhausted, damage, and upgrades. The original
-  // controller is recorded as `owner` (if not already set) so the unit returns
-  // to its owner's discard on defeat (§8.28.2). A Leader Unit can't change
-  // control — it's defeated instead (§1.6).
+  // §8.28: the source player takes control of the target unit.
   const targets = resolveSelector(ctx, e.target);
-  const newController = ctx.sourcePlayer;
   let s = ctx.state;
   const events: GameEvent[] = [];
   for (const t of targets) {
     if (t.kind !== 'unit') continue;
-    const f = findCard(s, t.iid);
-    if (!f) continue;
-    if (f.loc.zone !== 'ground_arena' && f.loc.zone !== 'space_arena') continue;
-    const from = f.loc.controller;
-    if (from === newController) continue; // already control it — no-op
+    const r = transferUnitControl(s, t.iid, ctx.sourcePlayer);
+    s = r.state;
+    if (r.event) events.push(r.event);
+  }
+  return { state: s, events };
+}
 
-    const ps0 = s.players[from];
-    // Leader Unit changing control → defeated instead (§1.6). Bump to lethal and
-    // let the state-based loop flip it back / route it correctly.
-    if (ps0.leaders.some(l => l.isDeployed && l.unitIid === f.inst.iid)) {
-      s = mapInstance(s, f.inst.iid, c => ({ ...c, damage: c.damage + 9999 }));
-      continue;
-    }
-
-    // Remove from the original controller's arena.
-    const fromArr = getZoneArr(ps0, f.loc.zone).slice();
-    const idx = fromArr.findIndex(c => c.iid === f.inst.iid);
-    if (idx < 0) continue;
-    const moved = { ...fromArr[idx], owner: fromArr[idx].owner ?? from, enteredZoneAt: s.step };
-    fromArr.splice(idx, 1);
-    s = withPlayer(s, from, withZoneArr(ps0, f.loc.zone, fromArr));
-
-    // Add to the new controller's MATCHING arena (ground stays ground, etc.).
-    const ps1 = s.players[newController];
-    const toArr = getZoneArr(ps1, f.loc.zone).slice();
-    toArr.push(moved);
-    s = withPlayer(s, newController, withZoneArr(ps1, f.loc.zone, toArr));
-    events.push({ kind: 'CONTROL_CHANGED', iid: f.inst.iid, from, to: newController });
+function applyExchangeControl(ctx: InterpCtx, e: Extract<Effect, { effect: 'exchange_control' }>): InterpResult {
+  // "Exchange control": the chosen friendly unit goes to the opponent, the chosen
+  // enemy unit comes to the source player. Resolve both selectors against the
+  // ORIGINAL state (so picking the enemy isn't affected by moving the friendly),
+  // then apply the two transfers.
+  const opp = ctx.state.playerOrder.find(p => p !== ctx.sourcePlayer) ?? ctx.sourcePlayer;
+  const mine = resolveSelector(ctx, e.friendly).filter(t => t.kind === 'unit');
+  const theirs = resolveSelector(ctx, e.enemy).filter(t => t.kind === 'unit');
+  let s = ctx.state;
+  const events: GameEvent[] = [];
+  for (const t of mine) {
+    const r = transferUnitControl(s, t.iid, opp);
+    s = r.state; if (r.event) events.push(r.event);
+  }
+  for (const t of theirs) {
+    const r = transferUnitControl(s, t.iid, ctx.sourcePlayer);
+    s = r.state; if (r.event) events.push(r.event);
   }
   return { state: s, events };
 }
@@ -596,6 +655,8 @@ function applyReturnToHand(ctx: InterpCtx, e: Extract<Effect, { effect: 'return_
     };
     ps = { ...ps, hand: [...ps.hand, fresh], discard: newDiscard };
     s = withPlayer(s, ctrl, ps);
+    // A unit controlled by `ctrl` left play this phase (bounce).
+    s = { ...s, leftPlayThisPhase: [...(s.leftPlayThisPhase ?? []), ctrl] };
     events.push({ kind: 'ZONE_CHANGED', iid: f.inst.iid, from: f.loc.zone, to: 'hand' });
   }
   return { state: s, events };
@@ -810,6 +871,175 @@ function applyPlayAsResource(ctx: InterpCtx, e: Extract<Effect, { effect: 'play_
   let s = mapInstance(moved.state, ctx.sourceIid, c => ({ ...c, exhausted }));
   s = { ...s, log: [...s.log, { round: s.round, player: pid, message: `${pid} puts ${name} into play as a resource${e.ready ? ' (ready)' : ''}.`, kind: 'info' }] };
   return { state: s, events: [...moved.events, { kind: 'RESOURCE_PLACED', player: pid, iid: ctx.sourceIid }] };
+}
+
+/** "Play a unit from your discard pile [at a reduced cost]." (Palpatine's
+ *  Return.) Choose an eligible AFFORDABLE unit in the controller's discard, pay
+ *  its reduced cost, and put it into its arena (exhausted, onPlay hooks + Ambush;
+ *  its When-Played fires from the trailing settle on the CARD_PLAYED event). A
+ *  no-op if nothing is eligible/affordable. Units only. */
+function applyPlayFromDiscard(ctx: InterpCtx, e: Extract<Effect, { effect: 'play_from_discard' }>): InterpResult {
+  const pid = ctx.sourcePlayer;
+  const p = ctx.state.players[pid];
+  if (!p) return { state: ctx.state, events: [] };
+  const ready = p.resources.filter(r => !r.exhausted);
+
+  // Eligible = unit cards in the discard matching the filter AND affordable at
+  // their reduced cost.
+  const reductionFor = (spec: import('../spec/types').CardSpec): number => {
+    if (e.cost_reduction_if && evalCardPredicate(e.cost_reduction_if.filter, ctx, dummyInst(spec.id), pid, 'discard')) {
+      return e.cost_reduction_if.amount;
+    }
+    return e.cost_reduction ?? 0;
+  };
+  const eligible = p.discard.filter(c => {
+    const spec = ctx.reg.cards[c.cardId];
+    if (!spec || spec.type !== 'unit') return false;
+    if (e.filter && !evalCardPredicate(e.filter, ctx, c, pid, 'discard')) return false;
+    const reduced = Math.max(0, effectiveCost(ctx.state, ctx.reg, spec, pid) - reductionFor(spec));
+    return ready.length >= reduced;
+  });
+  if (eligible.length === 0) return { state: ctx.state, events: [] };
+
+  const chooser = ctx.chooser ?? defaultChooser;
+  const pick = chooser({
+    kind: 'choose_one',
+    prompt: 'Play a unit from your discard pile',
+    options: eligible.map(c => ({ label: ctx.reg.cards[c.cardId]?.name ?? c.iid, value: c.iid })),
+    player: pid, canPass: false,
+  });
+  const chosenIid = pick.kind === 'option' ? pick.value : eligible[0].iid;
+  const card = eligible.find(c => c.iid === chosenIid) ?? eligible[0];
+  const spec = ctx.reg.cards[card.cardId]!;
+  const cost = Math.max(0, effectiveCost(ctx.state, ctx.reg, spec, pid) - reductionFor(spec));
+
+  let s = ctx.state;
+  const events: GameEvent[] = [];
+  // Pay the reduced cost from ready resources.
+  for (let i = 0; i < cost; i++) {
+    const r = exhaust(s, ready[i].iid);
+    s = r.state;
+    events.push({ kind: 'RESOURCE_SPENT', player: pid, iid: ready[i].iid });
+  }
+  s = { ...s, log: [...s.log, { round: s.round, player: pid, message: `${pid} plays ${spec.name} from discard (${cost}).`, kind: 'info' }] };
+  const put = putUnitIntoPlay(s, ctx.reg, card.iid, pid, spec, ctx.chooser);
+  return { state: put.state, events: [...events, ...put.events] };
+}
+
+/** Move unit `iid` (from any zone) into its arena, exhausted (§3.4.4b), run its
+ *  onPlay keyword hooks (Shielded) + Ambush, and emit CARD_PLAYED. The unit's
+ *  triggered When-Played fires from the trailing settle on that event. Shared by
+ *  play_from_discard and search_play (units played from a non-hand zone). */
+function putUnitIntoPlay(
+  state: GameState, reg: CardRegistry, iid: string, pid: PlayerId,
+  spec: import('../spec/types').CardSpec, chooser: InterpCtx['chooser'],
+): InterpResult {
+  const events: GameEvent[] = [];
+  const destZone = (spec.type === 'unit' && spec.arena === 'space') ? 'space_arena' : 'ground_arena';
+  const moved = moveToZone(state, iid, pid, destZone);
+  let s = mapInstance(moved.state, iid, c => ({ ...c, exhausted: true, enteredZoneAt: moved.state.step }));
+  events.push(...moved.events, { kind: 'CARD_PLAYED', iid, cardId: spec.id, controller: pid });
+  if (spec.type === 'unit') {
+    for (const kw of (spec.keywords ?? [])) {
+      const def = KEYWORDS[kw.name.toLowerCase()];
+      if (!def?.onPlay) continue;
+      const here = findCard(s, iid);
+      if (!here) continue;
+      const r = def.onPlay({ state: s, reg, inst: here.inst, owner: pid, value: kw.value });
+      s = r.state;
+      events.push(...r.events);
+    }
+  }
+  const amb = resolveAmbush(s, reg, iid, pid, chooser);
+  return { state: amb.state, events: [...events, ...amb.events] };
+}
+
+/** "Search the top N cards of your deck for any number of <units> with combined
+ *  cost ≤ M and play each for free." (Darth Vader — Commanding the First Legion.)
+ *  Reveal the top N; the player picks any subset of matching cards whose combined
+ *  printed cost stays within the cap; each is put into play for free; the deck is
+ *  then shuffled (§8.36). The default chooser greedily takes affordable matches. */
+function applySearchPlay(ctx: InterpCtx, e: Extract<Effect, { effect: 'search_play' }>): InterpResult {
+  const pid = ctx.sourcePlayer;
+  const ps = ctx.state.players[pid];
+  if (!ps || ps.deck.length === 0) return { state: ctx.state, events: [] };
+  const top = ps.deck.slice(0, e.count);
+  const shuffleSeed = ctx.state.step;
+  const cap = e.max_combined_cost ?? Infinity;
+
+  const eligibleAll = top.filter(c => {
+    const spec = ctx.reg.cards[c.cardId];
+    if (!spec || spec.type !== 'unit') return false;
+    return !e.filter || evalCardPredicate(e.filter, ctx, c, pid, 'deck');
+  });
+
+  const chooser = ctx.chooser ?? defaultChooser;
+  const chosen: string[] = [];
+  let spent = 0;
+  // Pick matches one at a time while any remaining one still fits the cap.
+  while (true) {
+    const remaining = eligibleAll.filter(c =>
+      !chosen.includes(c.iid) && (ctx.reg.cards[c.cardId]?.cost ?? 0) <= cap - spent);
+    if (remaining.length === 0) break;
+    const options = [
+      ...remaining.map(c => ({ label: `${ctx.reg.cards[c.cardId]?.name ?? c.iid} (${ctx.reg.cards[c.cardId]?.cost ?? 0})`, value: c.iid })),
+      { label: 'Done', value: '__done__' },
+    ];
+    const pick = chooser({ kind: 'choose_one', prompt: `Search top ${e.count}: play a unit for free (combined ≤ ${cap}, ${spent} used)`, options, player: pid, canPass: true });
+    const v = pick.kind === 'option' ? pick.value : (pick.kind === 'pass' || pick.kind === 'no' ? '__done__' : remaining[0].iid);
+    if (v === '__done__') break;
+    chosen.push(v);
+    spent += ctx.reg.cards[eligibleAll.find(c => c.iid === v)!.cardId]?.cost ?? 0;
+  }
+
+  let s = ctx.state;
+  const events: GameEvent[] = [];
+  // Play each chosen unit for free (it's still in the deck array; putUnitIntoPlay
+  // moves it from there into the arena).
+  for (const iid of chosen) {
+    const spec = ctx.reg.cards[top.find(c => c.iid === iid)!.cardId]!;
+    s = { ...s, log: [...s.log, { round: s.round, player: pid, message: `${pid} plays ${spec.name} for free (searched).`, kind: 'info' }] };
+    const put = putUnitIntoPlay(s, ctx.reg, iid, pid, spec, ctx.chooser);
+    s = put.state;
+    events.push(...put.events);
+  }
+  // Shuffle the deck afterwards (§8.36 — a search shuffles regardless).
+  const psNow = s.players[pid];
+  s = withPlayer(s, pid, { ...psNow, deck: shuffleDeterministic(psNow.deck, shuffleSeed) });
+  return { state: s, events };
+}
+
+/** Minimal stand-in instance for predicate checks that only read the spec (by
+ *  cardId) — used when evaluating a cost_reduction_if filter against a card we
+ *  haven't moved yet. */
+function dummyInst(cardId: string): import('../state/types').CardInstance {
+  return { iid: `__probe_${cardId}`, cardId, damage: 0, exhausted: false, upgrades: [], shieldTokens: 0, isToken: false, enteredZoneAt: 0 };
+}
+
+/** "Create N Credit token(s)." Adds one-shot resource tokens to the controller. */
+function applyCreateCredit(ctx: InterpCtx, e: Extract<Effect, { effect: 'create_credit' }>): InterpResult {
+  const pid = resolvePlayerStrict(e.player ?? 'self', ctx);
+  const p = ctx.state.players[pid];
+  if (!p) return { state: ctx.state, events: [] };
+  const n = e.count ?? 1;
+  const made = Array.from({ length: n }, (_, i) => ({ iid: `credit_${ctx.state.step}_${p.creditTokens.length + i}` }));
+  let s = withPlayer(ctx.state, pid, { ...p, creditTokens: [...p.creditTokens, ...made] });
+  s = { ...s, log: [...s.log, { round: s.round, player: pid, message: `${pid} creates ${n} Credit token${n > 1 ? 's' : ''}.`, kind: 'info' }] };
+  return { state: s, events: [] };
+}
+
+/** "The next <card_type> you play this phase costs N less." Registers a one-shot
+ *  phase-scoped discount on the source player (General's Blade). Consumption +
+ *  the cost computation live in cost.ts / reducer.applyPlayCard; phase expiry in
+ *  reducer.endActionPhase. */
+function applyDiscount(ctx: InterpCtx, e: Extract<Effect, { effect: 'discount' }>): InterpResult {
+  const pid = ctx.sourcePlayer;
+  const p = ctx.state.players[pid];
+  if (!p) return { state: ctx.state, events: [] };
+  const discounts = [...(p.discounts ?? []), { amount: e.amount, cardType: e.card_type }];
+  let s = withPlayer(ctx.state, pid, { ...p, discounts });
+  s = { ...s, log: [...s.log, { round: s.round, player: pid, message: `${pid}: next ${e.card_type ?? 'card'} played this phase costs ${e.amount} less.`, kind: 'info' }] };
+  return { state: s, events: [] };
 }
 
 function applySearch(ctx: InterpCtx, e: Extract<Effect, { effect: 'search' }>): InterpResult {

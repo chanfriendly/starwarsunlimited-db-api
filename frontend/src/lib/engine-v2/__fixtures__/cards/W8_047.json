@@ -1,0 +1,26 @@
+{
+  "id": "W8_047",
+  "name": "Death Trooper (test)",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["villainy"],
+  "arena": "ground",
+  "power": 3,
+  "hp": 3,
+  "traits": ["imperial"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": {
+        "effect": "sequence",
+        "steps": [
+          { "effect": "damage", "amount": 2, "target": { "zone": "ground_arena", "controller": "self", "selector": "chosen", "count": 1 } },
+          { "effect": "damage", "amount": 2, "target": { "zone": "ground_arena", "controller": "opponent", "selector": "chosen", "count": 1 } }
+        ]
+      }
+    }
+  ]
+}

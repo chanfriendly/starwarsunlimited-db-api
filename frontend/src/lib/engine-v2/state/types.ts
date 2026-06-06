@@ -97,6 +97,21 @@ export interface PlayerState {
   perPhaseCounters: Record<string, number>;
   perRoundCounters: Record<string, number>;
   perGameFlags: Set<string>;
+  /** One-shot play-cost discounts awaiting a matching card play ("the next unit
+   *  you play this phase costs N less" — General's Blade). Each applies to (and
+   *  is consumed by) the first matching play; matching discounts STACK on one
+   *  play. Cleared at end of phase. Optional for back-compat with hand-built
+   *  states. */
+  discounts?: PendingDiscount[];
+}
+
+/** A pending one-shot play-cost discount on a player. `cardType` (if set) gates
+ *  which cards it applies to ("unit" → only units); keyed by card type rather
+ *  than a full predicate so `effectiveCost` stays free of the predicate
+ *  evaluator. Consumed by the first matching play; phase-scoped. */
+export interface PendingDiscount {
+  amount: number;
+  cardType?: 'unit' | 'event' | 'upgrade';
 }
 
 // Lasting effects ship in Week 2; delayed effects + nested-trigger queueing
@@ -112,6 +127,12 @@ export interface TriggerInstance {
   sourceController: PlayerId;
   /** the event that fired this trigger, snapshot for resolution */
   event: import('./bus').GameEvent;
+  /** For abilities GRANTED to the host by an attached upgrade ("Attached unit
+   *  gains: '<ability>'"): the granted ability, snapshotted inline so resolution
+   *  doesn't re-derive it by index (the grant is context-dependent — e.g. a
+   *  granted When-Defeated fires after the upgrade has already detached). When
+   *  set, resolution uses this instead of `cardAbilities(source)[abilityIndex]`. */
+  grantedAbility?: import('../spec/ast').TriggeredAbility;
 }
 
 export interface PendingChoice {
@@ -154,6 +175,11 @@ export interface GameState {
    *  (§18: can't be attacked the phase it was played/deployed/created). Optional
    *  for back-compat (absent → no unit counts as "entered this phase"). */
   phaseStartedAtStep?: number;
+  /** Controllers of units that have LEFT PLAY (defeated / returned to hand /
+   *  captured) during the current action phase — for "if a [friendly] unit left
+   *  play this phase, …". Reset at action-phase start. Optional for back-compat
+   *  (absent → none left play). A controller may appear more than once. */
+  leftPlayThisPhase?: PlayerId[];
   winner?: PlayerId | 'draw';
   log: LogEntry[];
   consecutivePasses: number;

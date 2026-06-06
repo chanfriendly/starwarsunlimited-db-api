@@ -1,0 +1,13 @@
+{
+  "id": "W8_038",
+  "name": "Sith Trooper (test host)",
+  "type": "unit",
+  "cost": 2,
+  "aspects": ["villainy"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 2,
+  "traits": ["sith", "trooper"],
+  "keywords": [],
+  "abilities": []
+}

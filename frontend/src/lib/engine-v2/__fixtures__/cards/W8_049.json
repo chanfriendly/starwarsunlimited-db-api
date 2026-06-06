@@ -1,0 +1,19 @@
+{
+  "id": "W8_049",
+  "name": "Rallying Strike (test)",
+  "type": "event",
+  "cost": 1,
+  "aspects": ["aggression"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": {
+        "effect": "attack",
+        "attacker": { "zone": "any_arena", "controller": "self", "selector": "chosen", "count": 1, "filter": { "self_exhausted": false } },
+        "attacker_buff": { "power": 2, "health": 0, "keyword": "overwhelm" }
+      }
+    }
+  ]
+}

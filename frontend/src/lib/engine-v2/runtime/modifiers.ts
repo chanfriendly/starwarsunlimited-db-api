@@ -84,7 +84,7 @@ function collectModifiersFor(
           const ctx: EvalCtx = { state, reg, sourceIid: source.iid, sourcePlayer: pid };
           if (ab.while && !evalSourcePredicate(ab.while, ctx, source, pid)) continue;
           const targets = resolveSelector(ctx, ab.grant.target);
-          if (targets.some(t => t.kind === 'unit' && t.iid === targetIid)) {
+          if (ab.grant.modifier && targets.some(t => t.kind === 'unit' && t.iid === targetIid)) {
             mods.push(ab.grant.modifier);
           }
         }
@@ -98,7 +98,7 @@ function collectModifiersFor(
               const ctx: EvalCtx = { state, reg, sourceIid: up.iid, sourcePlayer: pid };
               if (ab.while && !evalSourcePredicate(ab.while, ctx, up, pid)) continue;
               const targets = resolveSelector(ctx, ab.grant.target);
-              if (targets.some(t => t.kind === 'unit' && t.iid === targetIid)) {
+              if (ab.grant.modifier && targets.some(t => t.kind === 'unit' && t.iid === targetIid)) {
                 mods.push(ab.grant.modifier);
               }
             }
@@ -123,7 +123,7 @@ function collectModifiersFor(
         const ctx: EvalCtx = { state, reg, sourceIid: synth.iid, sourcePlayer: pid };
         if (ab.while && !evalSourcePredicate(ab.while, ctx, synth, pid)) continue;
         const targets = resolveSelector(ctx, ab.grant.target);
-        if (targets.some(t => t.kind === 'unit' && t.iid === targetIid)) {
+        if (ab.grant.modifier && targets.some(t => t.kind === 'unit' && t.iid === targetIid)) {
           mods.push(ab.grant.modifier);
         }
       }
@@ -207,12 +207,22 @@ function printedHp(reg: CardRegistry, inst: CardInstance): number {
 }
 
 /** Live count for a per-X scaling modifier. */
-function perCount(count: NonNullable<Modifier['per']>['count'], state: GameState, inst: CardInstance, ownerId: PlayerId): number {
+function perCount(per: NonNullable<Modifier['per']>, state: GameState, reg: CardRegistry, inst: CardInstance, ownerId: PlayerId): number {
   const ps = state.players[ownerId];
-  switch (count) {
+  switch (per.count) {
     case 'controller_resources': return ps ? ps.resources.length : 0;
     case 'controller_units':     return ps ? ps.groundArena.length + ps.spaceArena.length : 0;
     case 'self_upgrades':        return inst.upgrades.length;
+    case 'controller_discard_units': {
+      // "for each [Trait] unit in your discard pile" (Captain Enoch).
+      if (!ps) return 0;
+      const ctx: EvalCtx = { state, reg, sourceIid: inst.iid, sourcePlayer: ownerId };
+      return ps.discard.filter(c => {
+        const spec = reg.cards[c.cardId];
+        if (!spec || spec.type !== 'unit') return false;
+        return !per.filter || evalCardPredicate(per.filter, ctx, c, ownerId, 'discard');
+      }).length;
+    }
     default:                     return 0;
   }
 }
@@ -228,7 +238,7 @@ export function effectivePower(
   // Modifiers from constants + lasting effects
   for (const m of collectModifiersFor(state, reg, inst.iid, ownerId)) {
     if (m.power) p += m.power;
-    if (m.per?.power) p += m.per.power * perCount(m.per.count, state, inst, ownerId);
+    if (m.per?.power) p += m.per.power * perCount(m.per, state, reg, inst, ownerId);
   }
 
   // Upgrades contribute their powerModifier directly to the host's stats.
@@ -257,7 +267,7 @@ export function effectiveHp(
   let h = printedHp(reg, inst);
   for (const m of collectModifiersFor(state, reg, inst.iid, ownerId)) {
     if (m.health) h += m.health;
-    if (m.per?.health) h += m.per.health * perCount(m.per.count, state, inst, ownerId);
+    if (m.per?.health) h += m.per.health * perCount(m.per, state, reg, inst, ownerId);
   }
   h += upgradeHpBonus(reg, inst);
 

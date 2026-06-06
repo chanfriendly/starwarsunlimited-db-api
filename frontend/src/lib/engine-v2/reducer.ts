@@ -177,7 +177,7 @@ function resetResourcedFlags(state: GameState): GameState {
 }
 
 function startActionPhase(state: GameState, reg: CardRegistry, events: GameEvent[], chooser?: Chooser): StepResult {
-  let s: GameState = { ...state, phase: 'action', round: state.round + 1, activePlayer: state.initiative, consecutivePasses: 0, phaseStartedAtStep: state.step };
+  let s: GameState = { ...state, phase: 'action', round: state.round + 1, activePlayer: state.initiative, consecutivePasses: 0, phaseStartedAtStep: state.step, leftPlayThisPhase: [] };
   s = log(s, `Round ${s.round} begins.`, undefined, 'critical');
   s = log(s, `${s.activePlayer} acts first.`, s.activePlayer);
   return settle(s, reg, [...events, { kind: 'TURN_STARTED', player: s.activePlayer }], chooser);
@@ -238,13 +238,33 @@ function applyPlayCard(state: GameState, pid: PlayerId, iid: string, reg: CardRe
     cost = Math.max(0, cost - 2 * sacrificed.length);
   }
 
-  if (readyResources.length < cost) throw new Error(`Insufficient resources: need ${cost}, have ${readyResources.length}`);
+  // Credit tokens top up the resource pool (one-shot — removed when spent).
+  const creditCount = p.creditTokens.length;
+  if (readyResources.length + creditCount < cost) throw new Error(`Insufficient resources: need ${cost}, have ${readyResources.length + creditCount}`);
 
-  for (let i = 0; i < cost; i++) {
+  // Pay from ready resources first, then spend Credit tokens for the remainder.
+  const fromResources = Math.min(cost, readyResources.length);
+  for (let i = 0; i < fromResources; i++) {
     const ri = readyResources[i].iid;
     const r = exhaust(s, ri);
     s = r.state;
     events.push({ kind: 'RESOURCE_SPENT', player: pid, iid: ri });
+  }
+  const fromCredits = cost - fromResources;
+  if (fromCredits > 0) {
+    const ps = s.players[pid];
+    s = withPlayer(s, pid, { ...ps, creditTokens: ps.creditTokens.slice(fromCredits) });
+  }
+
+  // Consume one-shot play-cost discounts this play applied (matching by card
+  // type — "the next unit you play this phase costs N less"). effectiveCost
+  // subtracted them above; remove them now so they don't apply again.
+  const pNow = s.players[pid];
+  if (pNow.discounts && pNow.discounts.length > 0) {
+    const remaining = pNow.discounts.filter(d => d.cardType && d.cardType !== spec.type);
+    if (remaining.length !== pNow.discounts.length) {
+      s = withPlayer(s, pid, { ...pNow, discounts: remaining });
+    }
   }
 
   // Exploit: bump the sacrificed units to lethal so the trailing settle defeats
@@ -631,6 +651,19 @@ function applyActionAbility(
     }
   }
 
+  // Pay damage cost ("deal N damage to a friendly unit" — Doctor Pershing).
+  // Routes through the normal damage layer (shields/replacements apply).
+  if (cost.damage) {
+    const ctx = { state: s, reg, sourceIid: src.iid, sourcePlayer: pid, chooser };
+    const targets = resolveSelector(ctx, cost.damage.target);
+    for (const t of targets) {
+      if (t.kind !== 'unit') continue;
+      const r = dealDamageToUnit(s, reg, t.iid, cost.damage.amount, {}, src.iid, chooser);
+      s = r.state;
+      events.push(...r.events);
+    }
+  }
+
   // Bump the limit counter (after costs paid, before effect — so a card whose
   // effect references the limit-tracked counter sees the post-fire state).
   if (ability.limit) {
@@ -795,6 +828,19 @@ function endActionPhase(state: GameState, reg: CardRegistry, eventsIn: GameEvent
 
   // Expire end_of_phase lasting effects (the action phase that just ended).
   s = expireLastingEffects(s, 'end_of_phase');
+
+  // Clear unused one-shot play-cost discounts ("…this phase…", General's Blade).
+  {
+    const players = { ...s.players };
+    let changed = false;
+    for (const pid of s.playerOrder) {
+      if (players[pid].discounts && players[pid].discounts!.length > 0) {
+        players[pid] = { ...players[pid], discounts: [] };
+        changed = true;
+      }
+    }
+    if (changed) s = { ...s, players };
+  }
 
   for (const pid of s.playerOrder) {
     const drawn = draw(s, reg, pid, 2);

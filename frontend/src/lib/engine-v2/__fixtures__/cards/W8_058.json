@@ -1,0 +1,24 @@
+{
+  "id": "W8_058",
+  "name": "The Darksaber (test)",
+  "type": "upgrade",
+  "cost": 2,
+  "aspects": ["villainy"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "constant",
+      "grant": { "target": { "attached_to_self": true }, "modifier": { "keyword": "sentinel" } }
+    },
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": {
+        "effect": "if",
+        "condition": { "controller_distinct_keywords": { "min": 4 } },
+        "then": { "effect": "ready", "target": { "attached_to_self": true } }
+      }
+    }
+  ]
+}

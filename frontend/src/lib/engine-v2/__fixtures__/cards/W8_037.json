@@ -1,0 +1,17 @@
+{
+  "id": "W8_037",
+  "name": "Darth Revan's Lightsabers (test)",
+  "type": "upgrade",
+  "cost": 1,
+  "aspects": ["villainy"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "constant",
+      "grant": {
+        "target": { "attached_to_self": true, "filter": { "card_trait": "sith" } },
+        "modifier": { "keyword": "grit" }
+      }
+    }
+  ]
+}

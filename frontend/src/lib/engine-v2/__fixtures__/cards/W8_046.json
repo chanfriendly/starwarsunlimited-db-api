@@ -1,0 +1,20 @@
+{
+  "id": "W8_046",
+  "name": "Vader's Search (test)",
+  "type": "event",
+  "cost": 2,
+  "aspects": ["villainy"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": {
+        "effect": "search_play",
+        "count": 10,
+        "filter": { "and": [{ "card_type": "unit" }, { "card_aspect": "villainy" }] },
+        "max_combined_cost": 3
+      }
+    }
+  ]
+}

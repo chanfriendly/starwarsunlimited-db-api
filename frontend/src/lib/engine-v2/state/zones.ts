@@ -53,6 +53,16 @@ export function findCard(state: GameState, iid: string): { inst: CardInstance; l
       const idx = arr.findIndex(c => c.iid === iid);
       if (idx >= 0) return { inst: arr[idx], loc: { controller: pid, zone: z, index: idx } };
     }
+    // Attached upgrades are in play too — an upgrade's OWN triggered/constant
+    // ability resolves with the upgrade as source (e.g. The Darksaber's
+    // When-Played), so it must be findable. Report it at its host's arena +
+    // controller (index −1 = "attached, not a top-level arena slot").
+    for (const z of ['ground_arena', 'space_arena'] as Zone[]) {
+      for (const host of getZoneArr(p, z)) {
+        const up = host.upgrades.find(u => u.iid === iid);
+        if (up) return { inst: up, loc: { controller: pid, zone: z, index: -1 } };
+      }
+    }
   }
   return undefined;
 }

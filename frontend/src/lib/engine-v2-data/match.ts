@@ -17,7 +17,7 @@
 // "choose two") is NOT matchable yet — it's reported as `none`/`partial` with
 // the residual clause, which is exactly the signal for what to build next.
 
-import type { Ability, Effect, Selector, Predicate } from '@/lib/engine-v2';
+import type { Ability, Effect, Selector, Predicate, Modifier, AspectIcon } from '@/lib/engine-v2';
 import { TOKEN_REGISTRY } from '@/lib/engine-v2';
 
 /** Map a token name as printed on cards ("Clone Trooper", "X-Wing") to its
@@ -137,6 +137,31 @@ export function parseEffectClause(raw: string): Effect | null {
     return { effect: 'ready', target: { self: true } };
   }
 
+  // Ready attached unit. (an upgrade readies its host — The Darksaber.)
+  if (/^Ready attached unit\.?$/i.test(t)) {
+    return { effect: 'ready', target: { attached_to_self: true } };
+  }
+
+  // The next unit you play this phase costs N resources less. (one-shot,
+  // phase-scoped play-cost discount — General's Blade's granted On-Attack.)
+  if ((m = t.match(/^The next unit you play this phase costs (\d+) resources? less\.?$/i))) {
+    return { effect: 'discount', amount: parseInt(m[1], 10), card_type: 'unit' };
+  }
+
+  // Search the top N cards of your deck for any number of [<Aspect/Trait>] units
+  // with combined cost M or less and play each of them for free. (Darth Vader —
+  // Commanding the First Legion.) The aspect/trait qualifier is optional.
+  if ((m = t.match(/^Search the top (\d+) cards of your deck for any number of (?:\[?([A-Za-z]+)\]? )?units with combined cost (\d+) or less and play each of them for free\.?$/i))) {
+    const parts: Predicate[] = [{ card_type: 'unit' }];
+    if (m[2] && !/^(?:friendly|enemy)$/i.test(m[2])) parts.push(aspectOrTrait(m[2]));
+    return {
+      effect: 'search_play',
+      count: parseInt(m[1], 10),
+      filter: parts.length === 1 ? parts[0] : { and: parts },
+      max_combined_cost: parseInt(m[3], 10),
+    };
+  }
+
   // Exhaust this unit/leader. (self — used as a self-cost in "You may exhaust
   // this leader. If you do, …"). Exhausting an already-exhausted source no-ops,
   // so the if_did "then" correctly won't fire when the cost can't be paid.
@@ -157,10 +182,102 @@ export function parseEffectClause(raw: string): Effect | null {
     return { effect: 'attack', attacker: { self: true }, count: parseInt(m[1], 10) };
   }
 
+  // "Attack with a unit [that costs N or less]. [It gets +A/+B [and gains K] for
+  // this attack.]" — the controller chooses a READY friendly unit to attack with
+  // (you can only attack with a ready unit), optionally buffed for that attack.
+  // (The biggest matcher overlap in the corpus — 37 cards. Variants with a
+  // conditional buff or a post-attack rider stay residual.)
+  {
+    const head = t.match(/^Attack with a unit(?: that costs (\d+) or less)?\.\s*(.*)$/i);
+    if (head) {
+      const filterParts: Predicate[] = [{ self_exhausted: false }];
+      if (head[1]) filterParts.push({ card_cost: { max: parseInt(head[1], 10) } });
+      const attacker: Selector = {
+        zone: 'any_arena', controller: 'self', selector: 'chosen', count: 1,
+        filter: filterParts.length === 1 ? filterParts[0] : { and: filterParts },
+      };
+      const eff: Extract<Effect, { effect: 'attack' }> = { effect: 'attack', attacker };
+      const rider = head[2].trim();
+      if (rider === '') return eff; // bare "Attack with a unit."
+
+      // Rider A — attacker buff, optionally gated on the attacker's identity
+      // ("If it's an Imperial unit, …"). The "If it's a/an" guard excludes the
+      // defender-condition form ("If it's attacking a unit").
+      let rm: RegExpMatchArray | null;
+      if ((rm = rider.match(/^(?:If it's an? (.+?), )?It gets \+(\d+)\/\+(\d+)(?: and gains ([A-Za-z]+)(?:\s+(\d+))?)? for this attack\.?$/i))) {
+        const buff: Modifier = { power: parseInt(rm[2], 10), health: parseInt(rm[3], 10) };
+        if (rm[4]) {
+          const kw = rm[4].toLowerCase();
+          if (!KEYWORD_WORDS.has(kw)) return null; // unknown granted keyword → residual
+          buff.keyword = kw;
+          if (rm[5]) buff.keyword_value = parseInt(rm[5], 10);
+        }
+        eff.attacker_buff = buff;
+        if (rm[1]) {
+          const cond = parseHostCondition(rm[1]);
+          if (!cond) return null;
+          eff.attacker_buff_if = cond;
+        }
+        return eff;
+      }
+      // Rider B — defender debuff ("The defender gets -N/-0 for this attack").
+      // Dash may be hyphen-minus, en-dash, or em-dash.
+      if ((rm = rider.match(/^The defender gets [-–—](\d+)\/[-–—](\d+) for this attack\.?$/i))) {
+        eff.defender_debuff = { power: -parseInt(rm[1], 10), health: -parseInt(rm[2], 10) };
+        return eff;
+      }
+      // Unrecognized rider → fall through (residual), don't fake coverage.
+    }
+  }
+
   // if_did conditional compounds (NOT the Force form, matched above). The `do`
   // half is often "You may …" → optional. ALL referenced halves must template,
   // else the clause falls through and stays residual (no half-match misfire).
   // "do not" contains "do", so the do-not forms are checked FIRST.
+  // "If there are N or more different keywords among friendly units, <effect>."
+  // → an `if` gated on the distinct-keyword count (The Darksaber).
+  if ((m = t.match(/^If there are (\d+) or more different keywords among friendly units, (.+)$/i))) {
+    const effText = m[2].trim();
+    const opt = /^You may /i.test(effText);
+    const inner = parseEffectClause(effText.replace(/^You may /i, ''));
+    if (!inner) return null;
+    return { effect: 'if', condition: { controller_distinct_keywords: { min: parseInt(m[1], 10) } }, then: opt ? { effect: 'optional', do: inner } : inner };
+  }
+
+  // "If a [friendly] unit left play this phase, <effect>." → an `if` gated on the
+  // leftPlayThisPhase tracker. (Check before the "If you control …" template.)
+  if ((m = t.match(/^If an? (friendly )?unit left play this phase, (.+)$/i))) {
+    const scope = m[1] ? 'friendly' : 'any';
+    const effText = m[2].trim();
+    const opt = /^You may /i.test(effText);
+    const inner = parseEffectClause(effText.replace(/^You may /i, ''));
+    if (!inner) return null;
+    return { effect: 'if', condition: { unit_left_play_this_phase: scope }, then: opt ? { effect: 'optional', do: inner } : inner };
+  }
+
+  // "If you control [another] [<Trait/Aspect/damaged/exhausted>] unit, <effect>."
+  // → an `if` gated on the new controller_controls predicate. The inner effect
+  // must itself parse (a leading "you may" wraps it as optional). (Distinct from
+  // the "<do>. If you do, …" if_did compounds below — this one STARTS the clause.)
+  if ((m = t.match(/^If you control (another |an? )(?:([A-Za-z]+) )?unit, (.+)$/i))) {
+    const another = /another/i.test(m[1]);
+    const word = m[2];
+    const cc: { filter?: Predicate; exclude_self?: boolean } = {};
+    if (word && !/^friendly$/i.test(word)) {
+      const w = word.toLowerCase();
+      if (w === 'ground' || w === 'space') return null;           // arena conditions not modeled
+      else if (w === 'damaged') cc.filter = { self_damage: { min: 1 } };
+      else if (w === 'exhausted') cc.filter = { self_exhausted: true };
+      else cc.filter = aspectOrTrait(word);
+    }
+    if (another) cc.exclude_self = true;
+    const effText = m[3].trim();
+    const opt = /^You may /i.test(effText);
+    const inner = parseEffectClause(effText.replace(/^You may /i, ''));
+    if (!inner) return null; // inner effect must parse or the whole clause is residual
+    return { effect: 'if', condition: { controller_controls: cc }, then: opt ? { effect: 'optional', do: inner } : inner };
+  }
+
   {
     const parseDo = (raw: string): { do: Effect } | null => {
       const s = raw.trim();
@@ -208,6 +325,11 @@ export function parseEffectClause(raw: string): Effect | null {
     return { effect: 'give_experience', target: experienceTargetSelector(m[2]), count };
   }
 
+  // Create a/N Credit token(s). (one-shot resource tokens, not unit tokens.)
+  if ((m = t.match(/^Create (an?|\d+) Credit tokens?\.?$/i))) {
+    return { effect: 'create_credit', player: 'self', count: /^\d+$/.test(m[1]) ? parseInt(m[1], 10) : 1 };
+  }
+
   // Create a/N <TokenName> token(s). (unit tokens only — Battle Droid, Clone
   // Trooper, TIE Fighter, X-Wing, Spy; the token's arena sets the zone.)
   if ((m = t.match(/^Create (an?|\d+) (.+?) tokens?\.?$/i))) {
@@ -231,9 +353,13 @@ export function parseEffectClause(raw: string): Effect | null {
     return { effect: 'damage', amount: parseInt(m[1], 10), target: { zone: 'any_arena', controller: 'any', selector: 'chosen', count: 1 } };
   }
 
-  // Deal N damage to an (enemy) unit.
-  if ((m = t.match(/^Deal (\d+) damage to an? (enemy )?unit\.?$/i))) {
-    return { effect: 'damage', amount: parseInt(m[1], 10), target: m[2] ? chosenEnemyUnit : chosenAnyUnit };
+  // Deal N damage to an [enemy] [ground|space] unit. (single chosen target,
+  // optional controller + arena scope.)
+  if ((m = t.match(/^Deal (\d+) damage to an? (enemy )?(ground |space )?unit\.?$/i))) {
+    if (!m[2] && !m[3]) return { effect: 'damage', amount: parseInt(m[1], 10), target: chosenAnyUnit };
+    const controller = m[2] ? 'opponent' : 'any';
+    const zone = m[3] ? (/ground/i.test(m[3]) ? 'ground_arena' : 'space_arena') : 'any_arena';
+    return { effect: 'damage', amount: parseInt(m[1], 10), target: { zone, controller, selector: 'chosen', count: 1 } };
   }
 
   // Deal N damage to (the opponent's / the enemy / your opponent's) base.
@@ -247,16 +373,41 @@ export function parseEffectClause(raw: string): Effect | null {
     return { effect: 'damage', amount: parseInt(m[1], 10), target: { trigger_controller_base: true } };
   }
 
+  // Deal N damage to a base. (the player chooses any base — default = opponent's.)
+  if ((m = t.match(/^Deal (\d+) damage to a base\.?$/i))) {
+    return { effect: 'damage', amount: parseInt(m[1], 10), target: { chosen_base: true } };
+  }
+
+  // Deal N damage to your base.
+  if ((m = t.match(/^Deal (\d+) damage to your base\.?$/i))) {
+    return { effect: 'damage', amount: parseInt(m[1], 10), target: selfBase };
+  }
+
+  // Deal N damage to each base. → both bases.
+  if ((m = t.match(/^Deal (\d+) damage to each base\.?$/i))) {
+    const n = parseInt(m[1], 10);
+    return { effect: 'sequence', steps: [
+      { effect: 'damage', amount: n, target: opponentBase },
+      { effect: 'damage', amount: n, target: selfBase },
+    ] };
+  }
+
+  // Deal N damage to this unit. (self damage)
+  if ((m = t.match(/^Deal (\d+) damage to this unit\.?$/i))) {
+    return { effect: 'damage', amount: parseInt(m[1], 10), target: { self: true } };
+  }
+
   // Deal N damage to each of up to M [enemy] units. (chosen up-to-M, each takes N)
   if ((m = t.match(/^Deal (\d+) damage to each of up to (\d+) (enemy )?units\.?$/i))) {
     const controller = m[3] ? 'opponent' : 'any';
     return { effect: 'damage', amount: parseInt(m[1], 10), target: { zone: 'any_arena', controller, selector: 'chosen', count: { min: 0, max: parseInt(m[2], 10) } } };
   }
 
-  // Deal N damage to each [enemy|friendly] [non-leader] unit. (AOE — all matching)
-  if ((m = t.match(/^Deal (\d+) damage to each (enemy |friendly )?(non-leader )?unit\.?$/i))) {
+  // Deal N damage to each [enemy|friendly] [non-leader] [ground|space] unit. (AOE)
+  if ((m = t.match(/^Deal (\d+) damage to each (enemy |friendly )?(non-leader )?(ground |space )?unit\.?$/i))) {
     const controller = m[2] ? (/enemy/i.test(m[2]) ? 'opponent' : 'self') : 'any';
-    const base: Selector = { zone: 'any_arena', controller };
+    const zone = m[4] ? (/ground/i.test(m[4]) ? 'ground_arena' : 'space_arena') : 'any_arena';
+    const base: Selector = { zone, controller };
     const target: Selector = m[3] ? { ...base, filter: { not: { card_type: 'leader' } } } : base;
     return { effect: 'damage', amount: parseInt(m[1], 10), target };
   }
@@ -321,6 +472,16 @@ export function parseEffectClause(raw: string): Effect | null {
     return { effect: 'indirect_damage', amount: parseInt(m[1], 10), player: 'opponent' };
   }
 
+  // Deal N damage to a friendly [ground|space] unit and M damage to an enemy
+  // [ground|space] unit. (Death Trooper) — a sequence of two chosen-target hits.
+  if ((m = t.match(/^Deal (\d+) damage to a friendly (ground |space )?unit and (\d+) damage to an enemy (ground |space )?unit\.?$/i))) {
+    const zoneOf = (g?: string) => !g ? ('any_arena' as const) : (/space/i.test(g) ? ('space_arena' as const) : ('ground_arena' as const));
+    return { effect: 'sequence', steps: [
+      { effect: 'damage', amount: parseInt(m[1], 10), target: { zone: zoneOf(m[2]), controller: 'self', selector: 'chosen', count: 1 } },
+      { effect: 'damage', amount: parseInt(m[3], 10), target: { zone: zoneOf(m[4]), controller: 'opponent', selector: 'chosen', count: 1 } },
+    ] };
+  }
+
   // Give an (enemy) unit -N/-N for this phase. (en-dash, em-dash, or hyphen)
   if ((m = t.match(/^Give an? (enemy )?unit [–—-](\d+)\/[–—-](\d+) for this phase\.?$/i))) {
     return { effect: 'give', target: m[1] ? chosenEnemyUnit : chosenFriendlyUnit, modifier: { power: -parseInt(m[2], 10), health: -parseInt(m[3], 10), duration: 'end_of_phase' } };
@@ -329,6 +490,18 @@ export function parseEffectClause(raw: string): Effect | null {
   // Exhaust an (enemy) (ground|space) unit.
   if ((m = t.match(/^Exhaust an? (?:enemy )?(?:ground |space )?unit\.?$/i))) {
     return { effect: 'exhaust', target: chosenEnemyUnit };
+  }
+
+  // Exhaust the defender. (On-Attack context — the unit being attacked. Vambrace
+  // Grappleshot, as an upgrade-granted ability.)
+  if (/^Exhaust the defender\.?$/i.test(t)) {
+    return { effect: 'exhaust', target: { trigger_defender: true } };
+  }
+
+  // Exhaust a unit in attached unit's arena. (an upgrade's When-Played — Nimble
+  // Prowess; any unit in the same arena as the host.)
+  if (/^Exhaust a unit in attached unit['’]s arena\.?$/i.test(t)) {
+    return { effect: 'exhaust', target: { zone: 'host_arena', controller: 'any', selector: 'chosen', count: 1 } };
   }
 
   // Give a Shield token to a friendly unit and to an enemy unit. (compound)
@@ -349,18 +522,27 @@ export function parseEffectClause(raw: string): Effect | null {
     return { effect: 'defeat', target: chosenEnemyNonLeader };
   }
 
+  // "An opponent chooses a unit they control. Defeat that unit." (Power of the
+  // Dark Side) — the OPPONENT picks which of their own units dies, via the
+  // existing opponent_choose selector. No filter (leaders are eligible; a leader
+  // unit flips back instead of dying, handled by the state-based loop).
+  if (/^An opponent chooses a unit they control\.?\s*Defeat that unit\.?$/i.test(t)) {
+    return { effect: 'defeat', target: { zone: 'any_arena', controller: 'opponent', selector: 'opponent_choose', count: 1 } };
+  }
+
   // Defeat an enemy unit with a Shield token on it.
   if ((m = t.match(/^Defeat an enemy unit with a Shield token on it\.?$/i))) {
     return { effect: 'defeat', target: { zone: 'any_arena', controller: 'opponent', selector: 'chosen', count: 1, filter: { has_shield_token: true } } };
   }
 
-  // Defeat a[n] [enemy] [non-leader] unit with N or less remaining HP.
-  if ((m = t.match(/^Defeat an? (enemy )?(non-leader )?unit with (\d+) or less remaining hp\.?$/i))) {
+  // Defeat a[n] [enemy] [non-leader] [ground|space] unit with N or less remaining HP.
+  if ((m = t.match(/^Defeat an? (enemy )?(non-leader )?(ground |space )?unit with (\d+) or less remaining hp\.?$/i))) {
     const controller = m[1] ? 'opponent' : 'any';
-    const parts: Predicate[] = [{ remaining_hp: { max: parseInt(m[3], 10) } }];
+    const zone = m[3] ? (/ground/i.test(m[3]) ? 'ground_arena' : 'space_arena') : 'any_arena';
+    const parts: Predicate[] = [{ remaining_hp: { max: parseInt(m[4], 10) } }];
     if (m[2]) parts.push({ not: { card_type: 'leader' } });
     const filter: Predicate = parts.length === 1 ? parts[0] : { and: parts };
-    return { effect: 'defeat', target: { zone: 'any_arena', controller, selector: 'chosen', count: 1, filter } };
+    return { effect: 'defeat', target: { zone, controller, selector: 'chosen', count: 1, filter } };
   }
 
   // Return a [enemy|friendly] [non-leader] unit [that costs N or less] to its owner's hand. (arena → hand bounce)
@@ -391,6 +573,16 @@ export function parseEffectClause(raw: string): Effect | null {
     const target: Selector = parts.length === 0 ? base
       : { ...base, filter: parts.length === 1 ? parts[0] : { and: parts } };
     return { effect: 'take_control', target };
+  }
+
+  // "Choose a friendly non-leader unit and an enemy non-leader unit. Exchange
+  // control of those units." (Choose Sides) — a two-way control swap. Both are
+  // mandatory single chosen targets; "non-leader" is enforced as a filter.
+  if (/^Choose a friendly (non-leader )?unit and an enemy (non-leader )?unit\.\s*Exchange control of those units\.?$/i.test(t)) {
+    const nonLeader: Predicate = { not: { card_type: 'leader' } };
+    const friendly: Selector = { zone: 'any_arena', controller: 'self', selector: 'chosen', count: 1, filter: nonLeader };
+    const enemy: Selector = { zone: 'any_arena', controller: 'opponent', selector: 'chosen', count: 1, filter: nonLeader };
+    return { effect: 'exchange_control', friendly, enemy };
   }
 
   // Return a [Trait] unit [that costs N or less] from your discard pile to your
@@ -494,12 +686,42 @@ function parseBountyClause(clause: string): Ability | null {
   };
 }
 
+/** A trailing "Use this ability only once each round/phase/game." → a `limit`.
+ *  Returns the stripped clause + the limit (undefined if no suffix). */
+function extractLimit(clause: string): { clause: string; limit?: 'once_per_round' | 'once_per_phase' | 'once_per_game' } {
+  const m = clause.match(/\s*Use this ability only once each (round|phase|game)\.?$/i);
+  if (!m) return { clause };
+  const word = m[1].toLowerCase();
+  const limit = word === 'round' ? 'once_per_round' : word === 'phase' ? 'once_per_phase' : 'once_per_game';
+  return { clause: clause.slice(0, m.index).trim(), limit };
+}
+
 /** Try to parse a unit clause that begins with a triggered prefix into a
  *  TriggeredAbility. Returns null if no prefix or the body doesn't parse. */
 function parseTriggeredClause(clause: string): Ability | null {
+  // A trailing once-per-X limit applies to the whole ability; strip it first.
+  const { clause: limited, limit } = extractLimit(clause);
+  const withLimit = (a: Ability): Ability => (limit ? { ...a, limit } as Ability : a);
+
+  // "When another unique unit is defeated:" — fires on ANY unique unit's defeat
+  // except this one (Agent Kallus). Compound `where`, so handle it before the
+  // table-driven prefixes.
+  let mk: RegExpMatchArray | null;
+  if ((mk = limited.match(/^When another unique unit is defeated:\s*(.+)$/i))) {
+    const body = mk[1].trim();
+    const optional = /^You may /i.test(body);
+    const eff = parseEffectClause(body.replace(/^You may /i, ''));
+    if (!eff) return null;
+    return withLimit({
+      type: 'triggered', on: 'event.defeated',
+      where: { and: [{ card_is_unique: true }, { not: { card: 'self' } }] },
+      do: optional ? { effect: 'optional', do: eff } : eff,
+    });
+  }
+
   for (const p of TRIGGER_PREFIXES) {
-    if (!p.re.test(clause)) continue;
-    const body = clause.replace(p.re, '').trim();
+    if (!p.re.test(limited)) continue;
+    const body = limited.replace(p.re, '').trim();
     // Drop a leading "You may " — optional effects map to `optional`, but the
     // inner effect must still parse.
     const optional = /^You may /i.test(body);
@@ -509,20 +731,115 @@ function parseTriggeredClause(clause: string): Ability | null {
     const doEff: Effect = optional ? { effect: 'optional', do: eff } : eff;
     const where = p.where
       ?? (p.on === 'event.attack_declared' ? { attacker: 'self' as const } : { card: 'self' as const });
-    return { type: 'triggered', on: p.on, where, do: doEff };
+    return withLimit({ type: 'triggered', on: p.on, where, do: doEff });
   }
   return null;
+}
+
+/** "Attached unit gains: '<ability>' [and '<ability>']" (upgrades). The host
+ *  GAINS the quoted abilities — modeled as a constant `grant` whose target is
+ *  the host (attached_to_self) carrying the parsed abilities, which the trigger
+ *  system attributes to the host. Each quoted ability must parse as a TRIGGERED
+ *  ability (On Attack / When Defeated / …); if any doesn't, the whole clause
+ *  stays residual (so we never silently grant a subset). Covers Sith Traditions,
+ *  Vambrace Grappleshot. Constant/cost granted abilities (cost reductions) are
+ *  not yet modeled and correctly fall through to residual. */
+function parseGrantAbilityClause(clause: string): Ability | null {
+  // Two forms:
+  //   "Attached unit gains: '<ability>' [and '<ability>']"            (always)
+  //   "If attached unit is a <X>, it gains: '<ability>' [and …]"      (host-gated)
+  let body: string | undefined;
+  let filter: Predicate | undefined;
+  let m = clause.match(/^Attached unit gains:\s*(.+)$/i);
+  if (m) { body = m[1]; }
+  else if ((m = clause.match(/^If attached unit is an? (.+?), it gains:\s*(.+)$/i))) {
+    const f = parseHostCondition(m[1]);
+    if (!f) return null;
+    filter = f; body = m[2];
+  } else {
+    return null;
+  }
+  // Quoted segments — curly “…” or straight "…", joined by "and".
+  const quoted = [...body.matchAll(/[“"]([^”"]+)[”"]/g)].map(x => x[1].trim());
+  if (quoted.length === 0) return null;
+  const granted: Ability[] = [];
+  for (const q of quoted) {
+    // A granted ability is either a triggered-prefix ability ("On Attack: …",
+    // "When Defeated: …") or a "Bounty — <effect>" clause (an opponent-resolved
+    // When-Defeated). Either must produce a triggered ability or the whole grant
+    // stays residual (no silent partial grant).
+    const trig = parseTriggeredClause(q) ?? parseBountyClause(q);
+    if (!trig || trig.type !== 'triggered') return null;
+    granted.push(trig);
+  }
+  const target: Selector = filter ? { attached_to_self: true, filter } : { attached_to_self: true };
+  return { type: 'constant', grant: { target, abilities: granted } };
+}
+
+const ASPECT_ICONS = new Set<string>(['villainy', 'heroism', 'command', 'aggression', 'vigilance', 'cunning']);
+
+/** "<X>" in "If attached unit is a <X>, …" → a host predicate. <X> is a trait
+ *  (e.g. "Sith"), an aspect ("Heroism unit" / "Villainy unit"), or a negated
+ *  aspect list ("non-Heroism, non-Villainy unit"). Aspect names are matched
+ *  against the closed icon set; everything else is treated as a trait. */
+function aspectOrTrait(word: string): Predicate {
+  const w = word.trim().toLowerCase();
+  return ASPECT_ICONS.has(w) ? { card_aspect: w as AspectIcon } : { card_trait: w };
+}
+function parseHostCondition(phrase: string): Predicate | null {
+  const p = phrase.trim().replace(/\s+unit$/i, '').trim();
+  if (!p) return null;
+  if (/\bnon-/i.test(p)) {
+    const preds: Predicate[] = [];
+    for (const part of p.split(/,\s*/)) {
+      const mm = part.trim().match(/^non-(.+)$/i);
+      if (!mm) return null;
+      preds.push({ not: aspectOrTrait(mm[1]) });
+    }
+    return preds.length === 1 ? preds[0] : { and: preds };
+  }
+  return aspectOrTrait(p);
+}
+
+/** Upgrade keyword grants — two forms, both → a constant grant to the host:
+ *   • "Attached unit gains <Keyword> [N]."                  (unconditional —
+ *      The Darksaber/Sentinel, Devotion/Restore 2, Grievous's Wheel Bike/Overwhelm)
+ *   • "If attached unit is a <X>, it gains <Keyword> [N]."  (host-gated —
+ *      Darth Revan's Lightsabers, Constructed Lightsaber)
+ *  Restore/Raid N carry a `keyword_value`. The keyword is gated against the
+ *  known-keyword set so an unrecognized word stays residual (and trait grants
+ *  like "gains the Rebel trait" never match — they aren't a single keyword word). */
+function parseAttachedKeywordGrant(clause: string): Ability | null {
+  let m: RegExpMatchArray | null;
+  let filter: Predicate | undefined;
+  let keywordWord: string, valueStr: string | undefined;
+  if ((m = clause.match(/^If attached unit is an? (.+?), it gains ([A-Za-z]+)(?:\s+(\d+))?\.?$/i))) {
+    const f = parseHostCondition(m[1]);
+    if (!f) return null;
+    filter = f; keywordWord = m[2]; valueStr = m[3];
+  } else if ((m = clause.match(/^Attached unit gains ([A-Za-z]+)(?:\s+(\d+))?\.?$/i))) {
+    keywordWord = m[1]; valueStr = m[2];
+  } else {
+    return null;
+  }
+  const keyword = keywordWord.toLowerCase();
+  if (!KEYWORD_WORDS.has(keyword)) return null; // unknown keyword / trait grant → residual
+  const modifier: Modifier = { keyword };
+  if (valueStr) modifier.keyword_value = parseInt(valueStr, 10);
+  const target: Selector = filter ? { attached_to_self: true, filter } : { attached_to_self: true };
+  return { type: 'constant', grant: { target, modifier } };
 }
 
 // ---------------------------------------------------------------------------
 // Action abilities: "Action [<cost>]: <effect>" (leaders + some units)
 // ---------------------------------------------------------------------------
 
-interface ParsedCost { exhaust?: boolean; resources?: number }
+interface ParsedCost { exhaust?: boolean; resources?: number; damage?: { amount: number; target: Selector } }
 
 /** Parse the bracketed cost of an Action ability. Returns null if any cost
- *  component can't be expressed as an exhaust/resource cost (e.g. "deal 1
- *  damage to a friendly unit" as a cost) — the caller then leaves it residual. */
+ *  component can't be expressed (the caller then leaves it residual). Handles
+ *  exhaust, "N resources", and "deal N damage to a friendly unit" (Doctor
+ *  Pershing). */
 function parseActionCost(s: string): ParsedCost | null {
   const cost: ParsedCost = {};
   for (const part of s.split(',').map(p => p.trim().toLowerCase())) {
@@ -530,6 +847,8 @@ function parseActionCost(s: string): ParsedCost | null {
     if (part === 'exhaust') { cost.exhaust = true; continue; }
     const rm = part.match(/^(\d+) resources?$/);
     if (rm) { cost.resources = parseInt(rm[1], 10); continue; }
+    const dm = part.match(/^deal (\d+) damage to a friendly unit$/);
+    if (dm) { cost.damage = { amount: parseInt(dm[1], 10), target: { zone: 'any_arena', controller: 'self', selector: 'chosen', count: 1 } }; continue; }
     return null;   // uninterpretable cost component
   }
   return cost;
@@ -591,13 +910,21 @@ function parseConstantClause(clause: string): Ability | null {
       grant: { target: { self: true }, modifier: { power: +m[2], health: +m[3] } },
     };
   }
-  // While you control a <Trait> unit, this unit gains KEYWORD.
-  if ((m = clause.match(/^While you control an? ([A-Za-z]+) unit, this unit gains ([A-Za-z]+)\.?$/i))) {
-    return {
-      type: 'constant',
-      while: { controller_controls_trait: m[1].toLowerCase() },
-      grant: { target: { self: true }, modifier: { keyword: m[2].toLowerCase() } },
-    };
+  // While you control [another] [<Trait/Aspect>] unit, this unit gets +N/+N
+  // OR gains <Keyword> [N]. (self-buff/grant gated on controlling a matching
+  // unit; "another" excludes this unit.)
+  if ((m = clause.match(/^While you control (another |an? )(?:([A-Za-z]+) )?unit, this unit (?:gets \+(\d+)\/\+(\d+)|gains ([A-Za-z]+)(?:\s+(\d+))?)\.?$/i))) {
+    const another = /another/i.test(m[1]);
+    const word = m[2];
+    const filter: Predicate | undefined = word && !/^(?:friendly)$/i.test(word) ? aspectOrTrait(word) : undefined;
+    const cc: { filter?: Predicate; exclude_self?: boolean } = {};
+    if (filter) cc.filter = filter;
+    if (another) cc.exclude_self = true;
+    const modifier: Modifier = m[3]
+      ? { power: parseInt(m[3], 10), health: parseInt(m[4], 10) }
+      : (() => { const mod: Modifier = { keyword: m[5].toLowerCase() }; if (m[6]) mod.keyword_value = parseInt(m[6], 10); return mod; })();
+    if (m[5] && !KEYWORD_WORDS.has(m[5].toLowerCase())) return null; // unknown keyword → residual
+    return { type: 'constant', while: { controller_controls: cc }, grant: { target: { self: true }, modifier } };
   }
   // Coordinate — This unit gets +N/+N.  (Coordinate self-buff; the keyword's
   // reminder — "While you control 3 or more units, …" — is stripped before this,
@@ -634,6 +961,13 @@ function parseConstantClause(clause: string): Ability | null {
   // This unit gets +N/+N for each upgrade on (him|this unit|it).
   if ((m = clause.match(/^This unit gets \+(\d+)\/\+(\d+) for each upgrade on (?:him|this unit|it)\.?$/i))) {
     return { type: 'constant', grant: { target: { self: true }, modifier: { per: { count: 'self_upgrades', power: +m[1], health: +m[2] } } } };
+  }
+  // This unit gets +N/+N for each [Trait] unit in your discard pile. (Captain Enoch)
+  if ((m = clause.match(/^This unit gets \+(\d+)\/\+(\d+) for each (?:([A-Za-z]+) )?unit in your discard pile\.?$/i))) {
+    const trait = m[3] && m[3].toLowerCase() !== 'friendly' ? m[3].toLowerCase() : undefined;
+    const per: NonNullable<import('@/lib/engine-v2').Modifier['per']> = { count: 'controller_discard_units', power: +m[1], health: +m[2] };
+    if (trait) per.filter = { card_trait: trait };
+    return { type: 'constant', grant: { target: { self: true }, modifier: { per } } };
   }
   return null;
 }
@@ -750,6 +1084,26 @@ export function matchCard(card: MatchableCard): MatchResult {
     }
   }
 
+  // Palpatine's Return: "Play a unit from your discard pile. It costs N less. If
+  // it's a Force unit, it costs M less instead." Multi-line in the DB, so match
+  // the whitespace-flattened whole text → one play_from_discard effect.
+  if (type === 'event') {
+    const flat = rawText.replace(/\s+/g, ' ').trim();
+    const pr = flat.match(/^Play a unit from your discard pile\. It costs (\d+) resources? less\.(?: If it['’]s a Force unit, it costs (\d+) resources? less instead\.?)?$/i);
+    if (pr) {
+      const effect: Effect = {
+        effect: 'play_from_discard',
+        filter: { card_type: 'unit' },
+        cost_reduction: parseInt(pr[1], 10),
+        ...(pr[2] ? { cost_reduction_if: { filter: { card_trait: 'force' }, amount: parseInt(pr[2], 10) } } : {}),
+      };
+      return {
+        abilities: [{ type: 'triggered', on: 'event.card_played', where: { card: 'self' }, do: effect }],
+        coverage: 'full', matchedClauses: 1, totalClauses: 1, residual: [],
+      };
+    }
+  }
+
   const clauses = clausesOf(rawText);
   if (clauses.length === 0) {
     // Text was entirely keyword reminders → vanilla+keyword, already handled.
@@ -796,6 +1150,12 @@ export function matchCard(card: MatchableCard): MatchResult {
 
     const trig = parseTriggeredClause(clause);
     if (trig) { abilities.push(trig); continue; }
+
+    const grantAb = parseGrantAbilityClause(clause);
+    if (grantAb) { abilities.push(grantAb); continue; }
+
+    const condKw = parseAttachedKeywordGrant(clause);
+    if (condKw) { abilities.push(condKw); continue; }
 
     const constant = parseConstantClause(clause);
     if (constant) { abilities.push(constant); continue; }

@@ -1,0 +1,22 @@
+{
+  "id": "W8_045",
+  "name": "Agent Kallus (test)",
+  "type": "unit",
+  "cost": 4,
+  "aspects": ["villainy"],
+  "arena": "ground",
+  "power": 3,
+  "hp": 6,
+  "traits": ["imperial"],
+  "unique": true,
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.defeated",
+      "where": { "and": [{ "card_is_unique": true }, { "not": { "card": "self" } }] },
+      "limit": "once_per_round",
+      "do": { "effect": "optional", "do": { "effect": "draw", "player": "self", "count": 1 } }
+    }
+  ]
+}

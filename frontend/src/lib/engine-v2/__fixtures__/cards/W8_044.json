@@ -1,0 +1,21 @@
+{
+  "id": "W8_044",
+  "name": "Captain Enoch (test)",
+  "type": "unit",
+  "cost": 5,
+  "aspects": ["villainy"],
+  "arena": "ground",
+  "power": 3,
+  "hp": 6,
+  "traits": ["imperial"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "constant",
+      "grant": {
+        "target": { "self": true },
+        "modifier": { "per": { "count": "controller_discard_units", "power": 1, "health": 0, "filter": { "card_trait": "trooper" } } }
+      }
+    }
+  ]
+}

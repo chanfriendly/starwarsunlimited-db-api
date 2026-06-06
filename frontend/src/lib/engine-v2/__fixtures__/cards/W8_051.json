@@ -1,0 +1,19 @@
+{
+  "id": "W8_051",
+  "name": "Catch Unawares (test)",
+  "type": "event",
+  "cost": 1,
+  "aspects": ["cunning"],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": {
+        "effect": "attack",
+        "attacker": { "zone": "any_arena", "controller": "self", "selector": "chosen", "count": 1, "filter": { "self_exhausted": false } },
+        "defender_debuff": { "power": -2, "health": 0 }
+      }
+    }
+  ]
+}

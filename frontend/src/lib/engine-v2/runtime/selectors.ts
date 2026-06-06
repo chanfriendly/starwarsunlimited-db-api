@@ -19,6 +19,9 @@ function expandZones(zf: ZoneFilter | undefined): Zone[] {
   if (zf === undefined) return ARENA_ZONES; // sensible default for unit-targeted effects
   if (zf === 'any_arena') return ARENA_ZONES;
   if (zf === 'any_zone') return ['hand', 'deck', 'discard', 'resource_zone', ...ARENA_ZONES];
+  // 'host_arena' is resolved dynamically by the caller (resolveSelector) before
+  // expandZones runs; never reaches here. Fall back to arenas defensively.
+  if (zf === 'host_arena') return ARENA_ZONES;
   if (Array.isArray(zf)) return zf;
   return [zf];
 }
@@ -39,6 +42,23 @@ export function resolveSelector(ctx: EvalCtx, sel: Selector): ResolvedTarget[] {
     if (!iid) return [];
     return [{ kind: 'unit', iid, controller: ctx.sourcePlayer /* approximated; refined when event payload carries controller */ }];
   }
+  if ('trigger_defender' in sel && sel.trigger_defender) {
+    const e = ctx.triggerEvent;
+    const iid = (e && (e.kind === 'ATTACK_DECLARED' || e.kind === 'ATTACK_ENDED')) ? e.defenderIid : undefined;
+    if (!iid) return [];
+    // The defender may be a base ("attack the base") — only units are returnable
+    // targets here; resolve the controller by locating the unit in the arenas.
+    for (const pid of ctx.state.playerOrder) {
+      const ps = ctx.state.players[pid];
+      if (!ps) continue;
+      for (const z of ARENA_ZONES) {
+        if (ps[z === 'ground_arena' ? 'groundArena' : 'spaceArena'].some(c => c.iid === iid)) {
+          return [{ kind: 'unit', iid, controller: pid }];
+        }
+      }
+    }
+    return [];
+  }
   if ('self_base' in sel && sel.self_base) {
     return [{ kind: 'base', controller: ctx.sourcePlayer }];
   }
@@ -46,6 +66,20 @@ export function resolveSelector(ctx: EvalCtx, sel: Selector): ResolvedTarget[] {
     const opp = ctx.state.playerOrder.find(p => p !== ctx.sourcePlayer);
     if (!opp) return [];
     return [{ kind: 'base', controller: opp }];
+  }
+  if ('chosen_base' in sel && sel.chosen_base) {
+    // "a base" — choose any base; offer the opponent's first so the default/AI
+    // chooser (leftmost) picks it (the sane aggressive default).
+    const opp = ctx.state.playerOrder.find(p => p !== ctx.sourcePlayer);
+    const order = opp ? [opp, ctx.sourcePlayer] : [ctx.sourcePlayer];
+    const chooser = ctx.chooser ?? defaultChooser;
+    const result = chooser({
+      kind: 'choose_one', prompt: 'Choose a base',
+      options: order.map(p => ({ label: `${p}'s base`, value: p })),
+      player: ctx.sourcePlayer, canPass: false,
+    });
+    const pick = result.kind === 'option' ? (result.value as PlayerId) : order[0];
+    return [{ kind: 'base', controller: pick }];
   }
   if ('trigger_controller_base' in sel && sel.trigger_controller_base) {
     // "its controller's base" — the base of the controller of the unit named by
@@ -70,6 +104,8 @@ export function resolveSelector(ctx: EvalCtx, sel: Selector): ResolvedTarget[] {
         const arr = ps[z === 'ground_arena' ? 'groundArena' : 'spaceArena'];
         for (const host of arr) {
           if (host.upgrades.some(u => u.iid === ctx.sourceIid)) {
+            // Optional host gate ("If attached unit is a Sith, …").
+            if (sel.filter && !evalCardPredicate(sel.filter, ctx, host, pid, z)) return [];
             return [{ kind: 'unit', iid: host.iid, controller: pid }];
           }
         }
@@ -86,7 +122,15 @@ export function resolveSelector(ctx: EvalCtx, sel: Selector): ResolvedTarget[] {
   // Scoped form
   const scoped = sel as ScopedSelector;
   const players = resolveScopedPlayers(ctx, scoped.controller);
-  const zones = expandZones(scoped.zone);
+  // `host_arena` (upgrade abilities: "a unit in attached unit's arena") resolves
+  // to whichever arena the upgrade's host sits in. Empty if no host found.
+  let zones: Zone[];
+  if (scoped.zone === 'host_arena') {
+    const hostZone = upgradeHostArena(ctx);
+    zones = hostZone ? [hostZone] : [];
+  } else {
+    zones = expandZones(scoped.zone);
+  }
   const candidates = collectArena(ctx, players, zones, scoped.filter);
 
   if (scoped.selector === 'all' || scoped.count === 'all') return candidates;
@@ -135,6 +179,21 @@ export function resolveSelector(ctx: EvalCtx, sel: Selector): ResolvedTarget[] {
   // random ships when we add an RNG-aware chooser.
   const count = countOf(scoped.count) ?? 1;
   return candidates.slice(0, count);
+}
+
+/** The arena (ground/space) the upgrade source's host unit sits in, or undefined
+ *  if the source isn't an attached upgrade. */
+function upgradeHostArena(ctx: EvalCtx): Zone | undefined {
+  if (!ctx.sourceIid) return undefined;
+  for (const pid of ctx.state.playerOrder) {
+    const ps = ctx.state.players[pid];
+    if (!ps) continue;
+    for (const z of ARENA_ZONES) {
+      const arr = ps[z === 'ground_arena' ? 'groundArena' : 'spaceArena'];
+      if (arr.some(host => host.upgrades.some(u => u.iid === ctx.sourceIid))) return z;
+    }
+  }
+  return undefined;
 }
 
 function keyOf(t: ResolvedTarget): string {
