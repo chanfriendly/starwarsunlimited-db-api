@@ -7,7 +7,7 @@
 // will route through here too.
 
 import type { GameEvent } from '../state/bus';
-import type { CardRegistry, GameState, PlayerId } from '../state/types';
+import type { CardInstance, CardRegistry, GameState, PlayerId } from '../state/types';
 import type { LastingEffectRec } from '../state/effects';
 import type { Effect, Modifier, PlayerRef, ResolvedTarget } from '../spec/ast';
 import { healBase, healUnit } from '../primitives/combat';
@@ -17,7 +17,7 @@ import { createToken } from '../primitives/tokens';
 import { capture, rescue } from '../primitives/capture';
 import { resolveSelector } from './selectors';
 import { evalCardPredicate, resolvePlayer, type EvalCtx } from './predicates';
-import { findCard, withPlayer, mapInstance, getZoneArr, withZoneArr } from '../state/zones';
+import { findCard, findUpgrade, withPlayer, mapInstance, getZoneArr, withZoneArr } from '../state/zones';
 import { moveToZone } from '../primitives/move';
 import { defaultChooser } from './chooser';
 import { dealDamageToBase, dealDamageToUnit } from './damage';
@@ -107,6 +107,8 @@ export function applyEffect(ctx: InterpCtx, effect: Effect): InterpResult {
     case 'return_from_discard': return applyReturnFromDiscard(ctx, effect);
     case 'take_control':     return applyTakeControl(ctx, effect);
     case 'exchange_control': return applyExchangeControl(ctx, effect);
+    case 'transfer_upgrade': return applyTransferUpgrade(ctx, effect);
+    case 'name_card':        return applyNameCard(ctx, effect);
     case 'use_force':        return applyUseForce(ctx, effect);
     case 'gain_force':       return applyGainForce(ctx, effect);
     case 'attack':           return applyAttackEffect(ctx, effect);
@@ -479,7 +481,21 @@ function applyOptional(ctx: InterpCtx, e: Extract<Effect, { effect: 'optional' }
 
 function applyCreateToken(ctx: InterpCtx, e: Extract<Effect, { effect: 'create_token' }>): InterpResult {
   const controller = resolvePlayerStrict(e.controller, ctx);
-  return createToken(ctx.state, ctx.reg, e.token_id, controller, e.zone, e.count ?? 1);
+  const r = createToken(ctx.state, ctx.reg, e.token_id, controller, e.zone, e.count ?? 1);
+  if (!e.grant) return r;
+  // "…and give those tokens <modifier> for this phase." Grant the modifier to the
+  // just-created tokens (by iid from the TOKEN_CREATED events) as one lasting
+  // effect with the modifier's duration.
+  const iids = r.events.filter(ev => ev.kind === 'TOKEN_CREATED').map(ev => (ev as { iid: string }).iid);
+  if (iids.length === 0) return r;
+  const rec: LastingEffectRec = {
+    id: `le_${r.state.step}_${r.state.lastingEffects.length}`,
+    modifier: e.grant,
+    targets: { kind: 'units', iids },
+    expiry: e.grant.duration ?? 'permanent',
+    sourceIid: ctx.sourceIid,
+  };
+  return { state: { ...r.state, lastingEffects: [...r.state.lastingEffects, rec] }, events: r.events };
 }
 
 function applyCapture(ctx: InterpCtx, e: Extract<Effect, { effect: 'capture' }>): InterpResult {
@@ -617,6 +633,83 @@ function applyExchangeControl(ctx: InterpCtx, e: Extract<Effect, { effect: 'exch
     s = r.state; if (r.event) events.push(r.event);
   }
   return { state: s, events };
+}
+
+function applyTransferUpgrade(ctx: InterpCtx, e: Extract<Effect, { effect: 'transfer_upgrade' }>): InterpResult {
+  // "The attacking player takes control of this upgrade and attaches it to a unit
+  // they control." (Death Star Plans.) The source is the upgrade; move it off its
+  // current host onto a unit chosen by the attacking player of the triggering
+  // attack. Control follows the host, so this transfers control.
+  const upgradeIid = ctx.sourceIid;
+  if (!upgradeIid) return { state: ctx.state, events: [] };
+  const up = findUpgrade(ctx.state, upgradeIid);
+  if (!up) return { state: ctx.state, events: [] };
+
+  // New controller = the attacker of the triggering attack event.
+  const ev = ctx.triggerEvent;
+  if (!ev || (ev.kind !== 'ATTACK_DECLARED' && ev.kind !== 'ATTACK_ENDED')) {
+    return { state: ctx.state, events: [] };
+  }
+  const attacker = findCard(ctx.state, ev.attackerIid);
+  if (!attacker) return { state: ctx.state, events: [] };
+  const newController = attacker.loc.controller;
+
+  // Candidate hosts: any unit the new controller controls (either arena).
+  const np = ctx.state.players[newController];
+  const candidates = [...np.groundArena, ...np.spaceArena];
+  if (candidates.length === 0) return { state: ctx.state, events: [] }; // nothing to attach to
+
+  const chooser = ctx.chooser ?? defaultChooser;
+  let newHostIid = candidates[0].iid;
+  if (candidates.length > 1) {
+    const options = candidates.map(c => ({ label: ctx.reg.cards[c.cardId]?.name ?? c.cardId, value: c.iid }));
+    const pick = chooser({ kind: 'choose_one', prompt: 'Attach the upgrade to which unit?', options, player: newController, canPass: false });
+    if (pick.kind === 'option') newHostIid = pick.value;
+  }
+
+  // Detach from the old host, recording the original controller as owner so the
+  // upgrade returns to its owner's discard on defeat.
+  const oldHostIid = up.loc.hostIid;
+  const oldController = up.loc.controller;
+  const movedUpgrade: CardInstance = {
+    ...up.inst,
+    owner: up.inst.owner ?? oldController,
+    enteredZoneAt: ctx.state.step,
+  };
+  let s = mapInstance(ctx.state, oldHostIid, h => ({ ...h, upgrades: h.upgrades.filter(u => u.iid !== upgradeIid) }));
+  // Attach to the new host.
+  s = mapInstance(s, newHostIid, h => ({ ...h, upgrades: [...h.upgrades, movedUpgrade] }));
+
+  return {
+    state: s,
+    events: [
+      { kind: 'UPGRADE_DETACHED', upgradeIid, hostIid: oldHostIid },
+      { kind: 'UPGRADE_ATTACHED', upgradeIid, hostIid: newHostIid },
+    ],
+  };
+}
+
+function applyNameCard(ctx: InterpCtx, _e: Extract<Effect, { effect: 'name_card' }>): InterpResult {
+  // "Name a card." The source unit's controller names one of the cards an
+  // opponent could play (distinct names across the opponent's hand/deck/discard).
+  // The chosen NAME is recorded on the source unit; the play-restriction is
+  // enforced elsewhere (legal.ts / reducer) while the unit is in play.
+  if (!ctx.sourceIid) return { state: ctx.state, events: [] };
+  const opp = ctx.state.playerOrder.find(p => p !== ctx.sourcePlayer);
+  if (!opp) return { state: ctx.state, events: [] };
+  const op = ctx.state.players[opp];
+  const names = new Set<string>();
+  for (const c of [...op.hand, ...op.deck, ...op.discard]) {
+    const nm = ctx.reg.cards[c.cardId]?.name;
+    if (nm) names.add(nm);
+  }
+  if (names.size === 0) return { state: ctx.state, events: [] }; // nothing to name
+  const options = [...names].sort().map(n => ({ label: n, value: n }));
+  const chooser = ctx.chooser ?? defaultChooser;
+  const pick = chooser({ kind: 'choose_one', prompt: 'Name a card', options, player: ctx.sourcePlayer, canPass: false });
+  const named = pick.kind === 'option' ? pick.value : options[0].value;
+  const s = mapInstance(ctx.state, ctx.sourceIid, c => ({ ...c, namedCard: named }));
+  return { state: s, events: [] };
 }
 
 function applyReturnToHand(ctx: InterpCtx, e: Extract<Effect, { effect: 'return_to_hand' }>): InterpResult {

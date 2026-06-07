@@ -87,14 +87,15 @@ export function attackIllegalReason(
   return null;
 }
 
-/** Resolve one attack (combat core). Assumes the caller has validated turn /
- *  phase. Exhausts the attacker (no-op if already exhausted — the nested case).
- *  Does NOT advance the turn or run state-based / triggers. */
-export function resolveAttack(
+/** Declare phase of an attack (§7.x steps 1–3, BEFORE combat damage): exhaust the
+ *  attacker, emit ATTACK_DECLARED, and run the attacker's keyword onAttack hooks +
+ *  Saboteur shield removal. Does NOT deal combat damage. Split out so the caller
+ *  can resolve On-Attack TRIGGERED abilities (which §7.x sequences before combat)
+ *  between this and `resolveCombat`. */
+export function declareAttack(
   state: GameState, pid: PlayerId,
   attackerIid: string, defenderIid: string | 'base',
   reg: CardRegistry,
-  chooser?: Chooser,
 ): { state: GameState; events: GameEvent[] } {
   const attackerFound = findCard(state, attackerIid);
   if (!attackerFound) throw new Error(`Attacker ${attackerIid} not found`);
@@ -108,12 +109,6 @@ export function resolveAttack(
   const events: GameEvent[] = [];
 
   s = exhaust(s, attackerIid).state;
-
-  // Raid: extra power while attacking.
-  const raidVal = effectiveKeywordValue(s, reg, attackerFound.inst, pid, 'raid') ?? 0;
-  const basePower = effectivePower(s, reg, attackerFound.inst, pid);
-  const attackerPower = basePower + raidVal;
-
   events.push({ kind: 'ATTACK_DECLARED', attackerIid, defenderIid, defendingPlayer: oppId });
 
   // Keyword onAttack hooks fire BEFORE combat damage per §v7 7.6.15.A.
@@ -134,6 +129,34 @@ export function resolveAttack(
     events.push(...r.events);
   }
 
+  return { state: s, events };
+}
+
+/** Combat phase of an attack (§7.x step 4, deal combat damage). Recomputes the
+ *  attacker's power from CURRENT state — so any On-Attack ability that ran since
+ *  `declareAttack` (a buff/debuff like Condemn's −6/−0, or board changes) is
+ *  reflected. Gracefully fizzles (no combat damage) if the attacker or a unit
+ *  defender has left play during the On-Attack window. */
+export function resolveCombat(
+  state: GameState, pid: PlayerId,
+  attackerIid: string, defenderIid: string | 'base',
+  reg: CardRegistry,
+  chooser?: Chooser,
+): { state: GameState; events: GameEvent[] } {
+  let s = state;
+  const events: GameEvent[] = [];
+
+  const attackerNow = findCard(s, attackerIid);
+  if (!attackerNow || (attackerNow.loc.zone !== 'ground_arena' && attackerNow.loc.zone !== 'space_arena')) {
+    // Attacker left play during the On-Attack window — the attack fizzles.
+    return { state: s, events };
+  }
+  const oppId = s.playerOrder.find(p => p !== pid)!;
+
+  // Raid: extra power while attacking. Recomputed post-On-Attack.
+  const raidVal = effectiveKeywordValue(s, reg, attackerNow.inst, pid, 'raid') ?? 0;
+  const attackerPower = effectivePower(s, reg, attackerNow.inst, pid) + raidVal;
+
   if (defenderIid === 'base') {
     const dmg = dealDamageToBase(s, reg, oppId, attackerPower, { combat: true }, attackerIid, chooser);
     s = dmg.state;
@@ -142,7 +165,13 @@ export function resolveAttack(
     s = log(s, `${pid} attacks base for ${attackerPower}${raidVal ? ` (Raid ${raidVal})` : ''}.`, pid, attackerPower >= 5 ? 'critical' : 'info');
   } else {
     const defenderFound = findCard(s, defenderIid);
-    if (!defenderFound) throw new Error(`Defender ${defenderIid} not found`);
+    if (!defenderFound || (defenderFound.loc.zone !== 'ground_arena' && defenderFound.loc.zone !== 'space_arena')) {
+      // Defender left play during the On-Attack window — no combat damage (§7.x).
+      events.push({ kind: 'ATTACK_ENDED', attackerIid, defenderIid, damageDealt: 0 });
+      s = log(s, `${pid}'s attack target left play — no combat damage.`, pid);
+      s = expireLastingEffects(s, 'end_of_attack');
+      return { state: s, events };
+    }
     // Power snapshot for the SIMULTANEOUS case (§7.5.6c): both deal damage
     // computed BEFORE any lands, so a defender with Grit gets no bonus.
     const defenderPower = effectivePower(s, reg, defenderFound.inst, oppId);
@@ -151,7 +180,7 @@ export function resolveAttack(
     // "Deals combat damage before the defender" (§1618c / §7.5.6d): the attacker
     // deals first; the defender (the unit dealing second) must SURVIVE that damage
     // to deal combat damage back. If defeated, it deals none.
-    const attackerDealsFirst = hasEffectiveKeyword(s, reg, attackerFound.inst, pid, 'attacker_combat_first');
+    const attackerDealsFirst = hasEffectiveKeyword(s, reg, attackerNow.inst, pid, 'attacker_combat_first');
 
     const d1 = dealDamageToUnit(s, reg, defenderIid, attackerPower, { combat: true }, attackerIid, chooser);
     s = d1.state;
@@ -176,7 +205,7 @@ export function resolveAttack(
       events.push(...d2.events);
     }
 
-    const attackerHasOverwhelm = hasEffectiveKeyword(s, reg, attackerFound.inst, pid, 'overwhelm');
+    const attackerHasOverwhelm = hasEffectiveKeyword(s, reg, attackerNow.inst, pid, 'overwhelm');
     if (attackerHasOverwhelm) {
       const shieldBlocked = d1.events.some(e => e.kind === 'DAMAGE_PREVENTED');
       const excess = attackerPower - Math.max(0, defenderHpBefore);
@@ -194,6 +223,48 @@ export function resolveAttack(
 
   s = expireLastingEffects(s, 'end_of_attack');
   return { state: s, events };
+}
+
+/** Injected by the reducer (which CAN reach the settle machinery without an
+ *  import cycle): settles the On-Attack / "when attacked" TRIGGERED abilities of a
+ *  just-declared attack and returns the post-settle state. The reducer's
+ *  implementation isolates the outer pending-trigger queue, so a re-entrant settle
+ *  during a trigger drain doesn't disturb unrelated sibling triggers. Lets the
+ *  combined `resolveAttack` (nested ability-attacks + Ambush) sequence On-Attack
+ *  before combat damage (§7.x), matching the player-attack path. */
+export type DeclaredAttackResolver = (
+  state: GameState, declaredEvents: GameEvent[], reg: CardRegistry, chooser?: Chooser,
+) => { state: GameState; events: GameEvent[] };
+let declaredAttackResolver: DeclaredAttackResolver | undefined;
+export function setDeclaredAttackResolver(fn: DeclaredAttackResolver): void { declaredAttackResolver = fn; }
+
+/** Resolve one attack (combined declare + combat). Used by nested ability-attacks
+ *  + Ambush. When the reducer has injected a declared-attack resolver (the normal
+ *  runtime case), this sequences On-Attack / when-attacked abilities BEFORE combat
+ *  damage (§7.x): declare → resolve declared triggers → recompute power → combat.
+ *  Without a resolver (hand-built contexts), it falls back to the pre-fix combined
+ *  behavior (On-Attack settles in the caller, after combat). Assumes the caller has
+ *  validated turn / phase. Exhausts the attacker (no-op if already exhausted — the
+ *  nested case). Does NOT advance the turn. */
+export function resolveAttack(
+  state: GameState, pid: PlayerId,
+  attackerIid: string, defenderIid: string | 'base',
+  reg: CardRegistry,
+  chooser?: Chooser,
+): { state: GameState; events: GameEvent[] } {
+  const dec = declareAttack(state, pid, attackerIid, defenderIid, reg);
+  if (declaredAttackResolver) {
+    // §7.x: resolve On-Attack / when-attacked abilities, THEN combat damage. The
+    // declared + On-Attack events are fully settled inside the resolver, so we
+    // return ONLY the combat events — the caller's own settle must not re-collect
+    // the ATTACK_DECLARED (it would double-fire On-Attack). resolveCombat recomputes
+    // attacker power, so a debuff like Condemn's −6/−0 applies to this combat.
+    const settled = declaredAttackResolver(dec.state, dec.events, reg, chooser);
+    const combat = resolveCombat(settled.state, pid, attackerIid, defenderIid, reg, chooser);
+    return { state: combat.state, events: combat.events };
+  }
+  const combat = resolveCombat(dec.state, pid, attackerIid, defenderIid, reg, chooser);
+  return { state: combat.state, events: [...dec.events, ...combat.events] };
 }
 
 /** Ambush (§7.5.5): after a unit with Ambush enters play, its controller MAY

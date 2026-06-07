@@ -1,0 +1,31 @@
+{
+  "id": "W8_062",
+  "name": "Chancellor Palpatine (test)",
+  "type": "unit",
+  "cost": 7,
+  "aspects": ["villainy"],
+  "arena": "ground",
+  "power": 5,
+  "hp": 7,
+  "traits": ["official"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": {
+        "effect": "if",
+        "condition": { "controller_controls": { "filter": { "card_is_leader_unit": true } } },
+        "then": {
+          "effect": "create_token",
+          "token_id": "spy",
+          "controller": "self",
+          "zone": "ground_arena",
+          "count": 2,
+          "grant": { "keyword": "sentinel", "duration": "end_of_phase" }
+        }
+      }
+    }
+  ]
+}

@@ -11,6 +11,7 @@ import {
 } from '../runtime/modifiers';
 import { applyEffect } from '../runtime/interpret';
 import { effectiveCost } from '../runtime/cost';
+import { roundDiscountsToArm } from '../runtime/triggers';
 
 const reg: CardRegistry = buildRegistry(ALL_CARDS, W1_BASES);
 
@@ -380,6 +381,200 @@ scenario('Cost discount: granted ability is inert on a non-matching host (non-Je
   const state = emptyState({ groundP1: [plainHost], resourcesP1: 6, active: 'p1' });
   const after = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: 'plain', defenderIid: 'base' }, reg).next;
   assertEq((after.players.p1.discounts ?? []).length, 0, 'no discount from a non-Jedi host');
+});
+
+scenario('Death Star Plans (whole card): when the host is attacked, the attacker takes the upgrade onto their unit (clause 1)', () => {
+  // p1 attacks p2's host carrying Death Star Plans. "When attached unit is
+  // attacked" fires on ATTACK_DECLARED → the attacking player (p1) takes the
+  // upgrade and re-attaches it to a unit they control (their attacker). Both
+  // units are 1/9 so they survive the trade and the move is observable.
+  const dsp = mkInst('W8_060', { iid: 'dsp' });
+  const host = mkInst('W8_024', { iid: 'host', upgrades: [dsp] });   // 1/9, defender, survives
+  const atk = mkInst('W8_024', { iid: 'atk' });                       // 1/9, attacker, survives
+  const state = emptyState({ groundP1: [atk], groundP2: [host], active: 'p1' });
+  const r = step(state, { kind: 'ATTACK', player: 'p1', attackerIid: 'atk', defenderIid: 'host' }, reg);
+  const hostAfter = r.next.players.p2.groundArena.find(c => c.iid === 'host');
+  const atkAfter = r.next.players.p1.groundArena.find(c => c.iid === 'atk');
+  if (!hostAfter || !atkAfter) throw new Error('both 1/9 units should survive the trade');
+  if (hostAfter.upgrades.some(u => u.iid === 'dsp')) throw new Error('upgrade should have left the original host');
+  const moved = atkAfter.upgrades.find(u => u.iid === 'dsp');
+  if (!moved) throw new Error('upgrade should now sit on the attacking player\'s unit');
+  assertEq(moved.owner, 'p2', 'owner recorded as the original (defender-side) controller for §8.28.2 discard routing');
+});
+
+scenario('Death Star Plans (whole card): grants the host a "first unit each round costs 2 less" discount (clause 2)', () => {
+  // The constant grant → a round_discount the host's controller gets, armed at
+  // round start. Verify the scan finds it (only for the upgrade-controller, only
+  // for units) and that, once armed, a unit is cheaper but an event is not.
+  const dsp = mkInst('W8_060', { iid: 'dsp' });
+  const host = mkInst('W1_001', { iid: 'host', upgrades: [dsp] });   // p1
+  const plain = mkInst('W1_001', { iid: 'plain' });                   // p2, no upgrade
+  const state = emptyState({ groundP1: [host], groundP2: [plain], active: 'p1' });
+  const arm = roundDiscountsToArm(state, reg);
+  assertEq(arm.length, 1, 'exactly one round-discount armed');
+  assertEq(arm[0].pid, 'p1', 'armed for the upgrade-controller only');
+  assertEq(arm[0].discount.amount, 2, 'amount 2');
+  assertEq(arm[0].discount.cardType, 'unit', 'unit-typed');
+  const armed: GameState = { ...state, players: { ...state.players, p1: { ...state.players.p1, discounts: [arm[0].discount] } } };
+  assertEq(effectiveCost(armed, reg, reg.cards['W1_001'], 'p1'), 3 - 2, 'first unit discounted 3→1');
+  assertEq(effectiveCost(armed, reg, reg.cards['W6_001'], 'p1'), reg.cards['W6_001'].cost ?? 0, 'event unaffected by a unit-typed discount');
+});
+
+scenario('Death Star Plans (whole card): round-discount is armed at round start and consumed by the first unit (clause 2 end-to-end)', () => {
+  const dsp = mkInst('W8_060', { iid: 'dsp' });
+  const host = mkInst('W1_001', { iid: 'host', upgrades: [dsp] });
+  const unit = mkInst('W1_001', { iid: 'u' });   // Battlefield Marine, cost 3
+  const state = emptyState({ groundP1: [host], handP1: [unit], resourcesP1: 6, active: 'p1' });
+  // Drive a full round: two consecutive passes → regroup; decline resources → action round 2.
+  let s = step(state, { kind: 'PASS', player: 'p1' }, reg).next;
+  s = step(s, { kind: 'PASS', player: 'p2' }, reg).next;
+  if (s.phase !== 'regroup') throw new Error(`expected regroup, got ${s.phase}`);
+  s = step(s, { kind: 'DECLINE_RESOURCE', player: s.activePlayer }, reg).next;
+  s = step(s, { kind: 'DECLINE_RESOURCE', player: s.activePlayer }, reg).next;
+  if (s.phase !== 'action') throw new Error(`expected action phase, got ${s.phase}`);
+  assertEq((s.players.p1.discounts ?? []).length, 1, 'discount armed at round start');
+  const readyBefore = s.players.p1.resources.filter(r => !r.exhausted).length;
+  const afterPlay = step(s, { kind: 'PLAY_CARD', player: 'p1', iid: 'u' }, reg).next;
+  const readyAfter = afterPlay.players.p1.resources.filter(r => !r.exhausted).length;
+  assertEq(readyBefore - readyAfter, 1, 'charged the discounted cost (3 - 2 = 1)');
+  assertEq((afterPlay.players.p1.discounts ?? []).length, 0, 'discount consumed by the first unit');
+});
+
+scenario('Regional Governor (whole card): When-Played names a card the opponent can no longer play (name + restriction)', () => {
+  // p2 owns exactly one distinct card name (W1_001) across hand+deck, so the
+  // name_card chooser has a single option → default picks it.
+  const gov = mkInst('W8_061', { iid: 'gov' });
+  const oppCard = mkInst('W1_001', { iid: 'oppcard' });
+  const state = emptyState({
+    handP1: [gov], resourcesP1: 3,
+    handP2: [oppCard], deckP2: [mkInst('W1_001')], resourcesP2: 3,
+    active: 'p1',
+  });
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'gov' }, reg);
+  const g = r.next.players.p1.groundArena.find(c => c.iid === 'gov');
+  assertEq(g?.namedCard, reg.cards['W1_001'].name, 'governor recorded the named card');
+  // Playing the governor ended p1's turn → p2 is active. They can't play it.
+  assertEq(r.next.activePlayer, 'p2', 'p2 is active after p1 plays');
+  const legal = getLegalActions(r.next, reg, 'p2').actions;
+  if (legal.some(a => a.kind === 'PLAY_CARD' && a.iid === 'oppcard')) throw new Error('named card should not be a legal play');
+  expectThrow(() => step(r.next, { kind: 'PLAY_CARD', player: 'p2', iid: 'oppcard' }, reg), 'named it');
+});
+
+scenario('Regional Governor (whole card): the play-restriction is gated on the unit being in play', () => {
+  const named = reg.cards['W1_001'].name;
+  const oppCard = mkInst('W1_001', { iid: 'oppcard' });
+  // Governor in play, already naming → opponent blocked.
+  const gov = mkInst('W8_061', { iid: 'gov', namedCard: named });
+  const blocked = emptyState({ groundP1: [gov], handP2: [oppCard], resourcesP2: 3, active: 'p2' });
+  if (getLegalActions(blocked, reg, 'p2').actions.some(a => a.kind === 'PLAY_CARD' && a.iid === 'oppcard')) {
+    throw new Error('named card should be blocked while the governor is in play');
+  }
+  // Same hand, no governor in play → the card is playable again.
+  const free = emptyState({ handP2: [oppCard], resourcesP2: 3, active: 'p2' });
+  if (!getLegalActions(free, reg, 'p2').actions.some(a => a.kind === 'PLAY_CARD' && a.iid === 'oppcard')) {
+    throw new Error('card should be playable when no governor restricts it');
+  }
+});
+
+scenario('Regional Governor (whole card): only OPPONENTS are restricted, not the naming player', () => {
+  const named = reg.cards['W1_001'].name;
+  const gov = mkInst('W8_061', { iid: 'gov', namedCard: named });
+  const ownCard = mkInst('W1_001', { iid: 'owncard' });
+  const state = emptyState({ groundP1: [gov], handP1: [ownCard], resourcesP1: 3, active: 'p1' });
+  if (!getLegalActions(state, reg, 'p1').actions.some(a => a.kind === 'PLAY_CARD' && a.iid === 'owncard')) {
+    throw new Error('the naming player can still play the named card');
+  }
+});
+
+scenario('Chancellor Palpatine (whole card): with a leader unit, When-Played creates 2 Spy tokens with Sentinel for the phase', () => {
+  // A leader spec in the arena = a leader unit → the control condition holds.
+  const chancellor = mkInst('W8_062', { iid: 'chancellor' });
+  const leaderUnit = mkInst('W4_001', { iid: 'leaderunit' });
+  const state = emptyState({ handP1: [chancellor], groundP1: [leaderUnit], resourcesP1: 7, active: 'p1' });
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'chancellor' }, reg);
+  const spies = r.next.players.p1.groundArena.filter(c => c.isToken && reg.cards[c.cardId]?.name === 'Spy');
+  assertEq(spies.length, 2, 'two Spy tokens created');
+  for (const sp of spies) {
+    if (!hasEffectiveKeyword(r.next, reg, sp, 'p1', 'sentinel')) throw new Error('Spy token should have Sentinel this phase');
+  }
+});
+
+scenario('Chancellor Palpatine (whole card): without a leader unit, When-Played creates nothing', () => {
+  const chancellor = mkInst('W8_062', { iid: 'chancellor' });
+  const state = emptyState({ handP1: [chancellor], resourcesP1: 7, active: 'p1' });
+  const r = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'chancellor' }, reg);
+  const spies = r.next.players.p1.groundArena.filter(c => c.isToken && reg.cards[c.cardId]?.name === 'Spy');
+  assertEq(spies.length, 0, 'no Spy tokens without a leader unit');
+});
+
+scenario('Chancellor Palpatine (whole card): the granted Sentinel expires at end of phase', () => {
+  const chancellor = mkInst('W8_062', { iid: 'chancellor' });
+  const leaderUnit = mkInst('W4_001', { iid: 'leaderunit' });
+  const state = emptyState({ handP1: [chancellor], groundP1: [leaderUnit], resourcesP1: 7, active: 'p1' });
+  let s = step(state, { kind: 'PLAY_CARD', player: 'p1', iid: 'chancellor' }, reg).next;
+  const spy0 = s.players.p1.groundArena.find(c => c.isToken && reg.cards[c.cardId]?.name === 'Spy');
+  if (!spy0) throw new Error('expected a Spy token');
+  if (!hasEffectiveKeyword(s, reg, spy0, 'p1', 'sentinel')) throw new Error('Sentinel active this phase');
+  // End the round (p2 active after p1's play): two passes → regroup; decline → action round 2.
+  s = step(s, { kind: 'PASS', player: 'p2' }, reg).next;
+  s = step(s, { kind: 'PASS', player: 'p1' }, reg).next;
+  if (s.phase !== 'regroup') throw new Error(`expected regroup, got ${s.phase}`);
+  s = step(s, { kind: 'DECLINE_RESOURCE', player: s.activePlayer }, reg).next;
+  s = step(s, { kind: 'DECLINE_RESOURCE', player: s.activePlayer }, reg).next;
+  const spy1 = s.players.p1.groundArena.find(c => c.iid === spy0.iid);
+  if (!spy1) throw new Error('Spy token should persist across the round');
+  if (hasEffectiveKeyword(s, reg, spy1, 'p1', 'sentinel')) throw new Error('Sentinel should have expired at end of phase');
+});
+
+scenario('Condemn (whole card): On-Attack, the defending player discloses to give the attacker -6/-0 — and it reduces THIS attack (On-Attack resolves before combat, §7.x)', () => {
+  const condemn = mkInst('W8_063', { iid: 'condemn' });
+  const host = mkInst('W1_001', { iid: 'host', upgrades: [condemn], experienceTokens: 6 }); // 3/3 +6 = 9 power
+  const vig = mkInst('W1_004', { iid: 'vig' });  // a Villainy card (matches the disclose filter)
+  const state = emptyState({ groundP2: [host], handP1: [vig], active: 'p2' });
+  // p2 attacks p1's base; the DEFENDING player (p1) accepts + discloses → host -6 for this attack.
+  const chooser = scriptedChooser([{ kind: 'yes' }, { kind: 'option', value: 'vig' }]);
+  const r = step(state, { kind: 'ATTACK', player: 'p2', attackerIid: 'host', defenderIid: 'base' }, reg, chooser);
+  assertEq(r.next.players.p1.base.damage, 3, 'attacker dealt 9-6 = 3 (the debuff applied BEFORE combat)');
+});
+
+scenario('Condemn (whole card): if the defending player declines to disclose, no debuff (full damage)', () => {
+  const condemn = mkInst('W8_063', { iid: 'condemn' });
+  const host = mkInst('W1_001', { iid: 'host', upgrades: [condemn], experienceTokens: 6 }); // 9 power
+  const vig = mkInst('W1_004', { iid: 'vig' });
+  const state = emptyState({ groundP2: [host], handP1: [vig], active: 'p2' });
+  const r = step(state, { kind: 'ATTACK', player: 'p2', attackerIid: 'host', defenderIid: 'base' }, reg, declineChooser);
+  assertEq(r.next.players.p1.base.damage, 9, 'declined disclose → full 9 damage');
+});
+
+scenario('Condemn (nested attack): On-Attack resolves BEFORE combat for an ABILITY-driven attack too (not just the player ATTACK action)', () => {
+  // A nested `attack` effect (e.g. "this unit attacks" / "attacks again") goes
+  // through the combined resolveAttack. With the reducer's injected resolver, its
+  // On-Attack abilities now settle before combat too — Condemn's -6 reduces THIS
+  // combat (was a known gap; reducer injects the resolver at module load).
+  const condemn = mkInst('W8_063', { iid: 'condemn' });
+  const host = mkInst('W1_001', { iid: 'host', upgrades: [condemn], experienceTokens: 6 }); // p1, 9 power
+  const vig = mkInst('W1_004', { iid: 'vig' });  // p2's Villainy card to disclose
+  const state = emptyState({ groundP1: [host], handP2: [vig], active: 'p1' });
+  // chooser: pick base as the target, then p2 accepts + discloses → host -6 for this attack.
+  const chooser = scriptedChooser([{ kind: 'option', value: 'base' }, { kind: 'yes' }, { kind: 'option', value: 'vig' }]);
+  const r = applyEffect({ state, reg, sourceIid: 'host', sourcePlayer: 'p1', chooser }, { effect: 'attack', attacker: { self: true } });
+  assertEq(r.state.players.p2.base.damage, 3, 'nested attack: 9-6 = 3 (On-Attack debuff applied before combat)');
+});
+
+scenario('Condemn (whole card): the host loses its OWN On-Attack ability while attacking (lose_all_abilities)', () => {
+  // Field Commander's own On-Attack draws 1. With Condemn attached, while it
+  // attacks it loses that ability — only Condemn's granted ability resolves.
+  const condemn = mkInst('W8_063', { iid: 'condemn' });
+  const fc = mkInst('W2_010', { iid: 'fc', upgrades: [condemn] });
+  const state = emptyState({ groundP2: [fc], deckP2: [mkInst('W1_001'), mkInst('W1_001')], active: 'p2' });
+  const handBefore = state.players.p2.hand.length;
+  const r = step(state, { kind: 'ATTACK', player: 'p2', attackerIid: 'fc', defenderIid: 'base' }, reg, declineChooser);
+  assertEq(r.next.players.p2.hand.length, handBefore, 'Field Commander\'s own draw is suppressed while attacking');
+  // Control: without Condemn, the same On-Attack draws 1 (proves the suppression is real).
+  const fc2 = mkInst('W2_010', { iid: 'fc2' });
+  const ctrl = emptyState({ groundP2: [fc2], deckP2: [mkInst('W1_001'), mkInst('W1_001')], active: 'p2' });
+  const r2 = step(ctrl, { kind: 'ATTACK', player: 'p2', attackerIid: 'fc2', defenderIid: 'base' }, reg, declineChooser);
+  assertEq(r2.next.players.p2.hand.length, ctrl.players.p2.hand.length + 1, 'control: the own On-Attack draws when not Condemned');
 });
 
 scenario('Exchange control: a friendly and an enemy unit swap controllers, keeping state (Choose Sides)', () => {

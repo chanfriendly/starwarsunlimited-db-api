@@ -41,6 +41,12 @@ export interface CardInstance {
   /** Experience tokens on this unit. Each grants +1/+1 (§SWU); they stack and
    *  persist while the unit is in play. Optional — absent = 0. */
   experienceTokens?: number;
+  /** A card NAME this unit has named ("Name a card. While this unit is in play,
+   *  opponents can't play the named card." — Regional Governor). While set and
+   *  the unit is in play, opponents of its controller can't play a card with this
+   *  name (enforced in legal.ts + reducer.applyPlayCard). Cleared implicitly when
+   *  the unit leaves play. Optional — absent = names nothing. */
+  namedCard?: string;
 }
 
 export interface BaseInstance {

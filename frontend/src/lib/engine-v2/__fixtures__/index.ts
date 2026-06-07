@@ -137,6 +137,10 @@ import w8c056 from './cards/W8_056.json';
 import w8c057 from './cards/W8_057.json';
 import w8c058 from './cards/W8_058.json';
 import w8c059 from './cards/W8_059.json';
-export const W8_CARDS: CardSpec[] = [w8c001, w8c002, w8c003, w8c004, w8c005, w8c006, w8c007, w8c008, w8c009, w8c010, w8c011, w8c012, w8c013, w8c014, w8c015, w8c016, w8c017, w8c018, w8c019, w8c020, w8c021, w8c022, w8c023, w8c024, w8c025, w8c026, w8c027, w8c028, w8c029, w8c030, w8c031, w8c032, w8c033, w8c034, w8c035, w8c036, w8c037, w8c038, w8c039, w8c040, w8c041, w8c042, w8c043, w8c044, w8c045, w8c046, w8c047, w8c048, w8c049, w8c050, w8c051, w8c052, w8c053, w8c054, w8c055, w8c056, w8c057, w8c058, w8c059] as CardSpec[];
+import w8c060 from './cards/W8_060.json';
+import w8c061 from './cards/W8_061.json';
+import w8c062 from './cards/W8_062.json';
+import w8c063 from './cards/W8_063.json';
+export const W8_CARDS: CardSpec[] = [w8c001, w8c002, w8c003, w8c004, w8c005, w8c006, w8c007, w8c008, w8c009, w8c010, w8c011, w8c012, w8c013, w8c014, w8c015, w8c016, w8c017, w8c018, w8c019, w8c020, w8c021, w8c022, w8c023, w8c024, w8c025, w8c026, w8c027, w8c028, w8c029, w8c030, w8c031, w8c032, w8c033, w8c034, w8c035, w8c036, w8c037, w8c038, w8c039, w8c040, w8c041, w8c042, w8c043, w8c044, w8c045, w8c046, w8c047, w8c048, w8c049, w8c050, w8c051, w8c052, w8c053, w8c054, w8c055, w8c056, w8c057, w8c058, w8c059, w8c060, w8c061, w8c062, w8c063] as CardSpec[];
 
 export const ALL_CARDS: CardSpec[] = [...W1_CARDS, ...W2_CARDS, ...W3_CARDS, ...W4_CARDS, ...W5_CARDS, ...W6_CARDS, ...W7_CARDS, ...W8_CARDS];

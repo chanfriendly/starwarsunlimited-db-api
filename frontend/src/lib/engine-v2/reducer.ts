@@ -9,7 +9,7 @@ import type { PlayerAction } from './actions';
 import type { CardInstance, CardRegistry, GameState, PlayerId, StepResult } from './state/types';
 import type { LastingEffectRec } from './state/effects';
 import type { GameEvent } from './state/bus';
-import { findCard, getZoneArr, mapInstance, withPlayer } from './state/zones';
+import { findCard, getZoneArr, mapInstance, withPlayer, isPlayNameBlocked } from './state/zones';
 import { isUnit, type CardSpec } from './spec/types';
 import { draw } from './primitives/card_flow';
 import { snapshot } from './primitives/combat';
@@ -20,14 +20,14 @@ import { runStateBased } from './runtime/state_based';
 import { effectivePower, effectiveHp, hasEffectiveKeyword, effectiveKeywordValue } from './runtime/modifiers';
 import { nextActivePlayer, opponentOf } from './state/types';
 import { KEYWORDS, defeatDefenderShields } from './primitives/keywords';
-import { settleTriggers, isLimitExhausted, bumpLimit, parseUndeployedLeaderIid, makeUndeployedLeaderIid, synthLeaderInstance } from './runtime/triggers';
+import { settleTriggers, isLimitExhausted, bumpLimit, parseUndeployedLeaderIid, makeUndeployedLeaderIid, synthLeaderInstance, roundDiscountsToArm } from './runtime/triggers';
 import { defaultChooser, type Chooser } from './runtime/chooser';
 import { applyEffect } from './runtime/interpret';
 import { isTriggered, type ActionAbility, type Ability, type TriggeredAbility } from './spec/ast';
 import { resolveSelector } from './runtime/selectors';
 import { resolvePlayer } from './runtime/predicates';
 import { effectiveCost, exploitOf } from './runtime/cost';
-import { resolveAttack, attackIllegalReason, resolveAmbush } from './runtime/attack';
+import { declareAttack, resolveCombat, attackIllegalReason, resolveAmbush, setDeclaredAttackResolver } from './runtime/attack';
 
 function settle(state: GameState, reg: CardRegistry, eventsIn: GameEvent[], chooser?: Chooser): StepResult {
   const stepped: GameState = { ...state, step: state.step + 1 };
@@ -45,6 +45,19 @@ function settle(state: GameState, reg: CardRegistry, eventsIn: GameEvent[], choo
 function log(state: GameState, message: string, player?: PlayerId, kind: 'info' | 'critical' = 'info'): GameState {
   return { ...state, log: [...state.log, { round: state.round, player, message, kind }] };
 }
+
+// Resolve a just-declared attack's On-Attack / when-attacked TRIGGERED abilities
+// (§7.x), so the combined resolveAttack (nested ability-attacks + Ambush) can run
+// them BEFORE combat damage. Injected into attack.ts to break the import cycle.
+// Isolates the outer pending-trigger queue (save → empty → settle the declared
+// events → restore) so a re-entrant settle during a trigger drain resolves ONLY
+// this attack's declared triggers, never unrelated sibling triggers.
+function resolveDeclaredAttack(state: GameState, declaredEvents: GameEvent[], reg: CardRegistry, chooser?: Chooser): { state: GameState; events: GameEvent[] } {
+  const saved = state.pendingTriggers;
+  const r = settle({ ...state, pendingTriggers: [] }, reg, declaredEvents, chooser);
+  return { state: { ...r.next, pendingTriggers: saved }, events: r.events };
+}
+setDeclaredAttackResolver(resolveDeclaredAttack);
 
 function specOf(reg: CardRegistry, iid: string, state: GameState): CardSpec | undefined {
   const f = findCard(state, iid);
@@ -178,6 +191,19 @@ function resetResourcedFlags(state: GameState): GameState {
 
 function startActionPhase(state: GameState, reg: CardRegistry, events: GameEvent[], chooser?: Chooser): StepResult {
   let s: GameState = { ...state, phase: 'action', round: state.round + 1, activePlayer: state.initiative, consecutivePasses: 0, phaseStartedAtStep: state.step, leftPlayThisPhase: [] };
+  // Arm "first <card> you play each round costs N less" passive discounts (Death
+  // Star Plans). Each round has one action phase, so these are phase-scoped
+  // PendingDiscounts consumed by the first matching play; re-armed each round.
+  {
+    const arm = roundDiscountsToArm(s, reg);
+    if (arm.length > 0) {
+      const players = { ...s.players };
+      for (const { pid, discount } of arm) {
+        players[pid] = { ...players[pid], discounts: [...(players[pid].discounts ?? []), discount] };
+      }
+      s = { ...s, players };
+    }
+  }
   s = log(s, `Round ${s.round} begins.`, undefined, 'critical');
   s = log(s, `${s.activePlayer} acts first.`, s.activePlayer);
   return settle(s, reg, [...events, { kind: 'TURN_STARTED', player: s.activePlayer }], chooser);
@@ -199,6 +225,10 @@ function applyPlayCard(state: GameState, pid: PlayerId, iid: string, reg: CardRe
   if (!spec) throw new Error(`Unknown spec for ${iid}`);
   if (spec.type !== 'unit' && spec.type !== 'event' && spec.type !== 'upgrade') {
     throw new Error(`PLAY_CARD does not support ${spec.type}`);
+  }
+  // "Opponents can't play the named card" (Regional Governor) — blocked by name.
+  if (isPlayNameBlocked(state, pid, spec.name)) {
+    throw new Error(`Cannot play ${spec.name}: an opponent has named it`);
   }
 
   const p = state.players[pid];
@@ -707,8 +737,16 @@ function applyAttack(
   const reason = attackIllegalReason(state, pid, reg, attackerIid, defenderIid);
   if (reason) throw new Error(reason);
 
-  const r = resolveAttack(state, pid, attackerIid, defenderIid, reg, chooser);
-  return advanceToNextTurn(r.state, pid, reg, r.events, undefined, chooser);
+  // §7.x attack sequence: declare → resolve On-Attack (and "when attacked")
+  // TRIGGERED abilities → THEN deal combat damage. So settle the declared
+  // triggers BEFORE combat, and let resolveCombat recompute the attacker's power
+  // (e.g. Condemn's −6/−0 disclose debuff applies to this attack). Nested
+  // ability-attacks use the combined resolveAttack (no mid-settle) — see attack.ts.
+  const dec = declareAttack(state, pid, attackerIid, defenderIid, reg);
+  const declared = settle(dec.state, reg, dec.events, chooser);
+  const combat = resolveCombat(declared.next, pid, attackerIid, defenderIid, reg, chooser);
+  const adv = advanceToNextTurn(combat.state, pid, reg, combat.events, undefined, chooser);
+  return { next: adv.next, events: [...declared.events, ...adv.events] };
 }
 
 function applyTakeCounter(

@@ -100,6 +100,21 @@ export function findHostOfUpgrade(state: GameState, upgradeIid: string): { inst:
   return undefined;
 }
 
+/** True iff `pid` is forbidden from playing a card named `cardName` — i.e. an
+ *  OPPONENT controls an in-play unit that has named that card ("opponents can't
+ *  play the named card" — Regional Governor). Pure state read; matches by card
+ *  NAME (all copies/variants of the named card are blocked). */
+export function isPlayNameBlocked(state: GameState, pid: PlayerId, cardName: string): boolean {
+  for (const oppId of state.playerOrder) {
+    if (oppId === pid) continue;
+    const opp = state.players[oppId];
+    for (const u of [...opp.groundArena, ...opp.spaceArena]) {
+      if (u.namedCard === cardName) return true;
+    }
+  }
+  return false;
+}
+
 export function withPlayer(state: GameState, pid: PlayerId, p: PlayerState): GameState {
   return { ...state, players: { ...state.players, [pid]: p } };
 }

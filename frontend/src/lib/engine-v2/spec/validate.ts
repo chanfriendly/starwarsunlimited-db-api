@@ -44,9 +44,9 @@ const EFFECT_KINDS = new Set([
   'exhaust', 'ready', 'give', 'sequence', 'if', 'if_did', 'noop', 'choose_one', 'optional',
   'create_token', 'capture', 'rescue', 'move', 'look_at', 'disclose',
   'search', 'search_play', 'divided_damage', 'indirect_damage', 'play_as_resource', 'create_credit', 'discount', 'play_from_discard', 'return_to_hand', 'return_from_discard',
-  'take_control', 'exchange_control', 'use_force', 'gain_force', 'attack', 'power_damage_from_each',
+  'take_control', 'exchange_control', 'transfer_upgrade', 'name_card', 'use_force', 'gain_force', 'attack', 'power_damage_from_each',
 ]);
-const ABILITY_TYPES = new Set(['triggered', 'action', 'constant', 'replacement', 'cost']);
+const ABILITY_TYPES = new Set(['triggered', 'action', 'constant', 'replacement', 'cost', 'round_discount']);
 const COST_COUNTS = new Set(['friendly_leader_units', 'friendly_units', 'friendly_resources']);
 const TRIGGER_CONDITIONS = new Set([
   'event.card_played', 'event.card_drawn', 'event.attack_declared',
@@ -361,7 +361,8 @@ function validateEffect(v: V, path: string, e: unknown) {
     case 'create_token':
       need('token_id', isStr(e.token_id)); need('controller', 'controller' in e); need('zone', 'zone' in e);
       if ('controller' in e) checkEnum(v, `${path}.controller`, e.controller, PLAYER_REFS, 'controller');
-      if ('zone' in e) checkEnum(v, `${path}.zone`, e.zone, ZONES, 'zone'); break;
+      if ('zone' in e) checkEnum(v, `${path}.zone`, e.zone, ZONES, 'zone');
+      if ('grant' in e) validateModifier(v, `${path}.grant`, e.grant); break;
     case 'capture':
       need('target', 'target' in e); need('captor', 'captor' in e);
       if ('target' in e) validateSelector(v, `${path}.target`, e.target);
@@ -378,6 +379,9 @@ function validateEffect(v: V, path: string, e: unknown) {
       need('friendly', 'friendly' in e); need('enemy', 'enemy' in e);
       if ('friendly' in e) validateSelector(v, `${path}.friendly`, e.friendly);
       if ('enemy' in e) validateSelector(v, `${path}.enemy`, e.enemy); break;
+    case 'transfer_upgrade':
+      need('new_controller', 'new_controller' in e);
+      if ('new_controller' in e) checkEnum(v, `${path}.new_controller`, e.new_controller, new Set(['trigger_attacker']), 'new_controller'); break;
     case 'return_from_discard':
       need('player', 'player' in e);
       if ('player' in e) checkEnum(v, `${path}.player`, e.player, PLAYER_REFS, 'player');
@@ -465,6 +469,7 @@ function validateAbility(v: V, path: string, a: unknown) {
     case 'constant':
       if ('active_in_zone' in a) checkEnum(v, `${path}.active_in_zone`, a.active_in_zone, ZONES, 'active_in_zone');
       if ('while' in a) validatePredicate(v, `${path}.while`, a.while);
+      if ('while_attacking' in a && typeof a.while_attacking !== 'boolean') v.err(`${path}.while_attacking`, 'while_attacking must be a boolean');
       if (!isObj(a.grant)) v.err(`${path}.grant`, 'constant ability requires "grant" object');
       else {
         const grant = a.grant as Record<string, unknown>;
@@ -492,6 +497,10 @@ function validateAbility(v: V, path: string, a: unknown) {
       if (!isNum(a.amount)) v.err(`${path}.amount`, 'cost ability requires numeric "amount"');
       if ('per' in a) checkEnum(v, `${path}.per`, a.per, COST_COUNTS, 'per');
       if ('while' in a) validatePredicate(v, `${path}.while`, a.while);
+      break;
+    case 'round_discount':
+      if (!isNum(a.amount)) v.err(`${path}.amount`, 'round_discount ability requires numeric "amount"');
+      if ('card_type' in a) checkEnum(v, `${path}.card_type`, a.card_type, new Set(['unit', 'event', 'upgrade']), 'card_type');
       break;
   }
 }

@@ -1,0 +1,20 @@
+{
+  "id": "W8_061",
+  "name": "Regional Governor (test)",
+  "type": "unit",
+  "cost": 3,
+  "aspects": ["villainy"],
+  "arena": "ground",
+  "power": 3,
+  "hp": 3,
+  "traits": ["imperial", "official"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.card_played",
+      "where": { "card": "self" },
+      "do": { "effect": "name_card" }
+    }
+  ]
+}

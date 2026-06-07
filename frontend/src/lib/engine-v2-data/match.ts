@@ -268,6 +268,7 @@ export function parseEffectClause(raw: string): Effect | null {
       if (w === 'ground' || w === 'space') return null;           // arena conditions not modeled
       else if (w === 'damaged') cc.filter = { self_damage: { min: 1 } };
       else if (w === 'exhausted') cc.filter = { self_exhausted: true };
+      else if (w === 'leader') cc.filter = { card_is_leader_unit: true };   // "a leader unit"
       else cc.filter = aspectOrTrait(word);
     }
     if (another) cc.exclude_self = true;
@@ -328,6 +329,24 @@ export function parseEffectClause(raw: string): Effect | null {
   // Create a/N Credit token(s). (one-shot resource tokens, not unit tokens.)
   if ((m = t.match(/^Create (an?|\d+) Credit tokens?\.?$/i))) {
     return { effect: 'create_credit', player: 'self', count: /^\d+$/.test(m[1]) ? parseInt(m[1], 10) : 1 };
+  }
+
+  // Create N <TokenName> tokens and give those tokens <Keyword> [N] for this
+  // phase. (Chancellor Palpatine — Spy tokens granted Sentinel for the phase.)
+  // The grant is bundled into create_token so the "those tokens" reference needs
+  // no cross-effect binding. Must precede the plain Create-token branch.
+  if ((m = t.match(/^Create (an?|\d+) (.+?) tokens? and give those tokens ([A-Za-z]+)(?:\s+(\d+))? for this phase\.?$/i))) {
+    const count = /^\d+$/.test(m[1]) ? parseInt(m[1], 10) : 1;
+    const key = unitTokenKey(m[2]);
+    const kw = m[3].toLowerCase();
+    if (key && KEYWORD_WORDS.has(kw)) {
+      const spec = TOKEN_REGISTRY[key];
+      const zone = spec.arena === 'space' ? 'space_arena' : 'ground_arena';
+      const grant: Modifier = { keyword: kw, duration: 'end_of_phase' };
+      if (m[4]) grant.keyword_value = parseInt(m[4], 10);
+      return { effect: 'create_token', token_id: key, controller: 'self', zone, count, grant };
+    }
+    return null; // unknown token / keyword → residual
   }
 
   // Create a/N <TokenName> token(s). (unit tokens only — Battle Droid, Clone
@@ -575,6 +594,39 @@ export function parseEffectClause(raw: string): Effect | null {
     return { effect: 'take_control', target };
   }
 
+  // "The attacking player takes control of this upgrade and attaches it to a unit
+  // they control." (Death Star Plans, On the host being attacked.) Self-referential
+  // (the source upgrade); the attacking player becomes the new controller.
+  if (/^The attacking player takes control of this upgrade and attaches it to a unit they control\.?$/i.test(t)) {
+    return { effect: 'transfer_upgrade', new_controller: 'trigger_attacker' };
+  }
+
+  // "Name a card. While this unit is in play, opponents can't play the named
+  // card." (Regional Governor.) The whole compound → one name_card effect (the
+  // continuous play-restriction is baked into name_card's semantics).
+  if (/^Name a card\.\s*While this unit is in play, opponents can['’]?t play the named card\.?$/i.test(t)) {
+    return { effect: 'name_card' };
+  }
+
+  // "The defending player may disclose <aspects>. If they do, this unit gets
+  // -N/-M for this attack." (Condemn's granted On-Attack body.) → the defending
+  // player (opponent of the attacking host) may reveal an <aspect> card; if they
+  // do, the host gets the debuff for this attack. The granted ability is
+  // attributed to the host, so `opponent`/`self` resolve correctly.
+  if ((m = t.match(/^The defending player may disclose (.+?)\. If they do, this unit gets ([–—\-−]?\d+)\/([–—\-−]?\d+) for this attack\.?$/i))) {
+    const aspects = parseDisclosedAspects(m[1]);
+    if (aspects.length === 0) return null;
+    const filter: Predicate = aspects.length === 1 ? { card_aspect: aspects[0] } : { or: aspects.map(a => ({ card_aspect: a })) };
+    const modifier: Modifier = { duration: 'end_of_attack' };
+    const pow = parseSignedDelta(m[2]); if (pow !== 0) modifier.power = pow;
+    const hp = parseSignedDelta(m[3]); if (hp !== 0) modifier.health = hp;
+    return {
+      effect: 'if_did',
+      do: { effect: 'optional', chooser: 'opponent', do: { effect: 'disclose', player: 'opponent', filter } },
+      then: { effect: 'give', target: { self: true }, modifier },
+    };
+  }
+
   // "Choose a friendly non-leader unit and an enemy non-leader unit. Exchange
   // control of those units." (Choose Sides) — a two-way control swap. Both are
   // mandatory single chosen targets; "non-leader" is enforced as a filter.
@@ -643,7 +695,7 @@ interface TrigPrefix {
   re: RegExp;
   on: TrigOn;
   /** explicit `where` override; when absent, a sensible self-based default is used */
-  where?: { card?: 'self'; attacker?: 'self'; defender?: 'self'; controller?: 'self' | 'opponent'; defender_defeated?: boolean };
+  where?: { card?: 'self'; attacker?: 'self'; defender?: 'self' | 'host'; controller?: 'self' | 'opponent'; defender_defeated?: boolean };
 }
 
 const TRIGGER_PREFIXES: TrigPrefix[] = [
@@ -654,6 +706,10 @@ const TRIGGER_PREFIXES: TrigPrefix[] = [
   // defender: 'self' (the engine fires attack triggers for both attacker and
   // defender; the where-predicate disambiguates).
   { re: /^When this unit is attacked:\s*/i, on: 'event.attack_declared', where: { defender: 'self' } },
+  // "When attached unit is attacked" — an UPGRADE trigger where its HOST is the
+  // defender (Death Star Plans). `defender: 'host'` resolves the host via the
+  // upgrade source.
+  { re: /^When attached unit is attacked:\s*/i, on: 'event.attack_declared', where: { defender: 'host' } },
   // "When a friendly unit attacks and defeats a unit" / "When this unit attacks
   // and defeats a unit" — fires on attack RESOLUTION (attack_ended) where the
   // attack defeated the defending unit. "that friendly unit" / "this unit" is the
@@ -736,6 +792,16 @@ function parseTriggeredClause(clause: string): Ability | null {
   return null;
 }
 
+/** "The first unit you play each round costs N resources less." → a passive
+ *  round_discount ability. Used only as a GRANTED ability (Death Star Plans:
+ *  "Attached unit gains: '…'"); it lives on the host and discounts the
+ *  controller's first unit each round (armed at action-phase start). */
+function parseRoundDiscount(clause: string): Ability | null {
+  const m = clause.match(/^The first unit you play each round costs (\d+) resources? less\.?$/i);
+  if (!m) return null;
+  return { type: 'round_discount', amount: parseInt(m[1], 10), card_type: 'unit' };
+}
+
 /** "Attached unit gains: '<ability>' [and '<ability>']" (upgrades). The host
  *  GAINS the quoted abilities — modeled as a constant `grant` whose target is
  *  the host (attached_to_self) carrying the parsed abilities, which the trigger
@@ -764,19 +830,69 @@ function parseGrantAbilityClause(clause: string): Ability | null {
   if (quoted.length === 0) return null;
   const granted: Ability[] = [];
   for (const q of quoted) {
-    // A granted ability is either a triggered-prefix ability ("On Attack: …",
-    // "When Defeated: …") or a "Bounty — <effect>" clause (an opponent-resolved
-    // When-Defeated). Either must produce a triggered ability or the whole grant
-    // stays residual (no silent partial grant).
-    const trig = parseTriggeredClause(q) ?? parseBountyClause(q);
-    if (!trig || trig.type !== 'triggered') return null;
-    granted.push(trig);
+    // A granted ability is a triggered-prefix ability ("On Attack: …", "When
+    // Defeated: …"), a "Bounty — <effect>" clause (an opponent-resolved
+    // When-Defeated), or a passive "first … each round costs N less" discount
+    // (Death Star Plans). Every quoted segment must parse or the whole grant stays
+    // residual (no silent partial grant).
+    const ab = parseTriggeredClause(q) ?? parseBountyClause(q) ?? parseRoundDiscount(q);
+    if (!ab) return null;
+    granted.push(ab);
   }
   const target: Selector = filter ? { attached_to_self: true, filter } : { attached_to_self: true };
   return { type: 'constant', grant: { target, abilities: granted } };
 }
 
+/** "While attached unit is attacking, it gains: '<On-Attack ability>' and loses
+ *  all other abilities." (Condemn.) → a `while_attacking` constant grant: the host
+ *  gains the quoted On-Attack ability AND a `lose_all_abilities` modifier (honored
+ *  by trigger collection to suppress the host's own abilities during its attack).
+ *  The quoted ability must parse as a triggered ability or the clause stays
+ *  residual. */
+function parseWhileAttackingGrant(clause: string): Ability | null {
+  const m = clause.match(/^While attached unit is attacking, it gains:\s*(.+?)\s+and loses all other abilities\.?$/i);
+  if (!m) return null;
+  const quoted = [...m[1].matchAll(/[“"]([^”"]+)[”"]/g)].map(x => x[1].trim());
+  if (quoted.length === 0) return null;
+  const granted: Ability[] = [];
+  for (const q of quoted) {
+    const ab = parseTriggeredClause(q);
+    if (!ab || ab.type !== 'triggered') return null;
+    granted.push(ab);
+  }
+  return {
+    type: 'constant',
+    while_attacking: true,
+    grant: { target: { attached_to_self: true }, modifier: { lose_all_abilities: true }, abilities: granted },
+  };
+}
+
 const ASPECT_ICONS = new Set<string>(['villainy', 'heroism', 'command', 'aggression', 'vigilance', 'cunning']);
+
+/** Split a run of concatenated aspect icon words ("VigilanceVillainy" — the DB
+ *  renders adjacent aspect icons with no separator) into AspectIcons. Greedy
+ *  left-to-right match against the closed icon set; bails (→ []) on any
+ *  unrecognized remainder. */
+function parseDisclosedAspects(s: string): AspectIcon[] {
+  const names = ['villainy', 'heroism', 'command', 'aggression', 'vigilance', 'cunning'];
+  let rest = s.trim().toLowerCase();
+  const out: AspectIcon[] = [];
+  outer: while (rest.length > 0) {
+    for (const n of names) {
+      if (rest.startsWith(n)) { out.push(n as AspectIcon); rest = rest.slice(n.length); continue outer; }
+    }
+    return []; // unrecognized chunk → not a clean aspect run
+  }
+  return out;
+}
+
+/** A signed stat delta where en-dash/em-dash/minus all denote negative ("–6" →
+ *  -6, "–0" → 0). */
+function parseSignedDelta(s: string): number {
+  const neg = /^[–—\-−]/.test(s);
+  const n = parseInt(s.replace(/[^\d]/g, ''), 10) || 0;
+  return neg ? -n : n;
+}
 
 /** "<X>" in "If attached unit is a <X>, …" → a host predicate. <X> is a trait
  *  (e.g. "Sith"), an aspect ("Heroism unit" / "Villainy unit"), or a negated
@@ -1150,6 +1266,9 @@ export function matchCard(card: MatchableCard): MatchResult {
 
     const trig = parseTriggeredClause(clause);
     if (trig) { abilities.push(trig); continue; }
+
+    const whileAtkGrant = parseWhileAttackingGrant(clause);
+    if (whileAtkGrant) { abilities.push(whileAtkGrant); continue; }
 
     const grantAb = parseGrantAbilityClause(clause);
     if (grantAb) { abilities.push(grantAb); continue; }

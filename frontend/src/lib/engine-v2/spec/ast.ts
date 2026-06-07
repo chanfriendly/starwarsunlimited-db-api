@@ -299,6 +299,12 @@ export interface CreateTokenEffect {
   controller: PlayerRef;
   zone: import('../state/types').Zone;
   count?: number;
+  /** Optional modifier granted to EACH created token immediately ("create N
+   *  tokens and give those tokens <Keyword> for this phase" — Chancellor
+   *  Palpatine). Registered as a per-token lasting effect with the modifier's
+   *  duration (e.g. end_of_phase), so it avoids a cross-effect "those tokens"
+   *  binding. */
+  grant?: Modifier;
 }
 
 export interface CaptureEffect {
@@ -423,6 +429,29 @@ export interface ExchangeControlEffect {
   effect: 'exchange_control';
   friendly: Selector;
   enemy: Selector;
+}
+
+/** "The attacking player takes control of this upgrade and attaches it to a unit
+ *  they control." (Death Star Plans.) The SOURCE upgrade detaches from its
+ *  current host and re-attaches to a unit chosen by `new_controller`. Control of
+ *  an upgrade is positional (it follows its host), so moving it onto the new
+ *  controller's unit transfers control. The original host's controller is
+ *  recorded as the upgrade's `owner` (so it returns to the owner's discard on
+ *  defeat). `new_controller: 'trigger_attacker'` reads the attacker of the
+ *  triggering attack event. No-op if that player controls no unit to host it. */
+export interface TransferUpgradeEffect {
+  effect: 'transfer_upgrade';
+  new_controller: 'trigger_attacker';
+}
+
+/** "Name a card. While this unit is in play, opponents can't play the named
+ *  card." (Regional Governor.) The source unit's controller names a card; the
+ *  chosen NAME is recorded on the source unit (`namedCard`). The play-restriction
+ *  itself is a continuous effect enforced in legal.ts + reducer.applyPlayCard
+ *  (opponents can't play a card of that name while the source unit is in play).
+ *  Self-referential — always names on behalf of, and records on, the source. */
+export interface NameCardEffect {
+  effect: 'name_card';
 }
 
 /** Peek at a hidden zone without changing state. The runtime emits a
@@ -578,6 +607,8 @@ export type Effect =
   | ReturnFromDiscardEffect
   | TakeControlEffect
   | ExchangeControlEffect
+  | TransferUpgradeEffect
+  | NameCardEffect
   | UseForceEffect
   | GainForceEffect
   | AttackEffect
@@ -619,7 +650,10 @@ export interface TriggerPredicate {
   card?: 'self' | 'trigger_source';
   controller?: PlayerRef;
   attacker?: 'self' | 'trigger_source';
-  defender?: 'self' | 'trigger_source';
+  /** 'self' → the source is the defender; 'host' → the source is an UPGRADE and
+   *  its HOST is the defender ("When attached unit is attacked" — Death Star
+   *  Plans). 'host' resolves the upgrade's host via the source iid. */
+  defender?: 'self' | 'trigger_source' | 'host';
   /** For attack events: true → the defender was DEFEATED by this attack ("…
    *  attacks and defeats a unit"). Evaluated after state-based actions have run
    *  (the defeated defender is already out of play), so it reads "defenderIid no
@@ -669,6 +703,13 @@ export interface ConstantAbility {
   type: 'constant';
   active_in_zone?: Zone;
   while?: Predicate;
+  /** Scopes the grant to "while attached unit is attacking" (Condemn). The
+   *  granted abilities are On-Attack (so they only fire during the attack anyway),
+   *  and a `grant.modifier.lose_all_abilities` is honored by trigger collection to
+   *  suppress the HOST's own abilities during its attack — implementing "it gains
+   *  '<On-Attack>' and loses all other abilities." Not consulted by the stat
+   *  modifier aggregator (its modifier carries no stats). */
+  while_attacking?: boolean;
   grant: {
     target: Selector;
     /** Stat/keyword modifier the target gains. Provide `modifier` and/or
@@ -724,7 +765,21 @@ export interface CostAbility {
   while?: Predicate;
 }
 
-export type Ability = TriggeredAbility | ActionAbility | ConstantAbility | ReplacementAbility | CostAbility;
+// Round-discount ability — a PASSIVE board-level discount: "The first <card_type>
+// you play each round costs N less." Unlike CostAbility (which reduces THIS card's
+// own cost), this lives on an in-play unit (usually granted to the host by an
+// upgrade — Death Star Plans) and reduces the cost of OTHER cards its controller
+// plays. Because each SWU round has exactly one action phase and cards are only
+// played then, "first … each round" is armed as a phase-scoped PendingDiscount at
+// the start of each action phase (see reducer.startActionPhase) and consumed by
+// the controller's first matching play — reusing the General's Blade discount path.
+export interface RoundDiscountAbility {
+  type: 'round_discount';
+  amount: number;            // reduction (positive = cheaper), clamped ≥0 at play
+  card_type?: 'unit' | 'event' | 'upgrade';
+}
+
+export type Ability = TriggeredAbility | ActionAbility | ConstantAbility | ReplacementAbility | CostAbility | RoundDiscountAbility;
 
 // ---------------------------------------------------------------------------
 // Discriminator helpers
@@ -735,6 +790,7 @@ export const isAction      = (a: Ability): a is ActionAbility      => a.type ===
 export const isConstant    = (a: Ability): a is ConstantAbility    => a.type === 'constant';
 export const isReplacement = (a: Ability): a is ReplacementAbility => a.type === 'replacement';
 export const isCost         = (a: Ability): a is CostAbility         => a.type === 'cost';
+export const isRoundDiscount = (a: Ability): a is RoundDiscountAbility => a.type === 'round_discount';
 
 export const isPredicateAnd = (p: Predicate): p is PredicateAnd => 'and' in p && Array.isArray((p as PredicateAnd).and);
 export const isPredicateOr  = (p: Predicate): p is PredicateOr  => 'or'  in p && Array.isArray((p as PredicateOr).or);

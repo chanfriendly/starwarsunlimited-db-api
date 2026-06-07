@@ -10,7 +10,7 @@ import type { CardInstance, CardRegistry, GameState, PlayerId } from '../state/t
 import type { PlayerRef, Predicate, PredicateLeaf, Range, TriggerPredicate } from '../spec/ast';
 import { isPredicateAnd, isPredicateNot, isPredicateOr } from '../spec/ast';
 import { isUnit } from '../spec/types';
-import { findCard } from '../state/zones';
+import { findCard, findHostOfUpgrade } from '../state/zones';
 import { effectiveHp } from './modifiers';
 
 export interface EvalCtx {
@@ -67,6 +67,9 @@ export function evalCardPredicate(
   if (leaf.card_cost !== undefined && !inRange(spec && 'cost' in spec ? spec.cost ?? 0 : 0, leaf.card_cost)) return false;
   if (leaf.card_is_unique !== undefined && Boolean(spec && 'unique' in spec ? spec.unique : false) !== leaf.card_is_unique) return false;
   if (leaf.card_is_token !== undefined && inst.isToken !== leaf.card_is_token) return false;
+  // A deployed leader-unit is an in-arena CardInstance whose cardId is a leader
+  // spec ("if you control a leader unit, …" — Chancellor Palpatine).
+  if (leaf.card_is_leader_unit !== undefined && (spec?.type === 'leader') !== leaf.card_is_leader_unit) return false;
 
   if (leaf.controller !== undefined) {
     const want = resolvePlayer(leaf.controller, ctx);
@@ -183,6 +186,14 @@ export function evalTriggerPredicate(
   if (p.defender === 'self') {
     if (event.kind !== 'ATTACK_DECLARED' && event.kind !== 'ATTACK_ENDED') return false;
     if (event.defenderIid !== ctx.sourceIid) return false;
+  }
+  if (p.defender === 'host') {
+    // The source is an upgrade; its HOST must be the defender ("When attached
+    // unit is attacked" — Death Star Plans).
+    if (event.kind !== 'ATTACK_DECLARED' && event.kind !== 'ATTACK_ENDED') return false;
+    if (!ctx.sourceIid) return false;
+    const host = findHostOfUpgrade(ctx.state, ctx.sourceIid);
+    if (!host || event.defenderIid !== host.inst.iid) return false;
   }
 
   // For non-self triggers (Ki-Adi-Mundi: any clone played by self), allow

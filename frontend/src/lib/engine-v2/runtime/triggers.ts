@@ -16,7 +16,8 @@
 import type { GameEvent } from '../state/bus';
 import type { CardInstance, CardRegistry, GameState, PlayerId, TriggerInstance } from '../state/types';
 import type { Ability, TriggeredAbility, TriggerCondition } from '../spec/ast';
-import { isTriggered } from '../spec/ast';
+import type { PendingDiscount } from '../state/types';
+import { isTriggered, isRoundDiscount } from '../spec/ast';
 import { getZoneArr, findCard } from '../state/zones';
 import { evalTriggerPredicate, evalCardPredicate, type EvalCtx } from './predicates';
 import { applyEffect } from './interpret';
@@ -136,6 +137,44 @@ function grantedAbilitiesForHost(
   return out;
 }
 
+/** Scan in-play units for `round_discount` abilities — intrinsic ones plus those
+ *  GRANTED to a host by an attached upgrade ("Attached unit gains: 'The first unit
+ *  you play each round costs N less'" — Death Star Plans) — and return the
+ *  per-player PendingDiscounts to arm. Called by reducer.startActionPhase: each SWU
+ *  round has one action phase, so "first … each round" is a phase-scoped discount
+ *  re-armed at the start of every round and consumed by the controller's first
+ *  matching play. */
+export function roundDiscountsToArm(state: GameState, reg: CardRegistry): Array<{ pid: PlayerId; discount: PendingDiscount }> {
+  const out: Array<{ pid: PlayerId; discount: PendingDiscount }> = [];
+  for (const pid of state.playerOrder) {
+    const p = state.players[pid];
+    for (const host of [...p.groundArena, ...p.spaceArena]) {
+      const own = cardAbilities(reg, host);
+      const granted = grantedAbilitiesForHost(state, reg, host, pid, []);
+      for (const ab of [...own, ...granted]) {
+        if (!isRoundDiscount(ab)) continue;
+        out.push({ pid, discount: { amount: ab.amount, cardType: ab.card_type } });
+      }
+    }
+  }
+  return out;
+}
+
+/** True iff `host` carries an upgrade whose constant ability is `while_attacking`
+ *  and grants `lose_all_abilities` (Condemn). While such a host attacks, its OWN
+ *  abilities are suppressed for the attack triggers (only the granted Condemn
+ *  ability resolves). */
+function hostLosesOwnAbilitiesWhileAttacking(host: CardInstance, reg: CardRegistry): boolean {
+  for (const up of host.upgrades) {
+    const s = reg.cards[up.cardId];
+    if (!s || !('abilities' in s) || !s.abilities) continue;
+    for (const ab of s.abilities) {
+      if (ab.type === 'constant' && ab.while_attacking && ab.grant.modifier?.lose_all_abilities) return true;
+    }
+  }
+  return false;
+}
+
 interface CardSlot { inst: CardInstance; controller: PlayerId }
 
 function inPlayCards(state: GameState): CardSlot[] {
@@ -202,12 +241,22 @@ export function collectTriggers(
     const isHost = spec && (spec.type === 'unit' || spec.type === 'leader');
     const granted = isHost ? grantedAbilitiesForHost(state, reg, inst, controller, events) : [];
     const abs = granted.length > 0 ? [...own, ...granted] : own;
+    // Condemn: "While attached unit is attacking … it loses all other abilities."
+    // Compute once per host; applied below to the host's OWN abilities on its
+    // own attack events only (the only window where abilities compete).
+    const losesOwnWhileAttacking = !!isHost && hostLosesOwnAbilitiesWhileAttacking(inst, reg);
     abs.forEach((ab, abIdx) => {
       if (!isTriggered(ab)) return;
       const wanted = ab.on;
+      const isOwn = abIdx < own.length;
       for (const event of events) {
         const eventCondition = EVENT_KIND_TO_TRIGGER[event.kind];
         if (eventCondition !== wanted) continue;
+        // Suppress the host's OWN abilities while it is attacking (Condemn): only
+        // the granted Condemn ability resolves on the host's attack events.
+        if (losesOwnWhileAttacking && isOwn
+            && (event.kind === 'ATTACK_DECLARED' || event.kind === 'ATTACK_ENDED')
+            && event.attackerIid === inst.iid) continue;
         const ctx: EvalCtx = {
           state, reg,
           sourceIid: inst.iid,

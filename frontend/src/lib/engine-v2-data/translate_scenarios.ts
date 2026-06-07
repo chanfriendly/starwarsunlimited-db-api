@@ -438,6 +438,59 @@ scenario('Matcher: The Darksaber — both clauses (Sentinel grant + When-Played 
   if (!('attached_to_self' in then.target)) throw new Error('readies the host');
 });
 
+scenario('Matcher: Death Star Plans — both clauses (when-attacked upgrade transfer + granted round-discount) → full', () => {
+  const r = matchCard({ name: 'Death Star Plans', type: 'Upgrade', text: 'When attached unit is attacked: The attacking player takes control of this upgrade and attaches it to a unit they control.\nAttached unit gains: “The first unit you play each round costs 2 resources less.”' });
+  assertEq(r.coverage, 'full', 'whole card covered');
+  assertEq(r.abilities.length, 2, 'two abilities');
+  const trig = r.abilities.find(a => a.type === 'triggered');
+  if (!trig || trig.type !== 'triggered') throw new Error('expected a triggered ability');
+  assertEq(trig.on, 'event.attack_declared', 'fires when attacked');
+  assertEq((trig.where as { defender?: string }).defender, 'host', 'host is the defender');
+  assertEq(trig.do.effect, 'transfer_upgrade', 'transfers the upgrade');
+  const grant = r.abilities.find(a => a.type === 'constant');
+  if (!grant || grant.type !== 'constant' || !grant.grant.abilities) throw new Error('expected constant grant.abilities');
+  const g = grant.grant.abilities[0];
+  if (g.type !== 'round_discount') throw new Error('granted a round_discount');
+  assertEq(g.amount, 2, 'discount 2');
+  assertEq(g.card_type, 'unit', 'units only');
+});
+
+scenario('Matcher: "When Played: Name a card. While this unit is in play, opponents can\'t play the named card." → name_card (Regional Governor)', () => {
+  const r = matchCard({ name: 'Regional Governor', type: 'Unit', text: "When Played: Name a card. While this unit is in play, opponents can't play the named card." });
+  assertEq(r.coverage, 'full', 'whole card covered');
+  const a = r.abilities[0];
+  if (a.type !== 'triggered' || a.on !== 'event.card_played') throw new Error('expected a When-Played trigger');
+  assertEq(a.do.effect, 'name_card', 'names a card');
+});
+
+scenario('Matcher: "If you control a leader unit, create 2 Spy tokens and give those tokens Sentinel for this phase." → if-on-leader-unit + create_token grant (Chancellor Palpatine)', () => {
+  const r = matchCard({ name: 'Chancellor Palpatine', type: 'Unit', text: 'When Played: If you control a leader unit, create 2 Spy tokens and give those tokens Sentinel for this phase.' });
+  assertEq(r.coverage, 'full', 'whole clause covered');
+  const a = r.abilities[0];
+  if (a.type !== 'triggered' || a.do.effect !== 'if') throw new Error('expected a When-Played if');
+  const cond = (a.do as { condition: { controller_controls?: { filter?: { card_is_leader_unit?: boolean } } } }).condition;
+  if (cond.controller_controls?.filter?.card_is_leader_unit !== true) throw new Error('gated on controlling a leader unit');
+  const then = (a.do as { then: { effect: string; count?: number; grant?: { keyword?: string; duration?: string } } }).then;
+  assertEq(then.effect, 'create_token', 'creates tokens');
+  assertEq(then.count, 2, 'two tokens');
+  assertEq(then.grant?.keyword, 'sentinel', 'granted Sentinel');
+  assertEq(then.grant?.duration, 'end_of_phase', 'for this phase');
+});
+
+scenario('Matcher: Condemn — while-attacking grant (disclose → -6/-0) + loses all other abilities → full', () => {
+  const r = matchCard({ name: 'Condemn', type: 'Upgrade', text: 'While attached unit is attacking, it gains: “On Attack: The defending player may disclose VigilanceVillainy. If they do, this unit gets –6/–0 for this attack” and loses all other abilities.' });
+  assertEq(r.coverage, 'full', 'whole card covered');
+  const a = r.abilities[0];
+  if (a.type !== 'constant' || !a.while_attacking) throw new Error('expected a while_attacking constant');
+  if (!a.grant.modifier?.lose_all_abilities) throw new Error('grants lose_all_abilities');
+  const g = a.grant.abilities?.[0];
+  if (!g || g.type !== 'triggered' || g.on !== 'event.attack_declared') throw new Error('granted On-Attack ability');
+  if (g.do.effect !== 'if_did') throw new Error('On-Attack body is if_did(disclose, give)');
+  const giveMod = (g.do as { then?: { effect: string; modifier?: { power?: number; duration?: string } } }).then;
+  assertEq(giveMod?.modifier?.power, -6, 'gives -6 power');
+  assertEq(giveMod?.modifier?.duration, 'end_of_attack', 'for this attack');
+});
+
 scenario('Matcher: "Attached unit gains: \'Bounty — Draw 2 cards.\'" → grants an opponent-controlled bounty (Death Mark)', () => {
   const r = matchCard({ name: 'Death Mark', type: 'Upgrade', text: 'Attached unit gains: “Bounty — Draw 2 cards.”' });
   assertEq(r.coverage, 'full', 'coverage');

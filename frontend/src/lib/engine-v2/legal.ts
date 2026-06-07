@@ -5,7 +5,7 @@
 import type { PlayerAction } from './actions';
 import type { CardRegistry, GameState, PlayerId } from './state/types';
 import type { Ability, ActionAbility, ActionAbilityCost, Effect, Selector } from './spec/ast';
-import { findCard, getZoneArr } from './state/zones';
+import { findCard, getZoneArr, isPlayNameBlocked } from './state/zones';
 import { effectivePower, hasEffectiveKeyword } from './runtime/modifiers';
 import { isLimitExhausted, makeUndeployedLeaderIid } from './runtime/triggers';
 import { resolveSelector } from './runtime/selectors';
@@ -51,6 +51,8 @@ export function getLegalActions(state: GameState, reg: CardRegistry, pid: Player
     const spec = reg.cards[c.cardId];
     if (!spec) continue;
     if (spec.type !== 'unit' && spec.type !== 'event' && spec.type !== 'upgrade') continue;
+    // "Opponents can't play the named card" (Regional Governor) — blocked by name.
+    if (isPlayNameBlocked(state, pid, spec.name)) continue;
     const cost = effectiveCost(state, reg, spec, pid);
     // Exploit (§16): the player may defeat up to X friendly units when playing
     // this card, each cutting the cost by 2 (floored at 0). The card is

@@ -94,6 +94,9 @@ function collectModifiersFor(
           for (const up of source.upgrades) {
             for (const ab of cardAbilities(reg, up)) {
               if (!isConstant(ab)) continue;
+              // `while_attacking` grants (Condemn) carry no stat modifier and are
+              // handled in trigger collection — skip them in the stat aggregator.
+              if (ab.while_attacking) continue;
               // Upgrade constants always apply while the host is in play.
               const ctx: EvalCtx = { state, reg, sourceIid: up.iid, sourcePlayer: pid };
               if (ab.while && !evalSourcePredicate(ab.while, ctx, up, pid)) continue;

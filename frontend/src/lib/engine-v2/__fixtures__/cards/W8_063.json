@@ -1,0 +1,42 @@
+{
+  "id": "W8_063",
+  "name": "Condemn (test)",
+  "type": "upgrade",
+  "cost": 1,
+  "aspects": ["vigilance"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "constant",
+      "while_attacking": true,
+      "grant": {
+        "target": { "attached_to_self": true },
+        "modifier": { "lose_all_abilities": true },
+        "abilities": [
+          {
+            "type": "triggered",
+            "on": "event.attack_declared",
+            "where": { "attacker": "self" },
+            "do": {
+              "effect": "if_did",
+              "do": {
+                "effect": "optional",
+                "chooser": "opponent",
+                "do": {
+                  "effect": "disclose",
+                  "player": "opponent",
+                  "filter": { "or": [{ "card_aspect": "vigilance" }, { "card_aspect": "villainy" }] }
+                }
+              },
+              "then": {
+                "effect": "give",
+                "target": { "self": true },
+                "modifier": { "duration": "end_of_attack", "power": -6 }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

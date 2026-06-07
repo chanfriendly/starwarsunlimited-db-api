@@ -1,0 +1,25 @@
+{
+  "id": "W8_060",
+  "name": "Death Star Plans (test)",
+  "type": "upgrade",
+  "cost": 2,
+  "aspects": ["villainy"],
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "triggered",
+      "on": "event.attack_declared",
+      "where": { "defender": "host" },
+      "do": { "effect": "transfer_upgrade", "new_controller": "trigger_attacker" }
+    },
+    {
+      "type": "constant",
+      "grant": {
+        "target": { "attached_to_self": true },
+        "abilities": [
+          { "type": "round_discount", "amount": 2, "card_type": "unit" }
+        ]
+      }
+    }
+  ]
+}
