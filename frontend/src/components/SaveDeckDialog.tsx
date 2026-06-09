@@ -2,10 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { saveUserDeck, updateUserDeck } from '@/lib/api';
 import { useDeckBuilder } from '@/contexts/DeckBuilderContext';
 
@@ -83,69 +80,84 @@ const SaveDeckDialog = ({ isOpen, onClose, onSuccess, existingDeckId }: SaveDeck
     }
   };
 
+  const labelStyle: React.CSSProperties = {
+    display: 'block', fontFamily: 'var(--ts-font-mono)', fontSize: 9, letterSpacing: '0.2em',
+    color: 'var(--ts-ink-3)', textTransform: 'uppercase', marginBottom: 8,
+  };
+  const totalCards = deckCards.reduce((sum, item) => sum + item.quantity, 0);
+  const summaryRows: Array<[string, string]> = [
+    ['Leaders', `${leaders.length} / 2`],
+    ['Base', base ? '1 / 1' : '0 / 1'],
+    ['Total Cards', `${totalCards}`],
+  ];
+
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="bg-gray-900 text-white border border-gray-700 sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        style={{ background: 'var(--ts-bg-2)', border: '1px solid var(--ts-line)', color: 'var(--ts-ink)', borderRadius: 0 }}
+      >
         <DialogHeader>
-          <DialogTitle className="text-xl font-semibold">{isUpdate ? 'Update Deck' : 'Save Deck'}</DialogTitle>
-          <DialogDescription className="text-gray-400">
+          <div className="ts-eyebrow" style={{ marginBottom: 8 }}>Twin Suns · {isUpdate ? 'Update' : 'Save'} Deck</div>
+          <DialogTitle style={{ fontFamily: 'var(--ts-font-display)', fontSize: 28, fontWeight: 400, color: 'var(--ts-ink)', lineHeight: 1.1 }}>
+            {isUpdate ? 'Update Deck' : 'Save Deck'}
+          </DialogTitle>
+          <DialogDescription style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 10, letterSpacing: '0.08em', color: 'var(--ts-ink-3)', marginTop: 4 }}>
             {isUpdate ? 'Save your changes to this deck.' : 'Give your deck a name to save it to your profile.'}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4 py-4">
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="deck-name" className="text-right">
-              Name
-            </Label>
-            <Input
-              id="deck-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Enter deck name..."
-              className="col-span-3 bg-gray-800 border-gray-700 text-white"
-            />
-          </div>
+        <div className="ts-rule" style={{ margin: '4px 0 16px' }} />
 
-          {/* Deck Info */}
-          <div className="bg-gray-800 p-3 rounded-md text-sm">
-            <div className="flex justify-between mb-1">
-              <span className="text-gray-400">Leaders:</span>
-              <span className="text-white">{leaders.length} / 2</span>
-            </div>
-            <div className="flex justify-between mb-1">
-              <span className="text-gray-400">Base:</span>
-              <span className="text-white">{base ? '1 / 1' : '0 / 1'}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-400">Total Cards:</span>
-              <span className="text-white">{deckCards.reduce((sum, item) => sum + item.quantity, 0)}</span>
-            </div>
+        <div>
+          <label htmlFor="deck-name" style={labelStyle}>Name</label>
+          <input
+            id="deck-name"
+            className="ts-input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Enter deck name..."
+            autoFocus
+            style={{ borderColor: error && !name.trim() ? 'var(--ts-red)' : undefined }}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !isSaving) handleSave(); }}
+          />
+
+          {/* Deck summary */}
+          <div style={{ marginTop: 20, padding: '14px 16px', background: 'var(--ts-bg-3)', border: '1px solid var(--ts-line)' }}>
+            {summaryRows.map(([label, value], i) => (
+              <div
+                key={label}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: i < summaryRows.length - 1 ? 8 : 0 }}
+              >
+                <span style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ts-ink-3)' }}>{label}</span>
+                <span style={{ fontFamily: 'var(--ts-font-mono)', fontSize: 12, letterSpacing: '0.06em', color: 'var(--ts-amber)' }}>{value}</span>
+              </div>
+            ))}
           </div>
 
           {error && (
-            <div className="text-red-500 text-sm p-2 bg-red-500/10 rounded-md border border-red-500/20">
+            <div style={{ marginTop: 16, padding: '10px 14px', border: '1px solid var(--ts-red)', background: 'rgba(255,61,46,0.08)', fontFamily: 'var(--ts-font-mono)', fontSize: 11, letterSpacing: '0.06em', color: 'rgba(255,100,90,0.95)', lineHeight: 1.5 }}>
               {error}
             </div>
           )}
         </div>
 
-        <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={onClose}
-            className="bg-transparent border-gray-600 hover:bg-gray-800 text-white"
-          >
+        <div className="ts-rule" style={{ margin: '20px 0 16px' }} />
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button type="button" className="ts-btn" onClick={onClose} disabled={isSaving}>
             Cancel
-          </Button>
-          <Button
+          </button>
+          <button
+            type="button"
+            className="ts-btn ts-btn-primary"
             onClick={handleSave}
             disabled={isSaving}
-            className="bg-purple-600 hover:bg-purple-700 text-white"
+            style={{ opacity: isSaving ? 0.6 : 1 }}
           >
-            {isSaving ? 'Saving...' : isUpdate ? 'Update Deck' : 'Save Deck'}
-          </Button>
-        </DialogFooter>
+            {isSaving ? 'Saving…' : isUpdate ? 'Update Deck' : 'Save Deck'}
+          </button>
+        </div>
       </DialogContent>
     </Dialog>
   );

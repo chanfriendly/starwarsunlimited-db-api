@@ -109,6 +109,7 @@ export function applyEffect(ctx: InterpCtx, effect: Effect): InterpResult {
     case 'exchange_control': return applyExchangeControl(ctx, effect);
     case 'transfer_upgrade': return applyTransferUpgrade(ctx, effect);
     case 'name_card':        return applyNameCard(ctx, effect);
+    case 'defeat_upgrade':   return applyDefeatUpgrade(ctx, effect);
     case 'use_force':        return applyUseForce(ctx, effect);
     case 'gain_force':       return applyGainForce(ctx, effect);
     case 'attack':           return applyAttackEffect(ctx, effect);
@@ -710,6 +711,60 @@ function applyNameCard(ctx: InterpCtx, _e: Extract<Effect, { effect: 'name_card'
   const named = pick.kind === 'option' ? pick.value : options[0].value;
   const s = mapInstance(ctx.state, ctx.sourceIid, c => ({ ...c, namedCard: named }));
   return { state: s, events: [] };
+}
+
+/** Detach + discard a single upgrade (to its owner's discard, cleared of state),
+ *  emitting UPGRADE_DETACHED — the same routing state_based uses when a host is
+ *  defeated. Shared by the defeat_upgrade effect. */
+function defeatUpgradeByIid(s: GameState, upgradeIid: string): { state: GameState; events: GameEvent[] } {
+  const up = findUpgrade(s, upgradeIid);
+  if (!up) return { state: s, events: [] };
+  const hostIid = up.loc.hostIid;
+  const owner = up.inst.owner ?? up.loc.controller;
+  let s2 = mapInstance(s, hostIid, h => ({ ...h, upgrades: h.upgrades.filter(u => u.iid !== upgradeIid) }));
+  const op = s2.players[owner];
+  const cleared: CardInstance = { ...up.inst, damage: 0, exhausted: false, upgrades: [], owner: undefined };
+  s2 = withPlayer(s2, owner, { ...op, discard: [...op.discard, cleared] });
+  return { state: s2, events: [{ kind: 'UPGRADE_DETACHED', upgradeIid, hostIid }] };
+}
+
+function applyDefeatUpgrade(ctx: InterpCtx, e: Extract<Effect, { effect: 'defeat_upgrade' }>): InterpResult {
+  if (e.self) {
+    if (!ctx.sourceIid) return { state: ctx.state, events: [] };
+    return defeatUpgradeByIid(ctx.state, ctx.sourceIid);
+  }
+  const want = resolvePlayer(e.controller ?? 'any', ctx); // 'self'/'opponent' → pid, else 'any'
+  const pids = ctx.state.playerOrder.filter(p => want === 'any' || p === want);
+  const candidates: string[] = [];
+  for (const pid of pids) {
+    const p = ctx.state.players[pid];
+    for (const u of [...p.groundArena, ...p.spaceArena]) {
+      for (const up of u.upgrades) {
+        if (e.filter && !evalCardPredicate(e.filter, ctx, up, pid)) continue;
+        candidates.push(up.iid);
+      }
+    }
+  }
+  if (candidates.length === 0) return { state: ctx.state, events: [] };
+  const chooser = ctx.chooser ?? defaultChooser;
+  const count = e.count ?? 1;
+  let s = ctx.state;
+  const events: GameEvent[] = [];
+  const picked: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const remaining = candidates.filter(iid => !picked.includes(iid) && findUpgrade(s, iid));
+    if (remaining.length === 0) break;
+    let iid = remaining[0];
+    if (remaining.length > 1) {
+      const options = remaining.map(id => ({ label: ctx.reg.cards[findUpgrade(s, id)!.inst.cardId]?.name ?? id, value: id }));
+      const pick = chooser({ kind: 'choose_one', prompt: 'Defeat which upgrade?', options, player: ctx.sourcePlayer, canPass: false });
+      if (pick.kind === 'option') iid = pick.value;
+    }
+    picked.push(iid);
+    const r = defeatUpgradeByIid(s, iid);
+    s = r.state; events.push(...r.events);
+  }
+  return { state: s, events };
 }
 
 function applyReturnToHand(ctx: InterpCtx, e: Extract<Effect, { effect: 'return_to_hand' }>): InterpResult {

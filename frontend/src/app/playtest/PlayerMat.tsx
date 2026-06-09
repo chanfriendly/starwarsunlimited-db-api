@@ -7,6 +7,7 @@ import type {
 } from '@/lib/engine-v2';
 import { effectivePower, effectiveHp } from '@/lib/engine-v2/runtime/modifiers';
 import { UnitCard } from './UnitCard';
+import { CardHover } from './CardHover';
 
 export interface PlayerMatProps {
   state: GameState;
@@ -89,9 +90,11 @@ export function PlayerMat({ state, registry, pid, perspective }: PlayerMatProps)
             const spec = registry.cards[c.cardId];
             const cost = spec && 'cost' in spec ? (spec.cost ?? 0) : 0;
             return (
-              <span key={c.iid} style={handChip} title={c.iid}>
-                {spec?.name ?? c.cardId} <span style={costBadge}>{cost}</span>
-              </span>
+              <CardHover key={c.iid} spec={spec}>
+                <span style={handChip} title={c.iid}>
+                  {spec?.name ?? c.cardId} <span style={costBadge}>{cost}</span>
+                </span>
+              </CardHover>
             );
           })
         ) : (

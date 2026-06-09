@@ -4,6 +4,7 @@
 
 import type { CardInstance, CardRegistry, GameState, PlayerId } from '@/lib/engine-v2';
 import { effectivePower, effectiveHp } from '@/lib/engine-v2/runtime/modifiers';
+import { CardHover } from './CardHover';
 
 export interface UnitCardProps {
   inst: CardInstance;
@@ -22,6 +23,7 @@ export function UnitCard({ inst, state, registry, pid }: UnitCardProps) {
 
   return (
     <div style={{ ...cardWrap, opacity: inst.exhausted ? 0.55 : 1 }}>
+      <CardHover spec={spec} power={pow} hp={hp} hpRemaining={hpRem} style={{ display: 'block' }}>
       <div style={{ ...cardBody, borderColor: isToken ? 'rgba(140,140,255,0.45)' : 'rgba(200,160,40,0.4)' }}>
         <div style={cardName} title={inst.iid}>
           {isToken ? '✨ ' : ''}{name}
@@ -38,6 +40,7 @@ export function UnitCard({ inst, state, registry, pid }: UnitCardProps) {
         </div>
         {inst.exhausted && <div style={exhaustOverlay}>EXHAUSTED</div>}
       </div>
+      </CardHover>
       {/* Upgrades — small chips stacked below the host */}
       {inst.upgrades.length > 0 && (
         <div style={upgradeStack}>

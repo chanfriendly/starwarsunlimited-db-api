@@ -368,6 +368,55 @@ scenario('Matcher: "Create a Credit token." / "Create 2 Credit tokens." → crea
   assertEq((two.abilities[0] as { do: { count?: number } }).do.count, 2, 'count 2');
 });
 
+scenario('Matcher: exhaust variants — attached unit / friendly / non-leader / remaining-HP / "If this unit is upgraded"', () => {
+  assertEq(matchCard({ name: 'X', type: 'Upgrade', text: 'When Played: Exhaust attached unit.' }).coverage, 'full', 'exhaust attached');
+  const fr = matchCard({ name: 'X', type: 'Event', text: 'Exhaust a friendly unit.' });
+  assertEq((fr.abilities[0] as { do: { target: { controller?: string } } }).do.target.controller, 'self', 'friendly → self');
+  const hp = matchCard({ name: 'X', type: 'Event', text: 'Exhaust an enemy unit with 4 or less remaining HP.' });
+  if (!(hp.abilities[0] as { do: { target: { filter?: { remaining_hp?: object } } } }).do.target.filter?.remaining_hp) throw new Error('remaining-HP filter');
+  const up = matchCard({ name: 'X', type: 'Unit', text: 'On Attack: If this unit is upgraded, exhaust an enemy unit.' });
+  if ((up.abilities[0] as { do: { effect: string; condition?: { self_upgraded?: boolean } } }).do.condition?.self_upgraded !== true) throw new Error('if-self-upgraded');
+});
+
+scenario('Matcher: "While the Force is with you, this unit gains <Keyword> / each friendly unit gets +N/+N" → player_has_force_token gate (reuses existing predicate)', () => {
+  const a = matchCard({ name: 'Plo Koon', type: 'Unit', text: 'While the Force is with you, this unit gains Grit. (He gets +1/+0 for each damage on him.)' });
+  assertEq(a.coverage, 'full', 'self keyword grant');
+  if ((a.abilities[0] as { while?: { player_has_force_token?: boolean }; grant: { modifier?: { keyword?: string } } }).while?.player_has_force_token !== true) throw new Error('gated on the Force token');
+  const b = matchCard({ name: 'The Son', type: 'Unit', text: 'While the Force is with you, each friendly unit gets +2/+0.' });
+  assertEq(b.coverage, 'full', 'friendly aura');
+});
+
+scenario('Matcher: "Defeat [up to N] [enemy] [non-unique] upgrade(s)." / "Defeat this upgrade." → defeat_upgrade', () => {
+  const a = matchCard({ name: 'X', type: 'Event', text: 'Defeat an enemy upgrade.' });
+  assertEq(a.coverage, 'full', 'enemy upgrade');
+  if ((a.abilities[0] as { do: { effect: string; controller?: string } }).do.effect !== 'defeat_upgrade') throw new Error('expected defeat_upgrade');
+  assertEq((a.abilities[0] as { do: { controller?: string } }).do.controller, 'opponent', 'enemy → opponent');
+  const b = matchCard({ name: 'X', type: 'Event', text: 'Defeat up to 2 upgrades.' });
+  assertEq((b.abilities[0] as { do: { count?: number } }).do.count, 2, 'up to 2');
+  const c = matchCard({ name: 'X', type: 'Upgrade', text: 'On Attack: Defeat this upgrade.' });
+  if ((c.abilities[0] as { do: { effect: string; self?: boolean } }).do.self !== true) throw new Error('"this upgrade" → self defeat');
+});
+
+scenario('Matcher: "If you control Poe Dameron (as a unit, upgrade, or leader), …" → if-on-controls_named (Black One)', () => {
+  const r = matchCard({ name: 'Black One', type: 'Unit', text: 'On Attack: If you control Poe Dameron (as a unit, upgrade, or leader), you may deal 1 damage to a unit.' });
+  assertEq(r.coverage, 'full', 'coverage');
+  const a = r.abilities[0];
+  if (a.type !== 'triggered' || a.do.effect !== 'if') throw new Error('expected On-Attack if');
+  assertEq((a.do as { condition: { controls_named?: string } }).condition.controls_named, 'Poe Dameron', 'gated on controlling the named card');
+  // The generic "If you control a/another <X> unit" form is NOT misread as a name.
+  const generic = matchCard({ name: 'X', type: 'Unit', text: 'On Attack: If you control another Villainy unit, deal 1 damage to a unit.' });
+  if ((generic.abilities[0] as { do: { condition: object } }).do.condition.hasOwnProperty('controls_named')) throw new Error('generic control must not use controls_named');
+});
+
+scenario('Matcher: "While you have the initiative, +2/+0" / "If you have the initiative, …" → has_initiative gate', () => {
+  const c = matchCard({ name: 'Senator’s Aide', type: 'Unit', text: 'While you have the initiative, this unit gets +2/+0.' });
+  assertEq(c.coverage, 'full', 'constant coverage');
+  if ((c.abilities[0] as { while?: { has_initiative?: boolean } }).while?.has_initiative !== true) throw new Error('constant gated on has_initiative');
+  const e = matchCard({ name: 'Jedi Knight', type: 'Unit', text: 'When Played: If you have the initiative, deal 2 damage to an enemy ground unit.' });
+  assertEq(e.coverage, 'full', 'effect coverage');
+  if ((e.abilities[0] as { do: { effect: string; condition?: { has_initiative?: boolean } } }).do.condition?.has_initiative !== true) throw new Error('effect gated on has_initiative');
+});
+
 scenario('Matcher: "If a unit left play this phase, create a Clone Trooper token." → if-on-left-play (Chancellor Palpatine)', () => {
   const r = matchCard({ name: 'Chancellor Palpatine', type: 'Unit', text: 'On Attack: If a unit left play this phase, create a Clone Trooper token.' });
   assertEq(r.coverage, 'full', 'coverage');
@@ -746,9 +795,10 @@ scenario('Matcher: modal "Choose two, in any order:" → choose_one count 2', ()
 });
 
 scenario('Matcher: modal with an unparseable mode stays residual (no partial misfire)', () => {
-  // "Defeat up to 2 upgrades" isn't templated → the whole modal must NOT match
-  // (otherwise the card would wrongly fire the parseable modes unconditionally).
-  const r = matchCard({ name: 'W', type: 'Event', text: 'Choose one:\nDraw a card.\nDefeat up to 2 upgrades.' });
+  // A modal with ANY unmodeled mode must NOT match (else the card would wrongly
+  // fire the parseable modes unconditionally). "An opponent reveals their hand"
+  // is not templated.
+  const r = matchCard({ name: 'W', type: 'Event', text: 'Choose one:\nDraw a card.\nAn opponent reveals their hand.' });
   assertEq(r.coverage, 'none', 'coverage none');
   assertEq(r.abilities.length, 0, 'no abilities emitted');
 });

@@ -12,6 +12,7 @@ import { Restore } from './restore';
 import { Saboteur } from './saboteur';
 import { Sentinel } from './sentinel';
 import { Shielded } from './shielded';
+import { Smuggle } from './smuggle';
 import type { KeywordDef } from './types';
 
 export const KEYWORDS: Record<string, KeywordDef> = {
@@ -26,6 +27,7 @@ export const KEYWORDS: Record<string, KeywordDef> = {
   saboteur: Saboteur,
   sentinel: Sentinel,
   shielded: Shielded,
+  smuggle: Smuggle,
 };
 
 export type { KeywordDef };

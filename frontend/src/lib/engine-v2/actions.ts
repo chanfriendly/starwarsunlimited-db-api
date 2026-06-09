@@ -9,6 +9,10 @@ export type PlayerAction =
    *  friendly unit to attach to. Ignored for units and events. */
   | { kind: 'PLAY_CARD'; player: PlayerId; iid: string; targetIid?: string }
   | { kind: 'DEPLOY_LEADER'; player: PlayerId; leaderIndex: number }
+  /** Smuggle (§14): play a card from your OWN resource zone for its bracketed
+   *  Smuggle cost instead of from hand, replacing it with the top of your deck.
+   *  `iid` names the facedown resource being smuggled. */
+  | { kind: 'SMUGGLE'; player: PlayerId; iid: string }
   /** Use an `Action [...]: …` ability on a card or leader. Exactly one of
    *  `sourceIid` (for in-play units, upgrades, or deployed leader-units) and
    *  `leaderIndex` (for un-deployed leaders) must be set. `abilityIndex`

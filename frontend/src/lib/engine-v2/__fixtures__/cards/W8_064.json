@@ -1,0 +1,27 @@
+{
+  "id": "W8_064",
+  "name": "Captain Rex (test)",
+  "type": "leader",
+  "cost": 4,
+  "aspects": ["heroism", "command"],
+  "arena": "ground",
+  "power": 4,
+  "hp": 5,
+  "traits": ["republic", "clone", "trooper", "officer"],
+  "leaderAbilities": [],
+  "leaderUnitAbilities": [
+    {
+      "type": "triggered",
+      "on": "event.leader_deployed",
+      "where": { "card": "self" },
+      "do": { "effect": "create_token", "token_id": "clone_trooper", "controller": "self", "zone": "ground_arena", "count": 1 }
+    },
+    {
+      "type": "constant",
+      "grant": {
+        "target": { "exclude": { "self": true }, "from": { "zone": "any_arena", "controller": "self", "filter": { "card_trait": "trooper" } } },
+        "modifier": { "power": 0, "health": 1 }
+      }
+    }
+  ]
+}

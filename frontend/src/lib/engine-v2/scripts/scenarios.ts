@@ -862,6 +862,81 @@ scenario('Action with a damage cost: pay by damaging a friendly unit, then draw 
   assertEq(d?.exhausted, true, 'exhaust cost paid');
 });
 
+scenario('Predicate has_initiative: "While you have the initiative, +2/+0" gates on the initiative', () => {
+  const u = mkInst('W8_065', { iid: 'u' });
+  const withInit = emptyState({ groundP1: [u], active: 'p1' }); // initiative defaults to p1
+  assertEq(effectivePower(withInit, reg, u, 'p1'), 4, 'p1 has initiative → +2 (2→4)');
+  const noInit: GameState = { ...withInit, initiative: 'p2' };
+  assertEq(effectivePower(noInit, reg, u, 'p1'), 2, 'p1 lacks initiative → unbuffed');
+});
+
+scenario('Predicate controls_named: counts the named card controlled as a unit OR a leader, and only by you (Clone General)', () => {
+  const u = mkInst('W8_066', { iid: 'u' });  // "While you control Clone General, +2/+0"
+  assertEq(effectivePower(emptyState({ groundP1: [u], active: 'p1' }), reg, u, 'p1'), 2, 'no Clone General → unbuffed');
+  // As a unit (a Clone General card in the arena).
+  const asUnit = emptyState({ groundP1: [u, mkInst('W4_001', { iid: 'cg' })], active: 'p1' });
+  assertEq(effectivePower(asUnit, reg, u, 'p1'), 4, 'control Clone General as a unit → +2');
+  // As a leader (un-deployed leader you control).
+  const base = emptyState({ groundP1: [u], active: 'p1' });
+  const asLeader: GameState = { ...base, players: { ...base.players, p1: { ...base.players.p1, leaders: [{ cardId: 'W4_001', side: 'leader', isDeployed: false, exhausted: false }] } } };
+  assertEq(effectivePower(asLeader, reg, u, 'p1'), 4, 'control Clone General as a leader → +2');
+  // The OPPONENT controlling it does not count.
+  const enemyHas = emptyState({ groundP1: [u], groundP2: [mkInst('W4_001', { iid: 'cg2' })], active: 'p1' });
+  assertEq(effectivePower(enemyHas, reg, u, 'p1'), 2, 'opponent controlling the named card does not count');
+});
+
+scenario('Smuggle (§14): play a card from the resource zone for its bracket cost, replaced by the top of deck', () => {
+  const smug = mkInst('W8_067', { iid: 'smug' });   // Smuggle 2, printed cost 8
+  const base = emptyState({ resourcesP1: 4, deckP1: [mkInst('W1_003', { iid: 'topdeck' })], active: 'p1' });
+  const withSmug: GameState = { ...base, players: { ...base.players, p1: { ...base.players.p1, resources: [smug, ...base.players.p1.resources] } } };
+  // SMUGGLE is offered (cost 2 ≤ ready resources).
+  if (!getLegalActions(withSmug, reg, 'p1').actions.some(a => a.kind === 'SMUGGLE' && a.iid === 'smug')) {
+    throw new Error('SMUGGLE should be a legal action');
+  }
+  const r = step(withSmug, { kind: 'SMUGGLE', player: 'p1', iid: 'smug' }, reg);
+  const inArena = r.next.players.p1.groundArena.find(c => c.iid === 'smug');
+  if (!inArena) throw new Error('smuggled unit should be in the ground arena');
+  assertEq(inArena.exhausted, true, 'smuggled unit enters play exhausted (§14f)');
+  if (r.next.players.p1.resources.some(c => c.iid === 'smug')) throw new Error('the smuggled card left the resource zone');
+  if (!r.next.players.p1.resources.some(c => c.iid === 'topdeck')) throw new Error('top of deck replaces it (§14g)');
+  assertEq(r.next.players.p1.resources.filter(c => c.exhausted).length >= 2, true, '2 resources spent to pay the Smuggle cost');
+});
+
+scenario('defeat_upgrade: defeats an enemy upgrade → detaches to its owner\'s discard', () => {
+  const up = mkInst('W8_058', { iid: 'up' });                       // an upgrade (The Darksaber test)
+  const host = mkInst('W1_001', { iid: 'host', upgrades: [up] });   // p2's unit
+  const state = emptyState({ groundP2: [host], active: 'p1' });
+  const r = applyEffect({ state, reg, sourcePlayer: 'p1', chooser: declineChooser }, { effect: 'defeat_upgrade', controller: 'opponent', count: 1 });
+  const hostAfter = r.state.players.p2.groundArena.find(c => c.iid === 'host');
+  if (hostAfter?.upgrades.some(u => u.iid === 'up')) throw new Error('upgrade should be defeated/detached from the host');
+  if (!r.state.players.p2.discard.some(c => c.iid === 'up')) throw new Error('defeated upgrade should be in its owner\'s (p2) discard');
+});
+
+scenario('defeat_upgrade self: "Defeat this upgrade" removes the source upgrade', () => {
+  const up = mkInst('W8_058', { iid: 'up' });
+  const host = mkInst('W1_001', { iid: 'host', upgrades: [up] });   // p1
+  const state = emptyState({ groundP1: [host], active: 'p1' });
+  const r = applyEffect({ state, reg, sourceIid: 'up', sourcePlayer: 'p1' }, { effect: 'defeat_upgrade', self: true });
+  assertEq(r.state.players.p1.groundArena.find(c => c.iid === 'host')?.upgrades.length, 0, 'source upgrade detached from host');
+  if (!r.state.players.p1.discard.some(c => c.iid === 'up')) throw new Error('source upgrade should be in the owner\'s discard');
+});
+
+scenario('When Deployed: a leader deploy_box ability fires on deploy + the aura buffs OTHER friendly Troopers (Captain Rex)', () => {
+  // Captain Rex (leader): "When Deployed: Create a Clone Trooper token." +
+  // "Each other friendly Trooper unit gets +0/+1."
+  const ally = mkInst('W1_001', { iid: 'ally' });   // Rebel/Trooper 3/3
+  const state = emptyState({ groundP1: [ally], resourcesP1: 6, active: 'p1' });
+  const withLeader: GameState = {
+    ...state,
+    players: { ...state.players, p1: { ...state.players.p1, leaders: [{ cardId: 'W8_064', side: 'leader', isDeployed: false, exhausted: false }] } },
+  };
+  const r = step(withLeader, { kind: 'DEPLOY_LEADER', player: 'p1', leaderIndex: 0 }, reg);
+  const tokens = r.next.players.p1.groundArena.filter(c => c.isToken && reg.cards[c.cardId]?.name === 'Clone Trooper');
+  assertEq(tokens.length, 1, 'deploying the leader fired When-Deployed → a Clone Trooper token');
+  const a = r.next.players.p1.groundArena.find(c => c.iid === 'ally');
+  assertEq(effectiveHp(r.next, reg, a!, 'p1'), 4, 'a friendly Trooper ally gets +0/+1 from the aura (3 → 4)');
+});
+
 scenario('Attacks-and-defeats trigger: the attacker gains Experience (Darth Revan)', () => {
   // Revan in play. A DIFFERENT friendly unit (3/3) attacks and defeats a 2/2.
   // Revan's "When a friendly unit attacks and defeats a unit" fires → the

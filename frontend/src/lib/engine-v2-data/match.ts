@@ -255,6 +255,37 @@ export function parseEffectClause(raw: string): Effect | null {
     return { effect: 'if', condition: { unit_left_play_this_phase: scope }, then: opt ? { effect: 'optional', do: inner } : inner };
   }
 
+  // "If you control <NamedCard> [(as a unit, upgrade, or leader)], <effect>." →
+  // an `if` gated on `controls_named`. The name is a proper noun (capitalized, no
+  // leading article, not ending in "unit"), distinguishing it from the generic
+  // "If you control a/another <X> unit" rule below. Reusable for every
+  // character-control card (Poe/Boba/Luke/…).
+  if ((m = t.match(/^If you control ([A-Z][^,()]*?)(?:\s*\(as[^)]*\))?,\s*(.+)$/))) {
+    const name = m[1].trim();
+    if (!/\bunits?$/i.test(name) && !/^(?:a|an|another|your|the)\b/i.test(name)) {
+      const body = m[2].trim();
+      const opt = /^You may /i.test(body);
+      const inner = parseEffectClause(body.replace(/^You may /i, ''));
+      if (inner) return { effect: 'if', condition: { controls_named: name }, then: opt ? { effect: 'optional', do: inner } : inner };
+    }
+  }
+
+  // "If this unit is upgraded, <effect>." → `if` gated on self_upgraded.
+  if ((m = t.match(/^If this unit is upgraded,\s*(.+)$/i))) {
+    const body = m[1].trim();
+    const opt = /^You may /i.test(body);
+    const inner = parseEffectClause(body.replace(/^You may /i, ''));
+    if (inner) return { effect: 'if', condition: { self_upgraded: true }, then: opt ? { effect: 'optional', do: inner } : inner };
+  }
+
+  // "If you have the initiative, <effect>." → an `if` gated on `has_initiative`.
+  if ((m = t.match(/^If you have the initiative,\s*(.+)$/i))) {
+    const body = m[1].trim();
+    const opt = /^You may /i.test(body);
+    const inner = parseEffectClause(body.replace(/^You may /i, ''));
+    if (inner) return { effect: 'if', condition: { has_initiative: true }, then: opt ? { effect: 'optional', do: inner } : inner };
+  }
+
   // "If you control [another] [<Trait/Aspect/damaged/exhausted>] unit, <effect>."
   // → an `if` gated on the new controller_controls predicate. The inner effect
   // must itself parse (a leading "you may" wraps it as optional). (Distinct from
@@ -506,9 +537,21 @@ export function parseEffectClause(raw: string): Effect | null {
     return { effect: 'give', target: m[1] ? chosenEnemyUnit : chosenFriendlyUnit, modifier: { power: -parseInt(m[2], 10), health: -parseInt(m[3], 10), duration: 'end_of_phase' } };
   }
 
-  // Exhaust an (enemy) (ground|space) unit.
-  if ((m = t.match(/^Exhaust an? (?:enemy )?(?:ground |space )?unit\.?$/i))) {
-    return { effect: 'exhaust', target: chosenEnemyUnit };
+  // Exhaust attached unit. (an upgrade exhausts its host.)
+  if (/^Exhaust attached unit\.?$/i.test(t)) {
+    return { effect: 'exhaust', target: { attached_to_self: true } };
+  }
+  // Exhaust a[n] [enemy|friendly] [non-leader] [ground|space] unit [with N or less
+  // remaining HP]. (No enemy/friendly qualifier → any unit, chooser's pick.)
+  if ((m = t.match(/^Exhaust an? (enemy |friendly )?(non-leader )?(ground |space )?unit(?: with (\d+) or less remaining hp)?\.?$/i))) {
+    const controller = m[1] ? (/enemy/i.test(m[1]) ? 'opponent' : 'self') : 'any';
+    const zone = m[3] ? (/ground/i.test(m[3]) ? 'ground_arena' : 'space_arena') : 'any_arena';
+    const parts: Predicate[] = [];
+    if (m[2]) parts.push({ not: { card_type: 'leader' } });
+    if (m[4]) parts.push({ remaining_hp: { max: parseInt(m[4], 10) } });
+    const base: Selector = { zone, controller, selector: 'chosen', count: 1 };
+    const target: Selector = parts.length === 0 ? base : { ...base, filter: parts.length === 1 ? parts[0] : { and: parts } };
+    return { effect: 'exhaust', target };
   }
 
   // Exhaust the defender. (On-Attack context — the unit being attacked. Vambrace
@@ -539,6 +582,19 @@ export function parseEffectClause(raw: string): Effect | null {
   // Defeat a non-leader unit.
   if ((m = t.match(/^Defeat a non-leader unit\.?$/i))) {
     return { effect: 'defeat', target: chosenEnemyNonLeader };
+  }
+
+  // "Defeat this upgrade." (an upgrade defeating itself — Advantage).
+  if (/^Defeat this upgrade\.?$/i.test(t)) {
+    return { effect: 'defeat_upgrade', self: true };
+  }
+  // "Defeat [up to N] [enemy|friendly] [non-unique] upgrade(s)." (upgrades aren't
+  // units → the dedicated defeat_upgrade effect).
+  if ((m = t.match(/^Defeat (?:an?|up to (\d+)) (enemy |friendly )?(non-unique )?upgrades?\.?$/i))) {
+    const eff: Extract<Effect, { effect: 'defeat_upgrade' }> = { effect: 'defeat_upgrade', count: m[1] ? parseInt(m[1], 10) : 1 };
+    if (m[2]) eff.controller = /enemy/i.test(m[2]) ? 'opponent' : 'self';
+    if (m[3]) eff.filter = { not: { card_is_unique: true } };
+    return eff;
   }
 
   // "An opponent chooses a unit they control. Defeat that unit." (Power of the
@@ -690,7 +746,7 @@ export function parseModalEffect(raw: string): Effect | null {
 // Triggered-prefix detection (units): "When Played:", "On Attack:", etc.
 // ---------------------------------------------------------------------------
 
-type TrigOn = 'event.card_played' | 'event.attack_declared' | 'event.attack_ended' | 'event.defeated';
+type TrigOn = 'event.card_played' | 'event.attack_declared' | 'event.attack_ended' | 'event.defeated' | 'event.leader_deployed';
 interface TrigPrefix {
   re: RegExp;
   on: TrigOn;
@@ -700,6 +756,10 @@ interface TrigPrefix {
 
 const TRIGGER_PREFIXES: TrigPrefix[] = [
   { re: /^When Played:\s*/i,   on: 'event.card_played' },
+  // "When Deployed:" — a leader-unit's deploy_box ability that fires when the
+  // leader is deployed (LEADER_DEPLOYED, leaderIid = the deployed unit's iid, so
+  // `card: 'self'` matches). Captain Rex → "Create a Clone Trooper token".
+  { re: /^When Deployed:\s*/i, on: 'event.leader_deployed' },
   { re: /^On Attack:\s*/i,     on: 'event.attack_declared' },
   // "When this unit is attacked" — this unit is the DEFENDER of an attack.
   // Must precede On Attack? No — distinct prefix. Maps to attack_declared with
@@ -1018,6 +1078,34 @@ function parseConstantClause(clause: string): Ability | null {
       grant: { target: { self: true }, modifier: { keyword: m[1].toLowerCase() } },
     };
   }
+  // While you have the initiative, this unit gets +N/+N. (has_initiative gate)
+  if ((m = clause.match(/^While you have the initiative, this unit gets \+(\d+)\/\+(\d+)\.?$/i))) {
+    return { type: 'constant', while: { has_initiative: true }, grant: { target: { self: true }, modifier: { power: +m[1], health: +m[2] } } };
+  }
+  // While the Force is with you, this unit gets +N/+N OR gains <Keyword> [N].
+  // (player_has_force_token gate — the predicate already exists.)
+  if ((m = clause.match(/^While the Force is with you, this unit (?:gets \+(\d+)\/\+(\d+)|gains ([A-Za-z]+)(?:\s+(\d+))?)\.?$/i))) {
+    const modifier: Modifier = m[1]
+      ? { power: +m[1], health: +m[2] }
+      : (() => { const mod: Modifier = { keyword: m[3].toLowerCase() }; if (m[4]) mod.keyword_value = parseInt(m[4], 10); return mod; })();
+    if (!m[1] && !KEYWORD_WORDS.has(m[3].toLowerCase())) return null;
+    return { type: 'constant', while: { player_has_force_token: true }, grant: { target: { self: true }, modifier } };
+  }
+  // While the Force is with you, each/your other friendly unit gets +N/+N. (aura)
+  if ((m = clause.match(/^While the Force is with you, (?:each friendly|other friendly|your other) units? gets? \+(\d+)\/\+(\d+)\.?$/i))) {
+    return { type: 'constant', while: { player_has_force_token: true }, grant: { target: { zone: 'any_arena', controller: 'self' }, modifier: { power: +m[1], health: +m[2] } } };
+  }
+  // While you control <NamedCard>, this unit gets +N/+N OR gains <Keyword> [N].
+  if ((m = clause.match(/^While you control ([A-Z][^,()]*?)(?:\s*\(as[^)]*\))?, this unit (?:gets \+(\d+)\/\+(\d+)|gains ([A-Za-z]+)(?:\s+(\d+))?)\.?$/))) {
+    const name = m[1].trim();
+    if (!/\bunits?$/i.test(name) && !/^(?:a|an|another|your|the)\b/i.test(name)) {
+      const modifier: Modifier = m[2]
+        ? { power: parseInt(m[2], 10), health: parseInt(m[3], 10) }
+        : (() => { const mod: Modifier = { keyword: m[4].toLowerCase() }; if (m[5]) mod.keyword_value = parseInt(m[5], 10); return mod; })();
+      if (!m[2] && !KEYWORD_WORDS.has(m[4].toLowerCase())) return null;
+      return { type: 'constant', while: { controls_named: name }, grant: { target: { self: true }, modifier } };
+    }
+  }
   // While you control N or more resources, this unit gets +N/+N.
   if ((m = clause.match(/^While you control (\d+) or more resources, this unit gets \+(\d+)\/\+(\d+)\.?$/i))) {
     return {
@@ -1063,6 +1151,17 @@ function parseConstantClause(clause: string): Ability | null {
       },
     };
   }
+  // Each [other] friendly [<Trait>] unit gets +N/+N.  (stat aura — Captain Rex:
+  // "Each other friendly Trooper unit gets +0/+1.") "other" excludes the source.
+  if ((m = clause.match(/^(?:Each other friendly|Each friendly|Other friendly|Your other) (?:([A-Za-z]+) )?units? gets? \+(\d+)\/\+(\d+)\.?$/i))) {
+    const trait = m[1] && m[1].toLowerCase() !== 'friendly' ? m[1].toLowerCase() : undefined;
+    const other = /^(?:Each other friendly|Other friendly|Your other)/i.test(clause);
+    const from: Selector = trait
+      ? { zone: 'any_arena', controller: 'self', filter: { card_trait: trait } }
+      : { zone: 'any_arena', controller: 'self' };
+    const target: Selector = other ? { exclude: { self: true }, from } : from;
+    return { type: 'constant', grant: { target, modifier: { power: +m[2], health: +m[3] } } };
+  }
   // Each friendly [<Trait>] unit gains KEYWORD.  (other friendly units gain …)
   if ((m = clause.match(/^(?:Each friendly|Other friendly|Your other) (?:([A-Za-z]+) )?units? gains? ([A-Za-z]+)\.?$/i))) {
     const trait = m[1] && m[1].toLowerCase() !== 'friendly' ? m[1].toLowerCase() : undefined;
@@ -1096,19 +1195,19 @@ function parseConstantClause(clause: string): Ability | null {
 function parseCostClause(clause: string): Ability | null {
   let m: RegExpMatchArray | null;
   // "This <card> costs N less to play for each friendly leader unit [you control]."
-  if ((m = clause.match(/^This (?:event|unit|upgrade|card) costs (\d+) less to play for each friendly leader unit(?: you control)?\.?$/i))) {
+  if ((m = clause.match(/^This (?:event|unit|upgrade|card) costs (\d+) (?:resources? )?less to play for each friendly leader unit(?: you control)?\.?$/i))) {
     return { type: 'cost', amount: -parseInt(m[1], 10), per: 'friendly_leader_units' };
   }
   // "… for each friendly unit [you control]."
-  if ((m = clause.match(/^This (?:event|unit|upgrade|card) costs (\d+) less to play for each friendly unit(?: you control)?\.?$/i))) {
+  if ((m = clause.match(/^This (?:event|unit|upgrade|card) costs (\d+) (?:resources? )?less to play for each friendly unit(?: you control)?\.?$/i))) {
     return { type: 'cost', amount: -parseInt(m[1], 10), per: 'friendly_units' };
   }
   // "… for each resource you control."
-  if ((m = clause.match(/^This (?:event|unit|upgrade|card) costs (\d+) less to play for each resource you control\.?$/i))) {
+  if ((m = clause.match(/^This (?:event|unit|upgrade|card) costs (\d+) (?:resources? )?less to play for each resource you control\.?$/i))) {
     return { type: 'cost', amount: -parseInt(m[1], 10), per: 'friendly_resources' };
   }
   // Flat: "This <card> costs N less to play."
-  if ((m = clause.match(/^This (?:event|unit|upgrade|card) costs (\d+) less to play\.?$/i))) {
+  if ((m = clause.match(/^This (?:event|unit|upgrade|card) costs (\d+) (?:resources? )?less to play\.?$/i))) {
     return { type: 'cost', amount: -parseInt(m[1], 10) };
   }
   return null;

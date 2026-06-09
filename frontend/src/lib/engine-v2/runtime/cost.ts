@@ -86,3 +86,13 @@ export function exploitOf(spec: CardSpec): number {
     : [];
   return kws.reduce((n, k) => k.name.toLowerCase() === 'exploit' ? n + (k.value ?? 0) : n, 0);
 }
+
+/** The Smuggle [Y] bracket cost on a card (§14), or undefined if it has no
+ *  Smuggle keyword / no parsed cost. Only units + events can be Smuggled (played
+ *  from the resource zone). The value is the bracket's resource count (aspect
+ *  penalties / additional bracket costs aren't modeled). */
+export function smuggleCostOf(spec: CardSpec): number | undefined {
+  const kws = (spec.type === 'unit' || spec.type === 'event') ? (spec.keywords ?? []) : [];
+  const k = kws.find(k => k.name.toLowerCase() === 'smuggle');
+  return k?.value;
+}

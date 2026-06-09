@@ -71,6 +71,15 @@ export interface PredicateLeaf {
    *  in-play units (printed keywords + those on attached upgrades). For "if there
    *  are 4 or more different keywords among friendly units, …" (The Darksaber). */
   controller_distinct_keywords?: Range;
+  /** True iff the evaluated card's controller CONTROLS a card with this exact
+   *  printed name — as a unit (either arena), an attached upgrade, OR a leader
+   *  (deployed unit or the leader card). For "If you control Poe Dameron (as a
+   *  unit, upgrade, or leader), …". A reusable building block: composes with `if`
+   *  / constant `while` like any other predicate. */
+  controls_named?: string;
+  /** True iff the evaluated card's controller currently has the initiative. For
+   *  "While you have the initiative, …" / "If you have the initiative, …". */
+  has_initiative?: boolean;
 }
 
 export interface PredicateAnd { and: Predicate[] }
@@ -197,6 +206,20 @@ export interface HealEffect {
 export interface DefeatEffect {
   effect: 'defeat';
   target: Selector;
+}
+
+/** "Defeat [up to N] [enemy] [non-unique] upgrade(s)." / "Defeat this upgrade."
+ *  Upgrades aren't units, so they're handled here rather than via the generic
+ *  `defeat` (which resolves unit/base targets). `self` defeats the source upgrade
+ *  ("Defeat this upgrade."); otherwise the chooser picks up to `count` (default 1)
+ *  upgrades on the scoped controller's units matching `filter`. A defeated upgrade
+ *  detaches (UPGRADE_DETACHED) and goes to its owner's discard. */
+export interface DefeatUpgradeEffect {
+  effect: 'defeat_upgrade';
+  self?: boolean;
+  controller?: PlayerRef;
+  filter?: Predicate;
+  count?: number;
 }
 
 export interface GiveShieldEffect {
@@ -608,6 +631,7 @@ export type Effect =
   | TakeControlEffect
   | ExchangeControlEffect
   | TransferUpgradeEffect
+  | DefeatUpgradeEffect
   | NameCardEffect
   | UseForceEffect
   | GainForceEffect

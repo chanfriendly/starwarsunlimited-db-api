@@ -27,6 +27,9 @@ interface CardSpecBase {
   aspects?: AspectIcon[];
   traits?: string[];
   unique?: boolean;
+  /** Printed oracle text, carried through from the DB for UI display (e.g. the
+   *  playtest card-hover preview). Not used by the engine — purely informational. */
+  text?: string | null;
 }
 
 export interface UnitSpec extends CardSpecBase {
@@ -41,6 +44,9 @@ export interface UnitSpec extends CardSpecBase {
 export interface EventSpec extends CardSpecBase {
   type: 'event';
   abilities?: Ability[];
+  /** Events normally drop keywords in v2, but Smuggle [Y] lives on events too
+   *  (played from the resource zone) — carried so `smuggleCostOf` can read it. */
+  keywords?: KeywordRef[];
 }
 
 export interface UpgradeSpec extends CardSpecBase {

@@ -1,0 +1,13 @@
+{
+  "id": "W8_067",
+  "name": "Smuggle Test",
+  "type": "unit",
+  "cost": 8,
+  "aspects": ["cunning"],
+  "arena": "ground",
+  "power": 3,
+  "hp": 3,
+  "traits": ["underworld"],
+  "keywords": [{ "name": "smuggle", "value": 2 }],
+  "abilities": []
+}

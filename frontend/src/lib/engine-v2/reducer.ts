@@ -26,7 +26,7 @@ import { applyEffect } from './runtime/interpret';
 import { isTriggered, type ActionAbility, type Ability, type TriggeredAbility } from './spec/ast';
 import { resolveSelector } from './runtime/selectors';
 import { resolvePlayer } from './runtime/predicates';
-import { effectiveCost, exploitOf } from './runtime/cost';
+import { effectiveCost, exploitOf, smuggleCostOf } from './runtime/cost';
 import { declareAttack, resolveCombat, attackIllegalReason, resolveAmbush, setDeclaredAttackResolver } from './runtime/attack';
 
 function settle(state: GameState, reg: CardRegistry, eventsIn: GameEvent[], chooser?: Chooser): StepResult {
@@ -86,6 +86,7 @@ export function step(state: GameState, action: PlayerAction, reg: CardRegistry, 
 
     case 'PLAY_CARD':           return applyPlayCard(state, action.player, action.iid, reg, chooser, action.targetIid);
     case 'DEPLOY_LEADER':       return applyDeployLeader(state, action.player, action.leaderIndex, reg, chooser);
+    case 'SMUGGLE':             return applySmuggle(state, action.player, action.iid, reg, chooser);
     case 'USE_ACTION_ABILITY':  return applyActionAbility(state, action.player, action.sourceIid, action.leaderIndex, action.abilityIndex, action.targetIid, reg, chooser);
     case 'ATTACK':              return applyAttack(state, action.player, action.attackerIid, action.defenderIid, reg, chooser);
     case 'TAKE_COUNTER':        return applyTakeCounter(state, action.player, action.counter, reg, chooser);
@@ -402,6 +403,7 @@ function specHasKeyword(spec: CardSpec | undefined, name: string): boolean {
  *  upgrades need a host target (not yet supported from the resource zone). */
 function playFromResourceZone(
   state: GameState, pid: PlayerId, resourceIid: string, reg: CardRegistry, chooser?: Chooser,
+  opts?: { cost?: number; includeSelf?: boolean },
 ): { state: GameState; events: GameEvent[]; played: boolean } {
   const found = findCard(state, resourceIid);
   if (!found || found.loc.zone !== 'resource_zone' || found.loc.controller !== pid) {
@@ -411,17 +413,23 @@ function playFromResourceZone(
   if (!spec || (spec.type !== 'unit' && spec.type !== 'event')) {
     return { state, events: [], played: false };
   }
-  const cost = effectiveCost(state, reg, spec, pid);
+  // Plot pays the printed cost; Smuggle passes its bracket cost via `opts.cost`.
+  const cost = opts?.cost ?? effectiveCost(state, reg, spec, pid);
   const p = state.players[pid];
-  const ready = p.resources.filter(r => !r.exhausted && r.iid !== resourceIid);
-  if (ready.length < cost) return { state, events: [], played: false };
+  // Pay with OTHER ready resources first; §14e lets a Smuggle card be exhausted to
+  // help pay its OWN cost (includeSelf) — so it's appended to the payer pool and
+  // only spent if the others don't cover the cost.
+  const others = p.resources.filter(r => !r.exhausted && r.iid !== resourceIid);
+  const selfRes = opts?.includeSelf ? p.resources.find(r => r.iid === resourceIid && !r.exhausted) : undefined;
+  const pool = selfRes ? [...others, selfRes] : others;
+  if (pool.length < cost) return { state, events: [], played: false };
 
   let s = state;
   const events: GameEvent[] = [];
   for (let i = 0; i < cost; i++) {
-    const r = exhaust(s, ready[i].iid);
+    const r = exhaust(s, pool[i].iid);
     s = r.state;
-    events.push({ kind: 'RESOURCE_SPENT', player: pid, iid: ready[i].iid });
+    events.push({ kind: 'RESOURCE_SPENT', player: pid, iid: pool[i].iid });
   }
   // Replace the played card in the resource zone with the top of the deck,
   // exhausted (§19c). If the deck is empty, the resource slot simply empties.
@@ -436,6 +444,24 @@ function playFromResourceZone(
   s = r.state;
   events.push(...r.events);
   return { state: s, events, played: true };
+}
+
+function applySmuggle(
+  state: GameState, pid: PlayerId, iid: string, reg: CardRegistry, chooser?: Chooser,
+): StepResult {
+  if (state.activePlayer !== pid) throw new Error(`${pid} is not the active player`);
+  if (state.phase !== 'action') throw new Error(`Cannot smuggle outside action phase`);
+  const found = findCard(state, iid);
+  if (!found || found.loc.zone !== 'resource_zone' || found.loc.controller !== pid) {
+    throw new Error(`Cannot smuggle ${iid}: not a resource ${pid} controls`);
+  }
+  const spec = reg.cards[found.inst.cardId];
+  const cost = spec ? smuggleCostOf(spec) : undefined;
+  if (cost === undefined) throw new Error(`${iid} has no Smuggle cost`);
+  const r = playFromResourceZone(state, pid, iid, reg, chooser, { cost, includeSelf: true });
+  if (!r.played) throw new Error(`Cannot afford to Smuggle ${iid}`);
+  let s = log(r.state, `${pid} Smuggles a card (cost ${cost}).`, pid);
+  return advanceToNextTurn(s, pid, reg, r.events, undefined, chooser);
 }
 
 function applyDeployLeader(

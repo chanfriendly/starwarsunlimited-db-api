@@ -38,7 +38,7 @@ const VALID_ASPECTS = new Set<AspectIcon>([
 
 // v2 keyword registry keys (the ones with real engine behavior). Names not in
 // this set still translate — they're just inert until implemented.
-const VALUE_KEYWORDS = new Set(['raid', 'restore', 'exploit']);
+const VALUE_KEYWORDS = new Set(['raid', 'restore', 'exploit', 'smuggle']);
 
 /** Default deployed-unit stats for a leader whose attack/health are NULL in the
  *  DB (common — the SWU API often omits the unit-side stats). Mirrors the v1
@@ -90,6 +90,15 @@ function costOf(card: Card): number {
  *  so the N comes from the rules text ("Raid 2."). Defensive: also handles a
  *  value baked into the keyword string itself ("Raid 2"). */
 function keywordValue(name: string, keywordRaw: string, text: string | undefined): number | undefined {
+  // Smuggle's value is a bracketed cost — "Smuggle [9 resources …]" — so the N
+  // comes after "[", not a bare "Smuggle 9". (We take the leading resource count;
+  // aspect penalties + additional bracket costs aren't modeled — consistent with
+  // the engine ignoring aspect penalties for normal play too.)
+  if (name.toLowerCase() === 'smuggle' && text) {
+    const m = text.match(/Smuggle\s*\[\s*(\d+)/i);
+    if (m) return parseInt(m[1], 10);
+    return undefined;
+  }
   // (a) value inline in the keyword string
   const inline = keywordRaw.match(/(\d+)\s*$/);
   if (inline) return parseInt(inline[1], 10);
@@ -153,6 +162,9 @@ export function translateCard(card: Card): TranslateResult {
     // frontend Card; map it onto the spec so state_based.ts enforces it for real
     // translated decks. Absent/false → not unique.
     unique: Boolean(card.is_unique),
+    // Printed oracle text — carried through for UI display (playtest card-hover
+    // preview). Inert to the engine.
+    text: card.text ?? null,
   };
 
   // Tier-1 template matcher: rules text → ability AST. Returns [] for cards the
@@ -173,7 +185,7 @@ export function translateCard(card: Card): TranslateResult {
       return { spec };
     }
     case 'event': {
-      const spec: EventSpec = { ...common, type: 'event', abilities: matched.abilities };
+      const spec: EventSpec = { ...common, type: 'event', abilities: matched.abilities, keywords: parseKeywords(card) };
       return { spec };
     }
     case 'upgrade': {

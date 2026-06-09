@@ -1,0 +1,18 @@
+{
+  "id": "W8_065",
+  "name": "Initiative Test",
+  "type": "unit",
+  "cost": 2,
+  "aspects": ["command"],
+  "arena": "ground",
+  "power": 2,
+  "hp": 2,
+  "keywords": [],
+  "abilities": [
+    {
+      "type": "constant",
+      "while": { "has_initiative": true },
+      "grant": { "target": { "self": true }, "modifier": { "power": 2, "health": 0 } }
+    }
+  ]
+}

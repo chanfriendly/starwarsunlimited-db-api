@@ -44,7 +44,7 @@ const EFFECT_KINDS = new Set([
   'exhaust', 'ready', 'give', 'sequence', 'if', 'if_did', 'noop', 'choose_one', 'optional',
   'create_token', 'capture', 'rescue', 'move', 'look_at', 'disclose',
   'search', 'search_play', 'divided_damage', 'indirect_damage', 'play_as_resource', 'create_credit', 'discount', 'play_from_discard', 'return_to_hand', 'return_from_discard',
-  'take_control', 'exchange_control', 'transfer_upgrade', 'name_card', 'use_force', 'gain_force', 'attack', 'power_damage_from_each',
+  'take_control', 'exchange_control', 'transfer_upgrade', 'defeat_upgrade', 'name_card', 'use_force', 'gain_force', 'attack', 'power_damage_from_each',
 ]);
 const ABILITY_TYPES = new Set(['triggered', 'action', 'constant', 'replacement', 'cost', 'round_discount']);
 const COST_COUNTS = new Set(['friendly_leader_units', 'friendly_units', 'friendly_resources']);
@@ -72,7 +72,7 @@ const PREDICATE_LEAF_FIELDS = new Set([
   'stat_hp', 'controller', 'zone', 'self_damage', 'self_exhausted',
   'self_upgraded', 'player_has_force_token', 'controller_unit_count',
   'controller_resource_count', 'controller_controls_trait', 'controller_controls', 'unit_left_play_this_phase', 'controller_distinct_keywords', 'has_shield_token',
-  'remaining_hp',
+  'remaining_hp', 'controls_named', 'has_initiative',
 ]);
 const MODIFIER_FIELDS = new Set([
   'duration', 'until', 'power', 'health', 'per', 'keyword', 'keyword_value',
@@ -382,6 +382,10 @@ function validateEffect(v: V, path: string, e: unknown) {
     case 'transfer_upgrade':
       need('new_controller', 'new_controller' in e);
       if ('new_controller' in e) checkEnum(v, `${path}.new_controller`, e.new_controller, new Set(['trigger_attacker']), 'new_controller'); break;
+    case 'defeat_upgrade':
+      if ('controller' in e) checkEnum(v, `${path}.controller`, e.controller, PLAYER_REFS, 'controller');
+      if ('filter' in e) validatePredicate(v, `${path}.filter`, e.filter);
+      if ('count' in e && !isNum(e.count)) v.err(`${path}.count`, 'count must be a number'); break;
     case 'return_from_discard':
       need('player', 'player' in e);
       if ('player' in e) checkEnum(v, `${path}.player`, e.player, PLAYER_REFS, 'player');

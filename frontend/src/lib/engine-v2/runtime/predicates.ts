@@ -157,6 +157,26 @@ export function evalCardPredicate(
     if (!ps || (!matches(ps.groundArena, 'ground_arena') && !matches(ps.spaceArena, 'space_arena'))) return false;
   }
 
+  if (leaf.controls_named !== undefined) {
+    // "Control" a named card as a unit (either arena), an attached upgrade, or a
+    // leader (the leader card / its deployed unit). Match by printed name.
+    const ps = ctx.state.players[instController];
+    const want = leaf.controls_named.toLowerCase();
+    const nameOf = (cardId: string) => ctx.reg.cards[cardId]?.name?.toLowerCase();
+    let has = false;
+    if (ps) {
+      for (const u of [...ps.groundArena, ...ps.spaceArena]) {
+        if (nameOf(u.cardId) === want || u.upgrades.some(up => nameOf(up.cardId) === want)) { has = true; break; }
+      }
+      if (!has) has = ps.leaders.some(l => nameOf(l.cardId) === want);
+    }
+    if (!has) return false;
+  }
+
+  if (leaf.has_initiative !== undefined) {
+    if ((ctx.state.initiative === instController) !== leaf.has_initiative) return false;
+  }
+
   return true;
 }
 

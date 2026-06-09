@@ -10,7 +10,7 @@ import { effectivePower, hasEffectiveKeyword } from './runtime/modifiers';
 import { isLimitExhausted, makeUndeployedLeaderIid } from './runtime/triggers';
 import { resolveSelector } from './runtime/selectors';
 import { defaultChooser } from './runtime/chooser';
-import { effectiveCost, exploitOf } from './runtime/cost';
+import { effectiveCost, exploitOf, smuggleCostOf } from './runtime/cost';
 
 export interface LegalActionsResult {
   actions: PlayerAction[];
@@ -87,6 +87,19 @@ export function getLegalActions(state: GameState, reg: CardRegistry, pid: Player
     if (cost > totalResourceCount) return;
     actions.push({ kind: 'DEPLOY_LEADER', player: pid, leaderIndex: idx });
   });
+
+  // SMUGGLE — a resource (facedown card) with Smuggle [Y] may be played from the
+  // resource zone for its bracket cost (§14). Affordable when Y ≤ ready resources
+  // (the Smuggle card itself counts — §14e self-pay, so `readyResourceCount`,
+  // which includes it, is the right pool).
+  for (const r of p.resources) {
+    const spec = reg.cards[r.cardId];
+    if (!spec) continue;
+    const sc = smuggleCostOf(spec);
+    if (sc !== undefined && sc <= readyResourceCount) {
+      actions.push({ kind: 'SMUGGLE', player: pid, iid: r.iid });
+    }
+  }
 
   // ATTACK — every ready unit in arena × every legal defender.
   for (const z of ['ground_arena', 'space_arena'] as const) {
@@ -279,6 +292,11 @@ export function describeAction(state: GameState, reg: CardRegistry, a: PlayerAct
       const spec = leader && reg.cards[leader.cardId];
       const cost = spec && spec.type === 'leader' ? (spec.cost ?? 0) : 0;
       return `Deploy leader ${spec?.name ?? a.leaderIndex} (${cost})`;
+    }
+    case 'SMUGGLE': {
+      const f = findCard(state, a.iid); const spec = f && reg.cards[f.inst.cardId];
+      const sc = spec ? smuggleCostOf(spec) : undefined;
+      return `Smuggle ${spec?.name ?? a.iid} (${sc ?? '?'})`;
     }
     case 'USE_ACTION_ABILITY': {
       if (a.leaderIndex !== undefined) {
