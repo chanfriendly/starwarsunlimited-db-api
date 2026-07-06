@@ -50,14 +50,14 @@ jobs:
           python scripts/build_database.py
 
       - name: Upload card database artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: swu-card-database
           path: databases/swu_cards.db
           retention-days: 30
 
       - name: Upload build log
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: card-database-build-log
           path: backend/database_build.log
